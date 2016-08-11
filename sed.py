@@ -2,6 +2,23 @@ import numpy as np
 import numpy.core.defchararray as npstr
 from astropy.table import Table
 
+def read_Casagrande_10_Table_4(
+    tblpath="/home/regulus/simonian/Binaries/Casagrande_10_Table_4.txt"):
+    '''Read Table 4 in Casagrande et al (2010).
+
+    This table contains the coefficients for fitting effective temperatures to
+    colors (and metallicities). These will also be useful for inverting the
+    relationship to get colors as a function of effective temperature.'''
+
+    cas = Table.read(
+        tblpath, format="ascii.fixed_width_no_header", data_start=1,
+        col_starts=(0, 25, 30, 49, 54, 64, 73, 80, 96, 112, 128, 144, 152),
+        col_ends=(23, 28, 32, 52, 57, 72, 79, 95, 111, 127, 143, 151, 173),
+        names=["Color", "Met_start", "Met_end", "Color_start", "Color_end", 
+               "a0", "a1", "a2", "a3", "a4", "a5", "N", "unc"] )
+    cas["Color"] = remove_latex_subscript_formatting(cas["Color"])
+    return cas
+
 def read_Casagrande_10_Table_5(
     tblpath="/home/regulus/simonian/Binaries/Casagrande_10_Table_5.txt"):
     '''Read Table 5 in Casagrande et al (2010).
