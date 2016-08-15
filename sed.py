@@ -1,11 +1,17 @@
 import os
+import subprocess
+import tempfile
+import shutil
 
 import numpy as np
 import numpy.core.defchararray as npstr
 from astropy.table import Table
 
-def read_Casagrande_10_Table_4(
-    tblpath="./Casagrande_10_Table_4.txt"):
+import path_config as paths
+
+DESP_PATH = "/home/regulus/simonian/DSep/"
+
+def read_Casagrande_10_Table_4(tblpath=paths.CASAGRANDE_TABLE_4):
     '''Read Table 4 in Casagrande et al (2010).
 
     This table contains the coefficients for fitting effective temperatures to
@@ -21,8 +27,7 @@ def read_Casagrande_10_Table_4(
     cas["Color"] = remove_latex_subscript_formatting(cas["Color"])
     return cas
 
-def read_Casagrande_10_Table_5(
-    tblpath="/home/regulus/simonian/Binaries/Casagrande_10_Table_5.txt"):
+def read_Casagrande_10_Table_5(tblpath= paths.CASAGRANDE_TABLE_5):
     '''Read Table 5 in Casagrande et al (2010).
 
     This table contains the coefficients for fitting bolometric fluxes from the
@@ -95,7 +100,9 @@ def split_color(colorcol):
     
     return bluecolor, redcolor
 
-def Casagrande_Teff(color, colorvals, metallicity, extrapolation_exception=True):
+def Casagrande_Teff(color, colorvals, metallicity,
+                    extrapolation_exception=True, 
+                    tblpath=paths.CASAGRANDE_TABLE_4):
     '''Calculate the Teff of a star using Casagrande (2010) calibration.
 
     This function calculates the Teff of a star using a given color. The string
@@ -110,7 +117,7 @@ def Casagrande_Teff(color, colorvals, metallicity, extrapolation_exception=True)
     Casagrande et al (2010), then if extrapolation_exception is enabled, this
     function will raise a ValueError. Otherwise, it will continue normally.
     '''
-    casagrande_teff_table = read_Casagrande_10_Table_4()
+    casagrande_teff_table = read_Casagrande_10_Table_4(tblpath)
 
     casagrande_row = casagrande_teff_table[
             casagrande_teff_table["Color"] == color]
@@ -140,7 +147,7 @@ def Casagrande_Teff(color, colorvals, metallicity, extrapolation_exception=True)
     return teff
 
 def Casagrande_inverted_color(color, teffs, metallicity, 
-        extrapolate_exception=True):
+        extrapolate_exception=True, tblpath=paths.CASAGRANDE_TABLE_4):
     '''Inverts Casagrande et al (2010) to get color from Teff and [Fe/H].
 
     This function is used to get empirical, calibrated colors from a
@@ -150,7 +157,7 @@ def Casagrande_inverted_color(color, teffs, metallicity,
     function will throw an error, unless the extrapolate_exception flag is
     turned off.
     '''
-    casagrande_teff_table = read_Casagrande_10_Table_4()
+    casagrande_teff_table = read_Casagrande_10_Table_4(tblpath)
 
     casagrande_row = casagrande_teff_table[
             casagrande_teff_table["Color"] == color]
@@ -164,12 +171,12 @@ def Casagrande_inverted_color(color, teffs, metallicity,
             metallicity < casagrande_row["Met_start"],
             metallicity > casagrande_row["Met_end"]))
 
-    if out_of_teff_bound and out_of_met_bound and extrapolation_exception:
+    if out_of_teff_bound and out_of_met_bound and extrapolate_exception:
         raise ValueError("Both Metallicity and Colors are outside of the "
             "calibration bounds.")
-    elif out_of_teff_bound and extrapolation_exception:
+    elif out_of_teff_bound and extrapolate_exception:
         raise ValueError("Colors are outside of the calibration bounds.")
-    elif out_of_met_bound and extrapolation_exception:
+    elif out_of_met_bound and extrapolate_exception:
         raise ValueError("Metallicities are outside of the calibration "
                 "bounds.")
 
@@ -186,8 +193,47 @@ def Casagrande_inverted_color(color, teffs, metallicity,
 
     return color
 
+def dsep_isochrone_interpolator(feh, output, bands=1, y=1, alpha=2,
+                                executable=paths.DSEP_INTERPOLATOR_EXECUTABLE):
+    '''Runs interpolator to generate DSEP isochrones of a given metallicity.
+
+    This is used to get a set of isochrones at a given metallicity, without
+    having to worry about the grid. The isochrones will be output to the
+    location in output.
+
+    [Fe/H] should be the metallicity of the star. Bands, Y, and Alpha are
+    integers which stand for options in DSEP. 
+    '''
+    args = [executable, bands, y, alpha, feh, output]
+    subprocess.call(args)
+
+def dsep_age_splitter(inputfile, outputdir):
+    '''Calls the isochrone splitter.
+
+    Oftentimes the isochrones can be really annoying to read in their current
+    shape. Therefore, the isochrone splitter splits the isochrones into
+    separate files, each corresponding to a different age on the isochrone. The
+    isochrone files will be put in outputdir.
+    '''
+    # This FORTRAN program is kinda awful. It has to be run in the same
+    # directory as the file. And it will output all of the new files to the
+    # same directory. 
+    # As a result, we may have to mess around with the files a bit under the
+    # hood. Here are the steps I would like to take.
+    # 1. Split the input file into the directory and the basename.
+    # 2. Create a temporary directory in the same directory as the input file.
+    # 3. Move the input file into the temporary directory.
+    # 4. Run the splitter on the input file, with the temporary directory as
+    # the current working directory.
+    # 5. Move the input file back into its original directory.
+    # 6. Move the contents of the temporary directory into outputdir.
+    # 7. Delete the temporary directory.
+    basedir, input_filename = os.path.split(inputfile)
+    with tempfile.TemporaryDirectory(dir=basedir) as tempdir_object:
+        tempdir = tempdir_object.name
+        shutil.copy(inputfile, tempdir)
+
+
 
 if __name__ == "__main__":
-    
-    CASAGRANDE_TABLE_DIR = "."
-    print(Casagrande_Teff("V-H", 1.0, -1.0))
+    pass
