@@ -1,11 +1,15 @@
 import os
+import glob
 import subprocess
 import tempfile
 import shutil
 
 import numpy as np
 import numpy.core.defchararray as npstr
+from scipy.interpolate import interp1d
 from astropy.table import Table
+from pathlib import Path
+import matplotlib.pyplot as plt
 
 import path_config as paths
 
@@ -19,7 +23,7 @@ def read_Casagrande_10_Table_4(tblpath=paths.CASAGRANDE_TABLE_4):
     relationship to get colors as a function of effective temperature.'''
 
     cas = Table.read(
-        tblpath, format="ascii.fixed_width_no_header", data_start=1,
+        str(tblpath), format="ascii.fixed_width_no_header", data_start=1,
         col_starts=(0, 25, 30, 49, 54, 64, 72, 80, 96, 112, 128, 144, 152),
         col_ends=(23, 28, 32, 52, 57, 71, 79, 95, 111, 127, 143, 151, 173),
         names=["Color", "Met_start", "Met_end", "Color_start", "Color_end", 
@@ -35,9 +39,9 @@ def read_Casagrande_10_Table_5(tblpath= paths.CASAGRANDE_TABLE_5):
     '''
 
     cas = Table.read(
-        tblpath, format="ascii.fixed_width_no_header", data_start=1,
+        str(tblpath), format="ascii.fixed_width_no_header", data_start=1,
         col_starts=(0, 16, 41, 46, 65, 70, 80, 88, 104, 120, 136, 152, 168, 184, 192),
-        col_ends=(15, 39, 44, 48, 68, 74, 87, 103, 119, 135, 151, 167, 183, 191, 203),
+        col_ends=(15, 39, 44, 48, 68, 73, 87, 103, 119, 135, 151, 167, 183, 191, 203),
         names=["Band", "Color", "Met_start", "Met_end", "Color_start",
                "Color_end", "b0", "b1", "b2", "b3", "b4", "b5", "b6", "N",
                "unc"] )
@@ -130,13 +134,24 @@ def Casagrande_Teff(color, colorvals, metallicity,
             metallicity > casagrande_row["Met_end"]))
 
     if out_of_color_bound and out_of_met_bound and extrapolation_exception:
-        raise ValueError("Both Metallicity and Colors are outside of the "
-            "calibration bounds.")
+        raise ValueError(("{0}={1:.2f} is out of the range {0}={2:.2f}–"
+                          "{3:.2f} and [Fe/H]={4:.1f} is out of the range " 
+                          "[Fe/H]={5:.1f}–{6:.1f}").format(
+                              color, colorvals[0],
+                              casagrande_row["Color_start"][0],
+                              casagrande_row["Color_end"][0], metallicity, 
+                              casagrande_row["Met_start"][0], 
+                              casagrande_row["Met_end"][0]))
     elif out_of_color_bound and extrapolation_exception:
-        raise ValueError("Colors are outside of the calibration bounds.")
+        raise ValueError(("{0}={1:.2f} is out of the range {0}={2:.2f}–"
+                         "{3:.2f.}").format(
+                             color, colorvals[0], casagrande_row["Color_start"],
+                             casagrande_row["Color_end"]))
     elif out_of_met_bound and extrapolation_exception:
-        raise ValueError("Metallicities are outside of the calibration "
-                "bounds.")
+        raise ValueError(("[Fe/H]={0:.1f} is out of the range "
+                         "[Fe/H]={1:.1f}–{2:.1f}").format(
+                             metallicity, casagrande_row["Met_start"][0],
+                             casagrande_row["Met_end"][0]))
 
     theta_eff = (casagrande_row["a0"] + casagrande_row["a1"] * colorvals + 
                   casagrande_row["a2"] * colorvals**2 + 
@@ -147,7 +162,7 @@ def Casagrande_Teff(color, colorvals, metallicity,
     return teff
 
 def Casagrande_inverted_color(color, teffs, metallicity, 
-        extrapolate_exception=True, tblpath=paths.CASAGRANDE_TABLE_4):
+        extrapolation_exception=True, tblpath=paths.CASAGRANDE_TABLE_4):
     '''Inverts Casagrande et al (2010) to get color from Teff and [Fe/H].
 
     This function is used to get empirical, calibrated colors from a
@@ -162,23 +177,34 @@ def Casagrande_inverted_color(color, teffs, metallicity,
     casagrande_row = casagrande_teff_table[
             casagrande_teff_table["Color"] == color]
 
+    teff_start = Casagrande_Teff(color, casagrande_row["Color_end"],
+                                 metallicity)
+    teff_end = Casagrande_Teff(color, casagrande_row["Color_start"],
+                                 metallicity)
+
     out_of_teff_bound = np.any(np.logical_or(
-           teffs > Casagrande_Teff(
-               color, casagrande_row["Color_start"], metallicity), 
-           teffs < Casagrande_Teff(
-               color, casagrande_row["Color_end"], metallicity)))
+           teffs < teff_start,
+           teffs > teff_end))
     out_of_met_bound = np.any(np.logical_or(
             metallicity < casagrande_row["Met_start"],
             metallicity > casagrande_row["Met_end"]))
 
-    if out_of_teff_bound and out_of_met_bound and extrapolate_exception:
-        raise ValueError("Both Metallicity and Colors are outside of the "
-            "calibration bounds.")
-    elif out_of_teff_bound and extrapolate_exception:
-        raise ValueError("Colors are outside of the calibration bounds.")
-    elif out_of_met_bound and extrapolate_exception:
-        raise ValueError("Metallicities are outside of the calibration "
-                "bounds.")
+    if out_of_teff_bound and out_of_met_bound and extrapolation_exception:
+        raise ValueError(("Teff={0:.2f} is out of the range Teff={1:.2f}–"
+                          "{2:.2f} and [Fe/H]={3:.1f} is out of the range " 
+                          "[Fe/H]={4:.1f}–{5:.1f}").format(
+                              teffs, teff_start, teff_end, metallicity, 
+                              casagrande_row["Met_start"][0], 
+                              casagrande_row["Met_end"][0]))
+    elif out_of_teff_bound and extrapolation_exception:
+        raise ValueError(("Teff={0:.2f} is out of the range Teff={1:.2f}–"
+                         "{2:.2f}").format(
+                             teffs, teff_start[0], teff_end[0]))
+    elif out_of_met_bound and extrapolation_exception:
+        raise ValueError(("[Fe/H]={0:.1f} is out of the range "
+                         "[Fe/H]={1:.1f}–{2:.1f}").format(
+                             metallicity, casagrande_row["Met_start"][0],
+                             casagrande_row["Met_end"][0]))
 
     # In this case, I'm basically inverting Eq. 3 in Casagrande et al (2010) by
     # treating it as a quadratic equation in color. Therefore, these will be
@@ -193,8 +219,60 @@ def Casagrande_inverted_color(color, teffs, metallicity,
 
     return color
 
-def dsep_isochrone_interpolator(feh, output, bands=1, y=1, alpha=2,
-                                executable=paths.DSEP_INTERPOLATOR_EXECUTABLE):
+def Casagrande_Bolometric_Flux(
+    band, mags, color, colorvals, metallicity, extrapolation_exception=True,
+    tblpath=paths.CASAGRANDE_TABLE_5):
+    '''Calculate the Bolometric Flux given a magnitude and color.
+
+    Uses Equation 5 from Casagrande et al (2010) to find the bolometric flux
+    from a source. This flux is metallicity dependent.'''
+    casagrande_bol_table = read_Casagrande_10_Table_5(tblpath)
+
+    casagrande_row = casagrande_bol_table[np.logical_and(
+        casagrande_bol_table["Band"] == band, 
+        casagrande_bol_table["Color"] == color)]
+
+    # Maybe move bounds checking into another function.
+    out_of_color_bound = np.any(np.logical_or(
+           colorvals < casagrande_row["Color_start"][0], 
+           colorvals > casagrande_row["Color_end"])[0])
+    out_of_met_bound = np.any(np.logical_or(
+            metallicity < casagrande_row["Met_start"][0],
+            metallicity > casagrande_row["Met_end"][0]))
+
+    if out_of_color_bound and out_of_met_bound and extrapolation_exception:
+        raise ValueError(("{0}={1:.2f} is out of the range {0}={2:.2f}–"
+                          "{3:.2f} and [Fe/H]={4:.1f} is out of the range " 
+                          "[Fe/H]={5:.1f}–{6:.1f}").format(
+                              color, colorvals[0],
+                              casagrande_row["Color_start"][0],
+                              casagrande_row["Color_end"][0], metallicity, 
+                              casagrande_row["Met_start"][0], 
+                              casagrande_row["Met_end"][0]))
+    elif out_of_color_bound and extrapolation_exception:
+        raise ValueError(("{0}={1:.2f} is out of the range {0}={2:.2f}–"
+                         "{3:.2f}").format(
+                             color, colorvals[0], casagrande_row["Color_start"][0],
+                             casagrande_row["Color_end"][0]))
+    elif out_of_met_bound and extrapolation_exception:
+        raise ValueError(("[Fe/H]={0:.1f} is out of the range "
+                         "[Fe/H]={1:.1f}–{2:.1f}").format(
+                             metallicity, casagrande_row["Met_start"][0],
+                             casagrande_row["Met_end"][0]))
+
+    # Sum of the polynomial term.
+    cr = casagrande_row
+    polysum = (
+        cr["b0"] + cr["b1"] * colorvals + cr["b2"] * colorvals**2 +
+        cr["b3"] * colorvals**3 + cr["b4"] * metallicity * colorvals + 
+        cr["b5"] * metallicity + cr["b6"] * metallicity**2)
+    fbol = 10**(-0.4*mags) * polysum
+    return fbol
+
+def dsep_isochrone_interpolator(
+    feh, output, bands=1, y=1, alpha=2, 
+    executable=paths.DSEP_INTERPOLATOR_EXECUTABLE,
+    isochrones=paths.DSEP_ISOCHRONES):
     '''Runs interpolator to generate DSEP isochrones of a given metallicity.
 
     This is used to get a set of isochrones at a given metallicity, without
@@ -204,16 +282,20 @@ def dsep_isochrone_interpolator(feh, output, bands=1, y=1, alpha=2,
     [Fe/H] should be the metallicity of the star. Bands, Y, and Alpha are
     integers which stand for options in DSEP. 
     '''
-    args = [executable, bands, y, alpha, feh, output]
-    subprocess.call(args)
+    command = [str(executable), str(bands), str(y), str(alpha), str(feh), 
+               str(output)]
+    subprocess.run(command, cwd=str(isochrones.parent), check=True)
 
-def dsep_age_splitter(inputfile, outputdir):
+def dsep_age_splitter(inputfile, outputdir,
+                      executable=paths.DSEP_SPLITTER_EXECUTABLE):
     '''Calls the isochrone splitter.
 
     Oftentimes the isochrones can be really annoying to read in their current
     shape. Therefore, the isochrone splitter splits the isochrones into
     separate files, each corresponding to a different age on the isochrone. The
     isochrone files will be put in outputdir.
+
+    This function expects the paths above to be pathlib.Path objects.
     '''
     # This FORTRAN program is kinda awful. It has to be run in the same
     # directory as the file. And it will output all of the new files to the
@@ -228,12 +310,314 @@ def dsep_age_splitter(inputfile, outputdir):
     # 5. Move the input file back into its original directory.
     # 6. Move the contents of the temporary directory into outputdir.
     # 7. Delete the temporary directory.
-    basedir, input_filename = os.path.split(inputfile)
-    with tempfile.TemporaryDirectory(dir=basedir) as tempdir_object:
-        tempdir = tempdir_object.name
-        shutil.copy(inputfile, tempdir)
+    basedir, input_filename = inputfile.parent, inputfile.name
+    with tempfile.TemporaryDirectory(dir=str(basedir)) as tempdir_object:
+        tempdir = Path(tempdir_object)
+        shutil.copy(str(inputfile), str(tempdir))
+        command = [str(executable), str(input_filename)]
+        subprocess.run(command, cwd=str(tempdir))
+        temp_input_file = tempdir / input_filename
+        temp_input_file.unlink()
+        for agefile in tempdir.iterdir():
+            outputdir.mkdir(exist_ok=True)
+            shutil.copy(str(agefile), str(outputdir))
+        
+# Maybe add something to automatically download isochrones. But I don't think
+# it's particularly important now.
+
+def sign_switch(val, pos_sym, neg_sym, zero=0):
+    '''Return symbol based on sign of val.
+
+    This function will return pos_sym if val is positive, neg_sym if val is
+    negative. If val is zero, then the behavior depends on the zero flag. If
+    zero is 0, then an empty string is returned. If zero is positive, then the
+    positive symbol will be returned. If zero is negative, then the negative
+    symbol will be returned.
+    '''
+    if val > 0:
+        sym = pos_sym
+    elif val < 0:
+        sym = neg_sym
+    elif val == 0:
+        if zero > 0:
+            sym = pos_sym
+        elif zero < 0:
+            sym = pos_sym
+        elif zero == 0:
+            sym = ""
+        else:
+            raise ValueError("Zero argument should be a number.")
+    else:
+        ValueError("Value to needs to be a number.")
+
+    return sym
+
+def assign_dsep_sign(val):
+    '''Returns p if val is positive and n if val is negative.
+
+    If val is zero, then it will return p anyway.
+    '''
+    return sign_switch(val, "p", "m", 1)
+
+def format_dsep_isochrone_filename(feh, afe, Y, bands):
+    '''Creates a filename which follows the dsep format.
+
+    This format is feh(p|m)??afe(p|m)?[y??].{bands}. Where the two digits after
+    feh are the metallicity, with p for positive and m for negative
+    metallicity. After that is the alpha-abundance, which follows the same
+    pattern. If the helium abundance is set and not metallicity-dependent, then
+    there will be the extra y term in the filename.
+
+    The bands is basically a suffix which contains every band that is contained
+    in the isochrone. For example, one isochrone contains UBVRIJHKsKp.'''
+    afe_val = 0.2 * (afe - 2)
+    feh_sign = assign_dsep_sign(feh)
+    afe_sign = assign_dsep_sign(afe_val)
+
+    if Y == 1:
+        ystring = ""
+    elif Y == 2:
+        ystring = "y33"
+    elif Y == 3:
+        ystring = "y40"
+    else:
+        raise ValueError("Y={0:.2g} not supported.".format(Y))
+    
+    if bands == 1:
+        suffix = "UBVRIJHKsKp"
+    elif 1 < bands <= 15:
+        raise ValueError("Band {0} not implemented yet.".format(bands))
+    else:
+        raise ValueError("Band number not recognized")
+
+    filename_template = "feh{0}{1:02d}afe{2}{3:01d}{4}.{5}".format(
+        feh_sign, int(abs(feh)*10), afe_sign, int(abs(afe_val)*10), ystring, 
+        suffix)
+
+    return filename_template
+
+def format_dsep_age_isochrone_filename(age, feh, afe, y, bands):
+    '''Formats the filename of a post-split age file.
+
+    This format is a?????feh(p|m)??afe(p|m)?[y??].{bands}. The 5 digits after a
+    stand for the age in Gyr, where an implied decimal place is after the
+    second digit. The two digits after feh are the metallicity, with p for 
+    positive and m for negative metallicity. After that is the 
+    alpha-abundance, which follows the same pattern. If the helium abundance 
+    is set and not metallicity-dependent, then there will be the extra y term 
+    in the filename.
+
+    The bands is basically a suffix which contains every band that is contained
+    in the isochrone. For example, one isochrone contains UBVRIJHKsKp.'''
+
+    age_prefix = "a{0:05d}".format(int(age*1000))
+    return age_prefix + format_dsep_isochrone_filename(feh, afe, y, bands)
+
+def interpolate_split_multi_isochrones(
+    fehs, outputdir, bands=1, Y=1, afe=2, isochrones=paths.DSEP_ISOCHRONES,
+    interp_exec=paths.DSEP_INTERPOLATOR_EXECUTABLE,
+    split_exec=paths.DSEP_SPLITTER_EXECUTABLE):
+    '''Generates isochrones at multiple metallicities.
+
+    Create isochrones at the specified [Fe/H] values, and output
+    them to outputdir, into separate files corresponding to their age.
+    Therefore, each file should correspond to a single isochrone. 
+    
+    The files will be in the format: a?????fehp??afep?[y??].{bands}. The 
+    first set of 5 digits corresponds to the age of the isochrone, the second 
+    set of two digits corresponds to the metallicity, the third set of one 
+    digit corresponds to the alpha abundance, and the fourth set of two 
+    digits (if present) represents the initial helium abundance. The {bands} 
+    value notes the photometric bands which are contained in the isochrone.
+    '''
+    for feh in fehs:
+        try:
+            interpolated_split_isochrone(
+                feh, outputdir, bands=bands, Y=Y, afe=afe, 
+                isochrones=isochrones, interp_exec=interp_exec, 
+                split_exec=split_exec)
+        except subprocess.CalledProcessError:
+            print("Could not generate isochrone for [Fe/H]={0:.1f}".format(
+                feh))
 
 
+def interpolated_split_isochrone(
+    feh, outputdir=paths.DSEP_OUTPUT, bands=1, Y=1, afe=2, 
+    isochrones=paths.DSEP_ISOCHRONES,
+    interp_exec=paths.DSEP_INTERPOLATOR_EXECUTABLE,
+    split_exec=paths.DSEP_SPLITTER_EXECUTABLE):
+    '''Generates isochrones at the specified metallicity.
+
+    Functions creates isochrones at the specified [Fe/H] value, and outputs
+    them to outputdir, into separate files corresponding to their age.
+    Therefore, each file should correspond to a single isochrone. 
+    
+    The files will be in the format: a?????fehp??afep?[y??].{bands}. The 
+    first set of 5 digits corresponds to the age of the isochrone, the second 
+    set of two digits corresponds to the metallicity, the third set of one 
+    digit corresponds to the alpha abundance, and the fourth set of two 
+    digits (if present) represents the initial helium abundance. The {bands} 
+    value notes the photometric bands which are contained in the isochrone.
+    '''
+    with tempfile.TemporaryDirectory() as tempdir_object:
+        tempdir = Path(tempdir_object)
+        isochrone_output = tempdir / format_dsep_isochrone_filename(
+            feh, afe, Y, bands)
+        dsep_isochrone_interpolator(feh, isochrone_output, bands, Y, 
+                                    afe, interp_exec, isochrones)
+        dsep_age_splitter(isochrone_output, outputdir,
+                          executable=split_exec)
+
+def read_dsep_age_table(tablepath):
+    '''Reads the post-split dsep table.
+
+    The table should be one which has been split from the monolithic isochrone
+    file, and thus should contain only one age.
+    '''
+    age_table = Table.read(str(tablepath), format="ascii.commented_header",
+                           header_start=-1)
+    return age_table
+
+def read_dsep_isochrone(
+    feh, age, bands=1, Y=1, afe=2, tabledir=paths.DSEP_OUTPUT,
+    isochrones=paths.DSEP_ISOCHRONES,
+    interp_exec=paths.DSEP_INTERPOLATOR_EXECUTABLE,
+    split_exec=paths.DSEP_SPLITTER_EXECUTABLE):
+    '''Read in a DSEP isochrone at a given metallicity and age.
+
+    The individual isochrone tables need to be found in tabledir. If the given
+    table is not found, then the isochrone will be generated automatically from
+    the grid if possible.
+    '''
+    tablepath = (tabledir / format_dsep_age_isochrone_filename(
+        age, feh, afe, Y, bands))
+    try:
+        age_table = read_dsep_age_table(tablepath)
+    except FileNotFoundError:
+        interpolated_split_isochrone(
+            feh, outputdir=tabledir, bands=bands, Y=Y, afe=afe, 
+            isochrones=isochrones, interp_exec=interp_exec, 
+            split_exec=split_exec)
+        age_table = read_dsep_age_table(tablepath)
+
+    return age_table
+
+def dsep_interpolation(fromcol, tocol, age=1.5, metallicity=0.0):
+    '''Return an interpolator between two DSEP isochrone quantities.
+
+    This will return a function which, given a value of fromcol which is
+    covered by the DSEP isochrone, will interpolate a value of tocol. This
+    interpolation uses a grid of the given age and metallicity.
+    '''
+    isochrone = read_dsep_isochrone(metallicity, age)
+
+    interpolator = interp1d(isochrone[fromcol], isochrone[tocol], kind="linear")
+
+    return interpolator
+
+def exponentify_interpolator(interp, base=10):
+    '''Make function that raises the base to the result of the interpolation.
+
+    If a function is best interpolated in log space, but it's preferable to
+    have it output in linear space, this function will wrap the interpolator in
+    a function that exponentifies it.
+    '''
+    return (lambda x: base**interp(x))
+
+def mass_to_bolometric_luminosity_dsep_interpolator(age=1.5, metallicity=0.0):
+    '''Return function to interpolate bolometric luminosity for a given mass.
+
+    This provides one of the important mappings between mass and bolometric
+    luminosity using the DSEP isochrones. The interpolator depends on having a
+    given age and metallicity.
+    
+    This interpolator interpolates log Luminosity, not luminosity itself.'''
+
+    interpolator = dsep_interpolation("M/Mo", "LogL/Lo", age, metallicity)
+
+    return exponentify_interpolator(interpolator)
+
+def mass_to_teff_dsep_interpolator(age=1.5, metallicity=0.0):
+    '''Return function to interpolate effective temperature for a given mass.
+
+    This provides one of the important mappings between mass and effective
+    temperature using the DSEP isochrones. The interpolator depends on having a
+    given age and metallicity.
+
+    This interpolator interpolates log Teff, not Teff itself.'''
+
+    interpolator = dsep_interpolation("M/Mo", "LogTeff", age, metallicity)
+
+    return exponentify_interpolator(interpolator)
+
+def calculate_single_star_color_Casagrande_DSEP(
+    color, mass, metallicity, age=1.5):
+    '''Calculates the given color of a single star.
+
+    The color will be calculated using the empirical Casagrande relations
+    between Teff and Color. The relationship between mass and Teff will be
+    taken from the DSEP isochrones.
+    '''
+    mass_teff_interpolator = mass_to_teff_dsep_interpolator(
+        metallicity=metallicity)
+    star_teff = mass_teff_interpolator(mass)
+
+    color = Casagrande_inverted_color(color, star_teff, metallicity)
+
+    return color
+
+def calculate_binary_star_color_Casagrande_DSEP(
+    color, mass1, mass2, metallicity, age=1.5):
+    '''Calculates the given color of a binary star system.
+
+    The colors will be calculated using the empirical Casagrande relations
+    between Teff and Color. The relationship between mass and Teff will be
+    taken from the DSEP isochrones. Bolometric corrections will be taken from
+    Casagrande as well. And the mass-luminosity relation will be taken from
+    DSEP.
+    '''
+    color1 = calculate_single_star_color_Casagrande_DSEP(
+        color, mass1, metallicity, age=age)
+    color2 = calculate_single_star_color_Casagrande_DSEP(
+        color, mass2, metallicity, age=age)
+
+    blueband, redband = split_color(np.array([color]))
+
+    bolratio = (Casagrande_Bolometric_Flux(
+        blueband, 0, color, color2, metallicity) / Casagrande_Bolometric_Flux(
+            blueband, 0, color, color1, metallicity))
+
+    mass_lum_interpolator = mass_to_bolometric_luminosity_dsep_interpolator(
+        age, metallicity)
+    lumratio = mass_lum_interpolator(mass1) / mass_lum_interpolator(mass2)
+
+    fluxratio = lumratio * bolratio
+
+    bin_color = (color2 - 2.5 * np.log10(1 + fluxratio) + 
+                 2.5 * np.log10(1 + fluxratio * 10**(-0.4 * (color2 - color1))))
+
+    return bin_color
 
 if __name__ == "__main__":
-    pass
+    color="B-V"
+    primary_mass = 1.0
+    secondary_mass = np.linspace(1.0, 0.1, 30)
+    metallicity = 0.0
+
+    colors = []
+    for smass in secondary_mass:
+        try:
+            colorval = calculate_binary_star_color_Casagrande_DSEP(
+                color, primary_mass, smass, metallicity, age=8)
+        except ValueError:
+            break
+        colors.append(colorval[0])
+
+    primary_color = calculate_single_star_color_Casagrande_DSEP(
+        color, primary_mass, metallicity)
+
+    plot_masses = secondary_mass[:len(colors)]
+    plt.plot(plot_masses, colors)
+    plt.plot([plot_masses[0], plot_masses[-1]], [primary_color]*2, 'r--')
+    plt.xlabel("Secondary Mass (Msun)")
+    plt.ylabel(color)
