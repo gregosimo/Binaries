@@ -15,6 +15,11 @@ import path_config as paths
 
 DESP_PATH = "/home/regulus/simonian/DSep/"
 
+class TableHolder(object):
+    pass
+
+tbl_holder = TableHolder()
+
 def read_Casagrande_10_Table_4(tblpath=paths.CASAGRANDE_TABLE_4):
     '''Read Table 4 in Casagrande et al (2010).
 
@@ -22,13 +27,18 @@ def read_Casagrande_10_Table_4(tblpath=paths.CASAGRANDE_TABLE_4):
     colors (and metallicities). These will also be useful for inverting the
     relationship to get colors as a function of effective temperature.'''
 
-    cas = Table.read(
-        str(tblpath), format="ascii.fixed_width_no_header", data_start=1,
-        col_starts=(0, 25, 30, 49, 54, 64, 72, 80, 96, 112, 128, 144, 152),
-        col_ends=(23, 28, 32, 52, 57, 71, 79, 95, 111, 127, 143, 151, 173),
-        names=["Color", "Met_start", "Met_end", "Color_start", "Color_end", 
-               "a0", "a1", "a2", "a3", "a4", "a5", "N", "unc"] )
-    cas["Color"] = remove_latex_subscript_formatting(cas["Color"])
+    try:
+        cas = tbl_holder.casagrande_10_table_4
+    except AttributeError:
+        cas = Table.read(
+            str(tblpath), format="ascii.fixed_width_no_header", data_start=1,
+            col_starts=(0, 25, 30, 49, 54, 64, 72, 80, 96, 112, 128, 144, 152),
+            col_ends=(23, 28, 32, 52, 57, 71, 79, 95, 111, 127, 143, 151, 173),
+            names=["Color", "Met_start", "Met_end", "Color_start", "Color_end", 
+                   "a0", "a1", "a2", "a3", "a4", "a5", "N", "unc"] )
+        cas["Color"] = remove_latex_subscript_formatting(cas["Color"])
+        tbl_holder.casagrande_10_table_4 = cas
+
     return cas
 
 def read_Casagrande_10_Table_5(tblpath= paths.CASAGRANDE_TABLE_5):
@@ -38,15 +48,21 @@ def read_Casagrande_10_Table_5(tblpath= paths.CASAGRANDE_TABLE_5):
     Earth.
     '''
 
-    cas = Table.read(
-        str(tblpath), format="ascii.fixed_width_no_header", data_start=1,
-        col_starts=(0, 16, 41, 46, 65, 70, 80, 88, 104, 120, 136, 152, 168, 184, 192),
-        col_ends=(15, 39, 44, 48, 68, 73, 87, 103, 119, 135, 151, 167, 183, 191, 203),
-        names=["Band", "Color", "Met_start", "Met_end", "Color_start",
-               "Color_end", "b0", "b1", "b2", "b3", "b4", "b5", "b6", "N",
-               "unc"] )
-    cas["Band"] = remove_latex_subscript_formatting(cas["Band"])
-    cas["Color"] = remove_latex_subscript_formatting(cas["Color"])
+    try:
+        cas = tbl_holder.casagrande_10_table_5
+    except AttributeError:
+        cas = Table.read(
+            str(tblpath), format="ascii.fixed_width_no_header", data_start=1,
+            col_starts=(0, 16, 41, 46, 65, 70, 80, 88, 104, 120, 136, 152, 168, 
+                        184, 192),
+            col_ends=(15, 39, 44, 48, 68, 73, 87, 103, 119, 135, 151, 167, 183, 
+                      191, 203),
+            names=["Band", "Color", "Met_start", "Met_end", "Color_start",
+                   "Color_end", "b0", "b1", "b2", "b3", "b4", "b5", "b6", "N",
+                   "unc"] )
+        cas["Band"] = remove_latex_subscript_formatting(cas["Band"])
+        cas["Color"] = remove_latex_subscript_formatting(cas["Color"])
+        tbl_holder.casagrande_10_table_5 = cas
     return cas
 
 def remove_latex_subscript_formatting(col):
@@ -70,7 +86,11 @@ def distribute_color_subscript(col):
     subscript to both fo the bands. For example, (R-I)C becomes RC-IC. This
     will be easier to disentangle.
     '''
-    newcol = col.copy()
+    try:
+        newcol = col.copy()
+    except AttributeError:
+        # This occurs when newcol is a string, not a numpy array.
+        newcol = np.array(col)
     shortened_indices = npstr.startswith(newcol, "(")
     shortened_entries = newcol[shortened_indices]
 
@@ -104,6 +124,13 @@ def split_color(colorcol):
     
     return bluecolor, redcolor
 
+###############################################################################
+# Casagrande paper routines
+###############################################################################
+
+class OutOfBoundsError(ValueError):
+    pass
+
 def Casagrande_Teff(color, colorvals, metallicity,
                     extrapolation_exception=True, 
                     tblpath=paths.CASAGRANDE_TABLE_4):
@@ -134,7 +161,7 @@ def Casagrande_Teff(color, colorvals, metallicity,
             metallicity > casagrande_row["Met_end"]))
 
     if out_of_color_bound and out_of_met_bound and extrapolation_exception:
-        raise ValueError(("{0}={1:.2f} is out of the range {0}={2:.2f}–"
+        raise OutOfBoundsError(("{0}={1:.2f} is out of the range {0}={2:.2f}–"
                           "{3:.2f} and [Fe/H]={4:.1f} is out of the range " 
                           "[Fe/H]={5:.1f}–{6:.1f}").format(
                               color, colorvals[0],
@@ -143,12 +170,12 @@ def Casagrande_Teff(color, colorvals, metallicity,
                               casagrande_row["Met_start"][0], 
                               casagrande_row["Met_end"][0]))
     elif out_of_color_bound and extrapolation_exception:
-        raise ValueError(("{0}={1:.2f} is out of the range {0}={2:.2f}–"
+        raise OutOfBoundsError(("{0}={1:.2f} is out of the range {0}={2:.2f}–"
                          "{3:.2f.}").format(
                              color, colorvals[0], casagrande_row["Color_start"],
                              casagrande_row["Color_end"]))
     elif out_of_met_bound and extrapolation_exception:
-        raise ValueError(("[Fe/H]={0:.1f} is out of the range "
+        raise OutOfBoundsError(("[Fe/H]={0:.1f} is out of the range "
                          "[Fe/H]={1:.1f}–{2:.1f}").format(
                              metallicity, casagrande_row["Met_start"][0],
                              casagrande_row["Met_end"][0]))
@@ -190,18 +217,18 @@ def Casagrande_inverted_color(color, teffs, metallicity,
             metallicity > casagrande_row["Met_end"]))
 
     if out_of_teff_bound and out_of_met_bound and extrapolation_exception:
-        raise ValueError(("Teff={0:.2f} is out of the range Teff={1:.2f}–"
+        raise OutOfBoundsError(("Teff={0:.2f} is out of the range Teff={1:.2f}–"
                           "{2:.2f} and [Fe/H]={3:.1f} is out of the range " 
                           "[Fe/H]={4:.1f}–{5:.1f}").format(
                               teffs, teff_start, teff_end, metallicity, 
                               casagrande_row["Met_start"][0], 
                               casagrande_row["Met_end"][0]))
     elif out_of_teff_bound and extrapolation_exception:
-        raise ValueError(("Teff={0:.2f} is out of the range Teff={1:.2f}–"
+        raise OutOfBoundsError(("Teff={0:.2f} is out of the range Teff={1:.2f}–"
                          "{2:.2f}").format(
                              teffs, teff_start[0], teff_end[0]))
     elif out_of_met_bound and extrapolation_exception:
-        raise ValueError(("[Fe/H]={0:.1f} is out of the range "
+        raise OutOfBoundsError(("[Fe/H]={0:.1f} is out of the range "
                          "[Fe/H]={1:.1f}–{2:.1f}").format(
                              metallicity, casagrande_row["Met_start"][0],
                              casagrande_row["Met_end"][0]))
@@ -241,7 +268,7 @@ def Casagrande_Bolometric_Flux(
             metallicity > casagrande_row["Met_end"][0]))
 
     if out_of_color_bound and out_of_met_bound and extrapolation_exception:
-        raise ValueError(("{0}={1:.2f} is out of the range {0}={2:.2f}–"
+        raise OutOfBoundsError(("{0}={1:.2f} is out of the range {0}={2:.2f}–"
                           "{3:.2f} and [Fe/H]={4:.1f} is out of the range " 
                           "[Fe/H]={5:.1f}–{6:.1f}").format(
                               color, colorvals[0],
@@ -250,12 +277,13 @@ def Casagrande_Bolometric_Flux(
                               casagrande_row["Met_start"][0], 
                               casagrande_row["Met_end"][0]))
     elif out_of_color_bound and extrapolation_exception:
-        raise ValueError(("{0}={1:.2f} is out of the range {0}={2:.2f}–"
+        raise OutOfBoundsError(("{0}={1:.2f} is out of the range {0}={2:.2f}–"
                          "{3:.2f}").format(
-                             color, colorvals[0], casagrande_row["Color_start"][0],
+                             color, colorvals[0], 
+                             casagrande_row["Color_start"][0],
                              casagrande_row["Color_end"][0]))
     elif out_of_met_bound and extrapolation_exception:
-        raise ValueError(("[Fe/H]={0:.1f} is out of the range "
+        raise OutOfBoundsError(("[Fe/H]={0:.1f} is out of the range "
                          "[Fe/H]={1:.1f}–{2:.1f}").format(
                              metallicity, casagrande_row["Met_start"][0],
                              casagrande_row["Met_end"][0]))
@@ -268,6 +296,13 @@ def Casagrande_Bolometric_Flux(
         cr["b5"] * metallicity + cr["b6"] * metallicity**2)
     fbol = 10**(-0.4*mags) * polysum
     return fbol
+
+###############################################################################
+# DSEP-specific routines #
+###############################################################################
+
+# Internal DSEP Routines #
+##########################
 
 def dsep_isochrone_interpolator(
     feh, output, bands=1, y=1, alpha=2, 
@@ -324,33 +359,6 @@ def dsep_age_splitter(inputfile, outputdir,
         
 # Maybe add something to automatically download isochrones. But I don't think
 # it's particularly important now.
-
-def sign_switch(val, pos_sym, neg_sym, zero=0):
-    '''Return symbol based on sign of val.
-
-    This function will return pos_sym if val is positive, neg_sym if val is
-    negative. If val is zero, then the behavior depends on the zero flag. If
-    zero is 0, then an empty string is returned. If zero is positive, then the
-    positive symbol will be returned. If zero is negative, then the negative
-    symbol will be returned.
-    '''
-    if val > 0:
-        sym = pos_sym
-    elif val < 0:
-        sym = neg_sym
-    elif val == 0:
-        if zero > 0:
-            sym = pos_sym
-        elif zero < 0:
-            sym = pos_sym
-        elif zero == 0:
-            sym = ""
-        else:
-            raise ValueError("Zero argument should be a number.")
-    else:
-        ValueError("Value to needs to be a number.")
-
-    return sym
 
 def assign_dsep_sign(val):
     '''Returns p if val is positive and n if val is negative.
@@ -502,6 +510,9 @@ def read_dsep_isochrone(
 
     return age_table
 
+# DSEP Interpolation Routines #
+###############################
+
 def dsep_interpolation(fromcol, tocol, age=1.5, metallicity=0.0):
     '''Return an interpolator between two DSEP isochrone quantities.
 
@@ -550,24 +561,110 @@ def mass_to_teff_dsep_interpolator(age=1.5, metallicity=0.0):
 
     return exponentify_interpolator(interpolator)
 
-def calculate_single_star_color_Casagrande_DSEP(
-    color, mass, metallicity, age=1.5):
-    '''Calculates the given color of a single star.
+def mass_to_band_dsep_interpolator(band, age=1.5, metallicity=0.0):
+    '''Return function to interpolate a magnitude for a given mass.
 
-    The color will be calculated using the empirical Casagrande relations
-    between Teff and Color. The relationship between mass and Teff will be
-    taken from the DSEP isochrones.
+    This function returns an interpolator to map mass and magnitude in the
+    given band. 
     '''
-    mass_teff_interpolator = mass_to_teff_dsep_interpolator(
-        metallicity=metallicity)
-    star_teff = mass_teff_interpolator(mass)
+    interpolator = dsep_interpolation("M/Mo", band, age=age,
+                                      metallicity=metallicity)
 
-    color = Casagrande_inverted_color(color, star_teff, metallicity)
+    return interpolator
 
-    return color
+def create_color_interpolator(blue_interp, red_interp):
+    '''Create a color interpolator from two band interpolators.
+
+    The most straightfoward way to interpolate colors from an isochrone is to
+    generate a function that uses the interpolators from each band, and
+    subtracts them.'''
+    return (lambda x: blue_interp(x) - red_interp(x))
+
+def mass_to_color_dsep_interpolator(color, age=1.5, metallicity=0.0):
+    '''Return function to interpolate color for a given mass.
+
+    This function will return an interpolator which will map mass and color for
+    the given color, for a star of the given age and metallicity.'''
+
+    band1, band2 = split_color(color)
+    band1_interpolator = mass_to_band_dsep_interpolator(
+        band1, age=age, metallicity=metallicity)
+    band2_interpolator = mass_to_band_dsep_interpolator(
+        band2, age=age, metallicity=metallicity)
+
+    return create_color_interpolator(band1_interpolator, band2_interpolator)
+
+# Stellar properties with DSEP only #
+#####################################
+
+
+def calculate_single_star_magnitude_DSEP(
+    band, mass, metallicity, age=1.5):
+    '''Calculate the magnitude of a star using DSEP.
+
+    DSEP assumes the star is some fixed distance away, most likely, and this
+    will return the magnitude that DSEP associates with the star. That will be
+    useful in getting flux-related quantities such as color and flux ratios.
+    '''
+    mass_mag_interpolator = mass_to_band_dsep_interpolator(
+        band, age=age, metallicity=metallicity)
+    star_mag = mass_mag_interpolator(mass)
+
+    return star_mag
+
+def calculate_binary_band_flux_ratio_DSEP(
+    band, mass1, mass2, metallicity, age=1.5):
+    '''Calculate flux ratio between two stars in a band.
+
+    An important quantity when adding colors is the in-band flux ratio. When
+    using isochrones, the flux ratio can be calculated directly, and does not
+    have to be calculated through bolometric corrections.
+    '''
+    band1 = calculate_single_star_color_DSEP(band, mass1, metallicity, age=age)
+    band2 = calculate_single_star_color_DSEP(band, mass2, metallicity, age=age)
+
+    return 10**(-0.4 * (band1 - band2))
+
+
+def calculate_single_star_color_DSEP(
+    color, mass, metallicity, age=1.5):
+    '''Calculate the color of a star using only DSEP.
+
+    The color will be calculated directly from DSEP using the mass-color
+    relations in the isochrones.
+    '''
+    bluemag, redmag = split_color(color)
+    bluemag = calculate_single_star_magnitude_DSEP(
+        bluemag, mass, metallicity, age=age)
+    redmag = calculate_single_star_magnitude_DSEP(
+        redmag, mass, metallicity, age=age)
+
+    return bluemag - redmag
+
+def calculate_binary_star_color_DSEP(
+    color, mass1, mass2, metallicity, age=1.5, bolcolor="B-V"):
+    '''Calculate the color of a binary star system using DSEP.
+
+    The colors will be calculated directly from the DSEP isochrones.
+    '''
+    color1 = calculate_single_star_color_DSEP(
+        color, mass1, metallicity, age=age)
+    color2 = calculate_single_star_color_DSEP(
+        color, mass2, metallicity, age=age)
+
+    blueband, redband = split_color(color)
+    fluxratio = calculate_binary_band_flux_ratio_DSEP(
+        blueband, mass1, mass2, metallicity, age=age)
+
+    binary_color = sum_binary_color(color1, color2, fluxratio)
+    return binary_color
+
+###############################################################################
+# Casagrande-DSEP Stellar Parameter Routines #
+###############################################################################
 
 def calculate_binary_star_color_Casagrande_DSEP(
-    color, mass1, mass2, metallicity, age=1.5):
+    color, mass1, mass2, metallicity, age=1.5, bolcolor="B-V"):
     '''Calculates the given color of a binary star system.
 
     The colors will be calculated using the empirical Casagrande relations
@@ -575,17 +672,58 @@ def calculate_binary_star_color_Casagrande_DSEP(
     taken from the DSEP isochrones. Bolometric corrections will be taken from
     Casagrande as well. And the mass-luminosity relation will be taken from
     DSEP.
+
+    The Bolometric corrections will be calculated using the single-star color
+    in the color given in bolcolor. For example, 
     '''
     color1 = calculate_single_star_color_Casagrande_DSEP(
         color, mass1, metallicity, age=age)
     color2 = calculate_single_star_color_Casagrande_DSEP(
         color, mass2, metallicity, age=age)
 
-    blueband, redband = split_color(np.array([color]))
+    bluecolor, redcolor = split_color(color)
+
+    fluxratio = calculate_binary_band_flux_ratio_Casagrande_DSEP(
+        bluecolor, mass1, mass2, metallicity, bolcolor, age=age)
+
+    bin_color = sum_binary_color(color1, color2, fluxratio)
+
+    return bin_color
+
+def calculate_single_star_color_Casagrande_DSEP(
+    color, mass, metallicity, age=1.5):
+    '''Calculate the color of a star using Casagrande and DSEP.
+
+    The color will be calculated using the empirical Casagrande relations
+    between Teff and Color. The relationship between mass and Teff will be
+    taken from the DSEP isochrones.
+    '''
+    mass_teff_interpolator = mass_to_teff_dsep_interpolator(age=age,
+        metallicity=metallicity)
+    star_teff = mass_teff_interpolator(mass)
+
+    color = Casagrande_inverted_color(color, star_teff, metallicity)
+
+    return color
+
+def calculate_binary_band_flux_ratio_Casagrande_DSEP(
+    band, mass1, mass2, metallicity, bolcolor, age=1.5):
+    '''Calculate the flux ratio between two stars using Casagrande and DSEP.
+
+    This function calculates the flux ratio by essentially running a
+    mass-bolometric luminosity relation from DSEP, and then correcting the
+    bolometric luminosity to an in-band luminosity from the Bolometric
+    Corrections in Casagrande et al (2010).
+    '''
+    bol_color1 = calculate_single_star_color_Casagrande_DSEP(
+        bolcolor, mass1, metallicity, age=age)
+    bol_color2 = calculate_single_star_color_Casagrande_DSEP(
+        bolcolor, mass2, metallicity, age=age)
 
     bolratio = (Casagrande_Bolometric_Flux(
-        blueband, 0, color, color2, metallicity) / Casagrande_Bolometric_Flux(
-            blueband, 0, color, color1, metallicity))
+        band, 0, bolcolor, bol_color2, metallicity) / 
+                Casagrande_Bolometric_Flux(
+        band, 0, bolcolor, bol_color1, metallicity))
 
     mass_lum_interpolator = mass_to_bolometric_luminosity_dsep_interpolator(
         age, metallicity)
@@ -593,31 +731,117 @@ def calculate_binary_star_color_Casagrande_DSEP(
 
     fluxratio = lumratio * bolratio
 
-    bin_color = (color2 - 2.5 * np.log10(1 + fluxratio) + 
-                 2.5 * np.log10(1 + fluxratio * 10**(-0.4 * (color2 - color1))))
+    return fluxratio
 
-    return bin_color
+###############################################################################
+# Plotting Routines
+###############################################################################
 
-if __name__ == "__main__":
-    color="B-V"
-    primary_mass = 1.0
-    secondary_mass = np.linspace(1.0, 0.1, 30)
-    metallicity = 0.0
+def single_color_excess_plot(
+    color, primary_mass, secondary_masses, metallicity, age=8, bolcolor="B-V",
+    method="Casagrande-DSEP"):
+    '''Plots the color excess as a function of secondary mass.
 
-    colors = []
-    for smass in secondary_mass:
+    This function only plots a single color excess as a function of secondary
+    mass.'''
+    
+    colors=[]
+    for smass in secondary_masses:
         try:
-            colorval = calculate_binary_star_color_Casagrande_DSEP(
-                color, primary_mass, smass, metallicity, age=8)
-        except ValueError:
+            if method == "Casagrande-DSEP":
+                colorval = calculate_binary_star_color_Casagrande_DSEP(
+                    color, primary_mass, smass, metallicity, age=age,
+                    bolcolor=bolcolor)
+            elif method == "DSEP":
+                colorval = calculate_binary_star_color_DSEP(
+                    color, primary_mass, smass, metallicity, age=age)
+            else:
+                raise ValueError("Don't recognize method {0}".format(method))
+        except OutOfBoundsError:
+            # This occurs when a value is out of bounds.
             break
         colors.append(colorval[0])
 
-    primary_color = calculate_single_star_color_Casagrande_DSEP(
-        color, primary_mass, metallicity)
+    binary_colors = np.array(colors)
+    if method == "Casagrande-DSEP":
+        primary_color = calculate_single_star_color_Casagrande_DSEP(
+            color, primary_mass, metallicity)
+    elif method == "DSEP":
+        primary_color = calculate_single_star_color_DSEP(
+            color, primary_mass, metallicity)
+    color_excess = binary_colors - primary_color
 
-    plot_masses = secondary_mass[:len(colors)]
-    plt.plot(plot_masses, colors)
-    plt.plot([plot_masses[0], plot_masses[-1]], [primary_color]*2, 'r--')
+    plot_masses = secondary_masses[:len(binary_colors)]
+    plt.plot(plot_masses, color_excess, label=color)
     plt.xlabel("Secondary Mass (Msun)")
-    plt.ylabel(color)
+    plt.ylabel("Color Excess over primary")
+
+def color_excess_plot_comparison(
+    colors, primary_mass, secondary_masses, metallicity, age=8, bolcolor="B-V"):
+    '''Plots multiple color excesses.
+
+    The color excesses for all of the given colors in the colors list will be
+    calculated and plotted on the same scale. That way, the most prominent
+    color for differentiating secondaries from a given primary can be
+    chosen.'''
+
+    for color in colors:
+        single_color_excess_plot(color, primary_mass, secondary_masses,
+                                 metallicity, age=age, bolcolor=bolcolor)
+    plt.legend(loc="upper right")
+
+###############################################################################
+# Miscellaneous Routines
+###############################################################################
+
+def sign_switch(val, pos_sym, neg_sym, zero=0):
+    '''Return symbol based on sign of val.
+
+    This function will return pos_sym if val is positive, neg_sym if val is
+    negative. If val is zero, then the behavior depends on the zero flag. If
+    zero is 0, then an empty string is returned. If zero is positive, then the
+    positive symbol will be returned. If zero is negative, then the negative
+    symbol will be returned.
+    '''
+    if val > 0:
+        sym = pos_sym
+    elif val < 0:
+        sym = neg_sym
+    elif val == 0:
+        if zero > 0:
+            sym = pos_sym
+        elif zero < 0:
+            sym = pos_sym
+        elif zero == 0:
+            sym = ""
+        else:
+            raise ValueError("Zero argument should be a number.")
+    else:
+        ValueError("Value to needs to be a number.")
+
+    return sym
+
+def sum_binary_color(color1, color2, fluxratio):
+    '''Calculate summed color from components.
+
+    The three main ingredients needed to calculate the summed color are the
+    colors of the individual components, and the flux ratio (in the blue band).
+    The flux ratio should also have component 1 in the numerator, and component
+    2 in the denominator. Isochrones generally provide the flux ratio fairly 
+    straightforwardly, but bolometric corrections may be needed if empirical 
+    relations are used.'''
+    summed_color = color2 - 2.5 * np.log10(
+        (1 + fluxratio) / (1 + fluxratio * 10**(-0.4*(color2 - color1))))
+    return summed_color
+    
+if __name__ == "__main__":
+    colors=["B-V", "V-J", "V-H", "V-KS", "J-KS"]
+    primary_mass = 1.0
+    secondary_masses = np.linspace(primary_mass, 0.1, 30)
+    metallicity = 0.0
+
+    color_excess_plot_comparison(
+        colors, primary_mass, secondary_masses, metallicity, age=8,
+        bolcolor="V-KS")
+    plt.show()
+
