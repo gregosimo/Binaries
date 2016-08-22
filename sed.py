@@ -113,6 +113,7 @@ def split_color(colorcol):
     into two arrays which just have the bands, such as "RC" & "J" and "BT" &
     "VT". This can handle colors which need to be distributed.
     '''
+    colorcol = np.atleast_1d(colorcol)
     distributed_colors = distribute_color_subscript(colorcol)
     bluecolor = np.array(distributed_colors)
     redcolor = np.array(distributed_colors)
@@ -524,7 +525,24 @@ def dsep_interpolation(fromcol, tocol, age=1.5, metallicity=0.0):
 
     interpolator = interp1d(isochrone[fromcol], isochrone[tocol], kind="linear")
 
-    return interpolator
+    def exception_wrapper(x):
+        try:
+            return interpolator(x)
+        except ValueError:
+            raise OutOfBoundsError
+
+    return exception_wrapper
+
+def DSEP_band_converter(band):
+    '''Maps other representations of band to those outputted by DSEP.
+
+    For example, if the Ks band is otherwise represented as KS, it would be
+    converted to Ks.
+    '''
+    if band == "KS":
+        return "Ks"
+    else:
+        return band
 
 def exponentify_interpolator(interp, base=10):
     '''Make function that raises the base to the result of the interpolation.
@@ -567,8 +585,13 @@ def mass_to_band_dsep_interpolator(band, age=1.5, metallicity=0.0):
     This function returns an interpolator to map mass and magnitude in the
     given band. 
     '''
-    interpolator = dsep_interpolation("M/Mo", band, age=age,
-                                      metallicity=metallicity)
+    band = DSEP_band_converter(band)
+    try:
+        interpolator = dsep_interpolation("M/Mo", band, age=age,
+                                          metallicity=metallicity)
+    except IndexError:
+        interpolator = dsep_interpolation("M/Mo", band[0], age=age,
+                                          metallicity=metallicity)
 
     return interpolator
 
@@ -620,11 +643,23 @@ def calculate_binary_band_flux_ratio_DSEP(
     using isochrones, the flux ratio can be calculated directly, and does not
     have to be calculated through bolometric corrections.
     '''
-    band1 = calculate_single_star_color_DSEP(band, mass1, metallicity, age=age)
-    band2 = calculate_single_star_color_DSEP(band, mass2, metallicity, age=age)
+    band1 = calculate_single_star_magnitude_DSEP(
+        band, mass1, metallicity, age=age)
+    band2 = calculate_single_star_magnitude_DSEP(
+        band, mass2, metallicity, age=age)
 
     return 10**(-0.4 * (band1 - band2))
 
+def calculate_magnitude_difference_DSEP(
+    band, mass1, mass2, metallicity, age=1.5):
+    '''Calculate magnitude difference between components with DSEP.
+
+    In a binary with masses mass1 and mass2, return the difference of magnitude
+    in the given band between the primary and the secondary. That is, return
+    m_X,1 - m_X,2, where X is the band.'''
+    fluxratio = calculate_binary_band_flux_ratio_DSEP(
+        band, mass1, mass2, metallicity, age=age)
+    return -2.5 * np.log10(fluxratio)
 
 def calculate_single_star_color_DSEP(
     color, mass, metallicity, age=1.5):
@@ -733,51 +768,76 @@ def calculate_binary_band_flux_ratio_Casagrande_DSEP(
 
     return fluxratio
 
+def calculate_magnitude_difference_Casagrande_DSEP(
+    band, mass1, mass2, metallicity, bolcolor, age=1.5):
+    '''Calculate magnitude difference for components with Casagrande and DSEP.
+
+    Given a binary with mass1 and mass2, this will calculate the magnitude
+    difference between the two in the given band. This will return the
+    magnitude difference m_X,1 - m_X,2 where X is the band.
+    '''
+    fluxratio = calculate_binary_band_flux_ratio_Casagrande_DSEP(
+        band, mass1, mass2, metallicity, bolcolor, age=age)
+    return -2.5 * np.log10(fluxratio)
+
+
 ###############################################################################
 # Plotting Routines
 ###############################################################################
 
 def single_color_excess_plot(
     color, primary_mass, secondary_masses, metallicity, age=8, bolcolor="B-V",
-    method="Casagrande-DSEP"):
+    method="Casagrande-DSEP", magdiff_band="V", linestyle="solid",
+    linecolor="black"):
     '''Plots the color excess as a function of secondary mass.
 
     This function only plots a single color excess as a function of secondary
     mass.'''
     
     colors=[]
+    magdiffs=[]
     for smass in secondary_masses:
         try:
             if method == "Casagrande-DSEP":
                 colorval = calculate_binary_star_color_Casagrande_DSEP(
                     color, primary_mass, smass, metallicity, age=age,
-                    bolcolor=bolcolor)
+                    bolcolor=bolcolor)[0]
+                magdiff = calculate_magnitude_difference_Casagrande_DSEP(
+                    magdiff_band, primary_mass, smass, metallicity, bolcolor, 
+                    age=age)[0]
             elif method == "DSEP":
                 colorval = calculate_binary_star_color_DSEP(
                     color, primary_mass, smass, metallicity, age=age)
+                magdiff = calculate_magnitude_difference_DSEP(
+                    magdiff_band, primary_mass, smass, metallicity, 
+                    age=age)
             else:
                 raise ValueError("Don't recognize method {0}".format(method))
         except OutOfBoundsError:
             # This occurs when a value is out of bounds.
             break
-        colors.append(colorval[0])
-
+        colors.append(colorval)
+        magdiffs.append(magdiff)
     binary_colors = np.array(colors)
+    binary_magdiffs = np.array(magdiffs)
+
     if method == "Casagrande-DSEP":
         primary_color = calculate_single_star_color_Casagrande_DSEP(
-            color, primary_mass, metallicity)
+            color, primary_mass, metallicity, age=age)
     elif method == "DSEP":
         primary_color = calculate_single_star_color_DSEP(
-            color, primary_mass, metallicity)
+            color, primary_mass, metallicity, age=age)
     color_excess = binary_colors - primary_color
 
-    plot_masses = secondary_masses[:len(binary_colors)]
-    plt.plot(plot_masses, color_excess, label=color)
-    plt.xlabel("Secondary Mass (Msun)")
+    plt.plot(binary_magdiffs, color_excess, label=color, ls=linestyle,
+             c=linecolor)
+    plt.xlabel("{0}-band Magnitude Difference".format(magdiff_band))
     plt.ylabel("Color Excess over primary")
 
 def color_excess_plot_comparison(
-    colors, primary_mass, secondary_masses, metallicity, age=8, bolcolor="B-V"):
+    colors, primary_mass, secondary_masses, metallicity, age=8, bolcolor="B-V",
+    magdiff_band="V", linestyle="solid", linecolors=[], 
+    method="Casagrande-DSEP"):
     '''Plots multiple color excesses.
 
     The color excesses for all of the given colors in the colors list will be
@@ -785,10 +845,15 @@ def color_excess_plot_comparison(
     color for differentiating secondaries from a given primary can be
     chosen.'''
 
-    for color in colors:
-        single_color_excess_plot(color, primary_mass, secondary_masses,
-                                 metallicity, age=age, bolcolor=bolcolor)
-    plt.legend(loc="upper right")
+    for i, color in enumerate(colors):
+        if linecolors is []:
+            linecolor=None
+        else:
+            linecolor = linecolors[i]
+        single_color_excess_plot(
+            color, primary_mass, secondary_masses, metallicity, age=age, 
+            bolcolor=bolcolor, magdiff_band=magdiff_band, linestyle=linestyle,
+            linecolor=linecolor, method=method)
 
 ###############################################################################
 # Miscellaneous Routines
@@ -836,12 +901,19 @@ def sum_binary_color(color1, color2, fluxratio):
     
 if __name__ == "__main__":
     colors=["B-V", "V-J", "V-H", "V-KS", "J-KS"]
+    linecolors = ["blue", "purple", "pink", "orange", "red"]
     primary_mass = 1.0
     secondary_masses = np.linspace(primary_mass, 0.1, 30)
     metallicity = 0.0
+    age=6
 
     color_excess_plot_comparison(
-        colors, primary_mass, secondary_masses, metallicity, age=8,
-        bolcolor="V-KS")
+        colors, primary_mass, secondary_masses, metallicity, age=age,
+        bolcolor="V-KS", magdiff_band="V", linecolors=linecolors)
+    plt.legend(loc="upper left")
+    color_excess_plot_comparison(
+        colors, primary_mass, secondary_masses, metallicity, age=age,
+        bolcolor="V-KS", magdiff_band="V", linestyle="dashed", method="DSEP",
+        linecolors=linecolors)
     plt.show()
 
