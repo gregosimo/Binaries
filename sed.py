@@ -3,6 +3,7 @@ import glob
 import subprocess
 import tempfile
 import shutil
+import itertools
 
 import numpy as np
 import numpy.core.defchararray as npstr
@@ -106,14 +107,15 @@ def distribute_color_subscript(col):
     newcol[shortened_indices] = distributed_entries
     return newcol
 
-def split_color(colorcol):
-    '''Splits an array of string colors into two arrays of bands.
+def split_color(color):
+    '''Split colors into component bands.
 
-    This takes an array of strings such as "RC-J" or "(B-V)T" and splits them
-    into two arrays which just have the bands, such as "RC" & "J" and "BT" &
+    This takes either an array of strings (or just a single string formatted) 
+    such as "RC-J" or "(B-V)T" and splits them into two arrays (or just a
+    2-tuple of strings) which just have the bands, such as "RC" & "J" and "BT" &
     "VT". This can handle colors which need to be distributed.
     '''
-    colorcol = np.atleast_1d(colorcol)
+    colorcol = np.atleast_1d(color)
     distributed_colors = distribute_color_subscript(colorcol)
     bluecolor = np.array(distributed_colors)
     redcolor = np.array(distributed_colors)
@@ -123,7 +125,29 @@ def split_color(colorcol):
         bluecolor[i] = lst[0]
         redcolor[i] = lst[1]
     
-    return bluecolor, redcolor
+    if len(colorcol) == 1:
+        return bluecolor[0], redcolor[0]
+    else:
+        return bluecolor, redcolor
+
+def join_color(blueband, redband):
+    '''Join the bands into a single color string.
+
+    This takes either two arrays of strings (or just two strings) and joins
+    them into an array (or just a single string) which has the color. For
+    example "B" and "V" becomes "B-V". This does not make factored strings. So
+    "BT" and "VT" make "BT-VT" not "(B-V)T".
+    '''
+    # Not working because join is a bitch.
+    bluearray = np.atleast_1d(blueband)
+    redarray = np.atleast_1d(redband)
+    colorarray = npstr.join("-", [bluearray, redarray])
+
+    if len(bluearray) == 1 and len(redarray) == 1:
+        return colorarray
+    else:
+        return colorarray
+
 
 ###############################################################################
 # Casagrande paper routines
@@ -392,9 +416,17 @@ def format_dsep_isochrone_filename(feh, afe, Y, bands):
     else:
         raise ValueError("Y={0:.2g} not supported.".format(Y))
     
+    # When placing extra bands, make sure the numbers line up with the values
+    # in the "iso_interp_feh.f" file. 
     if bands == 1:
         suffix = "UBVRIJHKsKp"
-    elif 1 < bands <= 15:
+    elif bands == 8:
+        suffix = "UKIDSS"
+    elif bands == 10:
+        suffix = "CFHTugriz"
+    elif bands == 11:
+        suffix = "SDSSugriz"
+    elif 0 < bands <= 15:
         raise ValueError("Band {0} not implemented yet.".format(bands))
     else:
         raise ValueError("Band number not recognized")
@@ -514,14 +546,15 @@ def read_dsep_isochrone(
 # DSEP Interpolation Routines #
 ###############################
 
-def dsep_interpolation(fromcol, tocol, age=1.5, metallicity=0.0):
+def dsep_interpolation(fromcol, tocol, age=1.5, metallicity=0.0, bands=1, Y=1,
+                       afe=2):
     '''Return an interpolator between two DSEP isochrone quantities.
 
     This will return a function which, given a value of fromcol which is
     covered by the DSEP isochrone, will interpolate a value of tocol. This
     interpolation uses a grid of the given age and metallicity.
     '''
-    isochrone = read_dsep_isochrone(metallicity, age)
+    isochrone = read_dsep_isochrone(metallicity, age, bands=bands, Y=Y, afe=afe)
 
     interpolator = interp1d(isochrone[fromcol], isochrone[tocol], kind="linear")
 
@@ -533,16 +566,75 @@ def dsep_interpolation(fromcol, tocol, age=1.5, metallicity=0.0):
 
     return exception_wrapper
 
-def DSEP_band_converter(band):
+def color_to_color_DSEP_interpolator(
+    fromcolor, tocolor, DSEP_lookup, age=1.5, metallicity=0.0, Y=1, afe=2):
+    '''Return function to interpolate between colors in DSEP.
+
+    Return a function which, given a color that can be calculated from the DSEP
+    isochrone, will interpolate to another color. This interpolation uses a
+    grid of the given age and metallicity.'''
+    fromblue, fromred = split_color(fromcolor)
+    fromblue_DSEP = DSEP_band_converter(fromblue, DSEP_lookup[fromblue])
+    fromred_DSEP = DSEP_band_converter(fromred, DSEP_lookup[fromred])
+
+    toblue, tored = split_color(tocolor)
+    toblue_DSEP = DSEP_band_converter(toblue, DSEP_lookup[toblue])
+    tored_DSEP = DSEP_band_converter(tored, DSEP_lookup[tored])
+
+    fromblue_col = read_dsep_isochrone(
+        metallicity, age, bands=DSEP_lookup[fromblue], Y=Y,
+        afe=afe)[fromblue_DSEP]
+    fromred_col = read_dsep_isochrone(
+        metallicity, age, bands=DSEP_lookup[fromred], Y=Y,
+        afe=afe)[fromred_DSEP]
+    toblue_col = read_dsep_isochrone(
+        metallicity, age, bands=DSEP_lookup[toblue], Y=Y, afe=afe)[toblue_DSEP]
+    tored_col = read_dsep_isochrone(
+        metallicity, age, bands=DSEP_lookup[tored], Y=Y, afe=afe)[tored_DSEP]
+
+    fromcolor_val = fromblue_col - fromred_col
+    tocolor_val = toblue_col - tored_col
+
+    interpolator = interp1d(fromcolor_val, tocolor_val, kind="linear")
+
+    def exception_wrapper(x):
+        try:
+            return interpolator(x)
+        except ValueError:
+            raise OutOfBoundsError
+
+    return exception_wrapper
+
+def convert_to_colors(
+    fromcolor, tocolor, fromcolor_val, DSEP_lookup, age=1.0, metallicity=0, 
+    Y=1, afe=2):
+    '''Interpolate between colors using the DSEP isochrones.
+
+    This is used to determine how the emission in one band is related to
+    another using the DSEP isochrones.'''
+    interpolator = color_to_color_DSEP_interpolator(
+        fromcolor, tocolor, DSEP_lookup, age=age, metallicity=metallicity, Y=Y,
+        afe=afe)
+    interpolated_colors = interpolator(fromcolor_val)
+    return interpolated_colors
+
+def DSEP_band_converter(band, bandno):
     '''Maps other representations of band to those outputted by DSEP.
 
     For example, if the Ks band is otherwise represented as KS, it would be
     converted to Ks.
     '''
-    if band == "KS":
-        return "Ks"
-    else:
-        return band
+    if bandno == 1:
+        if band == "KS" or band == "K":
+            band = "Ks"
+    elif bandno == 10:
+        if band == "i":
+            print("Using i_new.")
+            band = "i_new"
+    elif bandno == 11:
+        band = "sdss_" + band
+
+    return band
 
 def exponentify_interpolator(interp, base=10):
     '''Make function that raises the base to the result of the interpolation.
@@ -553,7 +645,8 @@ def exponentify_interpolator(interp, base=10):
     '''
     return (lambda x: base**interp(x))
 
-def mass_to_bolometric_luminosity_dsep_interpolator(age=1.5, metallicity=0.0):
+def mass_to_bolometric_luminosity_dsep_interpolator(
+    age=1.5, metallicity=0.0, bands=1, Y=1, afe=2):
     '''Return function to interpolate bolometric luminosity for a given mass.
 
     This provides one of the important mappings between mass and bolometric
@@ -562,11 +655,13 @@ def mass_to_bolometric_luminosity_dsep_interpolator(age=1.5, metallicity=0.0):
     
     This interpolator interpolates log Luminosity, not luminosity itself.'''
 
-    interpolator = dsep_interpolation("M/Mo", "LogL/Lo", age, metallicity)
+    interpolator = dsep_interpolation(
+        "M/Mo", "LogL/Lo", age, metallicity, bands=bands, Y=Y, afe=afe)
 
     return exponentify_interpolator(interpolator)
 
-def mass_to_teff_dsep_interpolator(age=1.5, metallicity=0.0):
+def mass_to_teff_dsep_interpolator(
+    age=1.5, metallicity=0.0, bands=1, Y=1, afe=2):
     '''Return function to interpolate effective temperature for a given mass.
 
     This provides one of the important mappings between mass and effective
@@ -575,23 +670,27 @@ def mass_to_teff_dsep_interpolator(age=1.5, metallicity=0.0):
 
     This interpolator interpolates log Teff, not Teff itself.'''
 
-    interpolator = dsep_interpolation("M/Mo", "LogTeff", age, metallicity)
+    interpolator = dsep_interpolation(
+        "M/Mo", "LogTeff", age, metallicity, bands=bands, Y=Y, afe=afe)
 
     return exponentify_interpolator(interpolator)
 
-def mass_to_band_dsep_interpolator(band, age=1.5, metallicity=0.0):
+def mass_to_band_dsep_interpolator(
+    band, age=1.5, metallicity=0.0, bands=1, Y=1, afe=2):
     '''Return function to interpolate a magnitude for a given mass.
 
     This function returns an interpolator to map mass and magnitude in the
     given band. 
     '''
-    band = DSEP_band_converter(band)
+    band = DSEP_band_converter(band, bands)
     try:
-        interpolator = dsep_interpolation("M/Mo", band, age=age,
-                                          metallicity=metallicity)
+        interpolator = dsep_interpolation(
+            "M/Mo", band, age=age, metallicity=metallicity, bands=bands, Y=Y,
+            afe=afe)
     except IndexError:
-        interpolator = dsep_interpolation("M/Mo", band[0], age=age,
-                                          metallicity=metallicity)
+        interpolator = dsep_interpolation(
+            "M/Mo", band[0], age=age, metallicity=metallicity, bands=bands,
+            Y=Y, afe=afe)
 
     return interpolator
 
@@ -603,7 +702,9 @@ def create_color_interpolator(blue_interp, red_interp):
     subtracts them.'''
     return (lambda x: blue_interp(x) - red_interp(x))
 
-def mass_to_color_dsep_interpolator(color, age=1.5, metallicity=0.0):
+
+def mass_to_color_dsep_interpolator(
+    color, DSEP_lookup, age=1.5, metallicity=0.0, Y=1, afe=2):
     '''Return function to interpolate color for a given mass.
 
     This function will return an interpolator which will map mass and color for
@@ -611,18 +712,29 @@ def mass_to_color_dsep_interpolator(color, age=1.5, metallicity=0.0):
 
     band1, band2 = split_color(color)
     band1_interpolator = mass_to_band_dsep_interpolator(
-        band1, age=age, metallicity=metallicity)
+        band1, age=age, metallicity=metallicity, bands=DSEP_lookup[band1], Y=Y, 
+        afe=afe)
     band2_interpolator = mass_to_band_dsep_interpolator(
-        band2, age=age, metallicity=metallicity)
+        band2, age=age, metallicity=metallicity, bands=DSEP_lookup[band2], Y=Y, 
+        afe=afe)
 
     return create_color_interpolator(band1_interpolator, band2_interpolator)
+
+def color_to_mass_dsep_interpolator(
+    color, DSEP_lookup, age=1.5, metallicity=0.0, Y=1, afe=2):
+    '''Return function to interpolate mass given a color.
+
+    This function will return an interpolator which will map colors to masses.
+    Unfortunately, this relation is generally double-valued. There needs to be
+    a good way to deal with this.
+    '''
 
 # Stellar properties with DSEP only #
 #####################################
 
 
 def calculate_single_star_magnitude_DSEP(
-    band, mass, metallicity, age=1.5):
+    band, mass, metallicity, age=1.5, bands=1, Y=1, afe=2):
     '''Calculate the magnitude of a star using DSEP.
 
     DSEP assumes the star is some fixed distance away, most likely, and this
@@ -630,13 +742,13 @@ def calculate_single_star_magnitude_DSEP(
     useful in getting flux-related quantities such as color and flux ratios.
     '''
     mass_mag_interpolator = mass_to_band_dsep_interpolator(
-        band, age=age, metallicity=metallicity)
+        band, age=age, metallicity=metallicity, bands=bands, Y=Y, afe=afe)
     star_mag = mass_mag_interpolator(mass)
 
     return star_mag
 
 def calculate_binary_band_flux_ratio_DSEP(
-    band, mass1, mass2, metallicity, age=1.5):
+    band, mass1, mass2, metallicity, age=1.5, bands=1, Y=1, afe=2):
     '''Calculate flux ratio between two stars in a band.
 
     An important quantity when adding colors is the in-band flux ratio. When
@@ -644,25 +756,25 @@ def calculate_binary_band_flux_ratio_DSEP(
     have to be calculated through bolometric corrections.
     '''
     band1 = calculate_single_star_magnitude_DSEP(
-        band, mass1, metallicity, age=age)
+        band, mass1, metallicity, age=age, bands=bands, Y=Y, afe=afe)
     band2 = calculate_single_star_magnitude_DSEP(
-        band, mass2, metallicity, age=age)
+        band, mass2, metallicity, age=age, bands=bands, Y=Y, afe=afe)
 
     return 10**(-0.4 * (band1 - band2))
 
 def calculate_magnitude_difference_DSEP(
-    band, mass1, mass2, metallicity, age=1.5):
+    band, mass1, mass2, metallicity, age=1.5, bands=1, Y=1, afe=2):
     '''Calculate magnitude difference between components with DSEP.
 
     In a binary with masses mass1 and mass2, return the difference of magnitude
     in the given band between the primary and the secondary. That is, return
     m_X,1 - m_X,2, where X is the band.'''
     fluxratio = calculate_binary_band_flux_ratio_DSEP(
-        band, mass1, mass2, metallicity, age=age)
+        band, mass1, mass2, metallicity, age=age, bands=bands, Y=Y, afe=afe)
     return -2.5 * np.log10(fluxratio)
 
 def calculate_single_star_color_DSEP(
-    color, mass, metallicity, age=1.5):
+    color, mass, metallicity, DSEP_lookup, age=1.5, Y=1, afe=2):
     '''Calculate the color of a star using only DSEP.
 
     The color will be calculated directly from DSEP using the mass-color
@@ -670,36 +782,119 @@ def calculate_single_star_color_DSEP(
     '''
     bluemag, redmag = split_color(color)
     bluemag = calculate_single_star_magnitude_DSEP(
-        bluemag, mass, metallicity, age=age)
+        bluemag, mass, metallicity, age=age, bands=DSEP_lookup[bluemag], Y=Y, 
+        afe=afe)
     redmag = calculate_single_star_magnitude_DSEP(
-        redmag, mass, metallicity, age=age)
+        redmag, mass, metallicity, age=age, bands=DSEP_lookup[redmag], Y=Y, 
+        afe=afe)
 
     return bluemag - redmag
 
 def calculate_binary_star_color_DSEP(
-    color, mass1, mass2, metallicity, age=1.5, bolcolor="B-V"):
+    color, mass1, mass2, metallicity, DSEP_lookup, age=1.5, Y=1, afe=2):
     '''Calculate the color of a binary star system using DSEP.
 
     The colors will be calculated directly from the DSEP isochrones.
     '''
     color1 = calculate_single_star_color_DSEP(
-        color, mass1, metallicity, age=age)
+        color, mass1, metallicity, age=age, DSEP_lookup=DSEP_lookup, Y=Y, 
+        afe=afe)
     color2 = calculate_single_star_color_DSEP(
-        color, mass2, metallicity, age=age)
+        color, mass2, metallicity, age=age, DSEP_lookup=DSEP_lookup, 
+        Y=Y, afe=afe)
 
     blueband, redband = split_color(color)
     fluxratio = calculate_binary_band_flux_ratio_DSEP(
-        blueband, mass1, mass2, metallicity, age=age)
+        blueband, mass1, mass2, metallicity, age=age,
+        bands=DSEP_lookup[blueband], Y=Y, afe=afe)
 
     binary_color = sum_binary_color(color1, color2, fluxratio)
     return binary_color
+
+# Binary Loop Calculations #
+############################
+
+def color_color_excess_rms(
+    ycolor, xcolor, primary_mass, DSEP_lookup, age=1.0, metallicity=0.0, Y=1,
+    afe=2, numsecs=20):
+    '''Calculate the RMS of the binary excess above the DSEP isochrone.
+
+    This function calculates the typical excursion of the binary above the DSEP
+    isochrone using the RMS excess as the figure of merit.
+    '''
+    secondaries = np.linspace(primary_mass, 0.12, numsecs)
+    comb_ycolor = calculate_binary_star_color_DSEP(
+        ycolor, primary_mass, secondaries, metallicity, DSEP_lookup, age=age)
+    comb_xcolor = calculate_binary_star_color_DSEP(
+        xcolor, primary_mass, secondaries, metallicity, DSEP_lookup, age=age)
+    ycolor_excess = subtract_DSEP_isochrone(
+        ycolor, xcolor, comb_ycolor, comb_xcolor, DSEP_lookup, age=age,
+        metallicity=metallicity, Y=Y, afe=afe)
+    print(ycolor_excess)
+    fom = np.sqrt(np.mean(ycolor_excess**2))
+    print(fom)
+    return fom
+
+def explore_color_combination_fom(
+    bands, primary_mass, DSEP_lookup, age=1.0, metallicity=0.0, Y=1, afe=2,
+    numsecs=20):
+    '''Calculate figures of merit for color combinations.
+
+    Iterate through the combinations of bands and calculate a figure of merit
+    for each color combination.'''
+    ycolorlist = []
+    xcolorlist = []
+    fomlist = []
+
+    for ytuple in itertools.combinations(bands, 2):
+        for xtuple in itertools.combinations(bands, 2):
+            ycolor = (ytuple[0] + "-" + ytuple[1])
+            xcolor = (xtuple[0] + "-" + xtuple[1])
+            if ycolor != xcolor:
+                fom = color_color_excess_rms(
+                    ycolor, xcolor, primary_mass, DSEP_lookup, age=age,
+                    metallicity=metallicity, Y=Y, afe=afe, numsecs=numsecs)
+                ycolorlist.append(ycolor)
+                xcolorlist.append(xcolor)
+                fomlist.append(fom)
+
+    fomtable = Table([ycolorlist, xcolorlist, fomlist], names=(
+        "ycolor", "xcolor", "RMS"))
+    fomtable.sort("RMS")
+    fomtable.reverse()
+    print(fomtable)
+
+    return fomtable
+
+
+
+# DSEP Tools #
+##############
+
+def subtract_DSEP_isochrone(
+    color, inputcolor, vals, inputvals, DSEP_lookup, age=1.0, metallicity=0.0, 
+    Y=1, afe=2):
+    '''Subtract a DSEP isochrone from vals using inputvals.
+
+    Isochrones interpolated from inputvals will be subtracted from vals and
+    returned. The actual colors which vals and inputvals correspond to should 
+    be indicated in color and inputcolor.
+    '''
+    interp = color_to_color_DSEP_interpolator(
+        inputcolor, color, DSEP_lookup, age=age, metallicity=metallicity, Y=Y,
+        afe=afe)
+    isochrone_values = interp(inputvals)
+    subtracted_values = vals - isochrone_values
+    return subtracted_values
+
 
 ###############################################################################
 # Casagrande-DSEP Stellar Parameter Routines #
 ###############################################################################
 
 def calculate_binary_star_color_Casagrande_DSEP(
-    color, mass1, mass2, metallicity, age=1.5, bolcolor="B-V"):
+    color, mass1, mass2, metallicity, age=1.5, bolcolor="B-V", bands=1, Y=1,
+    afe=2):
     '''Calculates the given color of a binary star system.
 
     The colors will be calculated using the empirical Casagrande relations
@@ -712,21 +907,22 @@ def calculate_binary_star_color_Casagrande_DSEP(
     in the color given in bolcolor. For example, 
     '''
     color1 = calculate_single_star_color_Casagrande_DSEP(
-        color, mass1, metallicity, age=age)
+        color, mass1, metallicity, age=age, bands=bands, Y=Y, afe=afe)
     color2 = calculate_single_star_color_Casagrande_DSEP(
-        color, mass2, metallicity, age=age)
+        color, mass2, metallicity, age=age, bands=bands, Y=Y, afe=afe)
 
     bluecolor, redcolor = split_color(color)
 
     fluxratio = calculate_binary_band_flux_ratio_Casagrande_DSEP(
-        bluecolor, mass1, mass2, metallicity, bolcolor, age=age)
+        bluecolor, mass1, mass2, metallicity, bolcolor, age=age, bands=bands,
+        Y=Y, afe=afe)
 
     bin_color = sum_binary_color(color1, color2, fluxratio)
 
     return bin_color
 
 def calculate_single_star_color_Casagrande_DSEP(
-    color, mass, metallicity, age=1.5):
+    color, mass, metallicity, age=1.5, bands=1, Y=1, afe=2):
     '''Calculate the color of a star using Casagrande and DSEP.
 
     The color will be calculated using the empirical Casagrande relations
@@ -734,7 +930,7 @@ def calculate_single_star_color_Casagrande_DSEP(
     taken from the DSEP isochrones.
     '''
     mass_teff_interpolator = mass_to_teff_dsep_interpolator(age=age,
-        metallicity=metallicity)
+        metallicity=metallicity, bands=bands, Y=Y, afe=afe)
     star_teff = mass_teff_interpolator(mass)
 
     color = Casagrande_inverted_color(color, star_teff, metallicity)
@@ -742,7 +938,7 @@ def calculate_single_star_color_Casagrande_DSEP(
     return color
 
 def calculate_binary_band_flux_ratio_Casagrande_DSEP(
-    band, mass1, mass2, metallicity, bolcolor, age=1.5):
+    band, mass1, mass2, metallicity, bolcolor, age=1.5, bands=1, Y=1, afe=2):
     '''Calculate the flux ratio between two stars using Casagrande and DSEP.
 
     This function calculates the flux ratio by essentially running a
@@ -751,9 +947,9 @@ def calculate_binary_band_flux_ratio_Casagrande_DSEP(
     Corrections in Casagrande et al (2010).
     '''
     bol_color1 = calculate_single_star_color_Casagrande_DSEP(
-        bolcolor, mass1, metallicity, age=age)
+        bolcolor, mass1, metallicity, age=age, bands=bands, Y=Y, afe=afe)
     bol_color2 = calculate_single_star_color_Casagrande_DSEP(
-        bolcolor, mass2, metallicity, age=age)
+        bolcolor, mass2, metallicity, age=age, bands=bands, Y=Y, afe=afe)
 
     bolratio = (Casagrande_Bolometric_Flux(
         band, 0, bolcolor, bol_color2, metallicity) / 
@@ -761,7 +957,7 @@ def calculate_binary_band_flux_ratio_Casagrande_DSEP(
         band, 0, bolcolor, bol_color1, metallicity))
 
     mass_lum_interpolator = mass_to_bolometric_luminosity_dsep_interpolator(
-        age, metallicity)
+        age, metallicity, bands=bands, Y=Y, afe=afe)
     lumratio = mass_lum_interpolator(mass1) / mass_lum_interpolator(mass2)
 
     fluxratio = lumratio * bolratio
@@ -769,7 +965,7 @@ def calculate_binary_band_flux_ratio_Casagrande_DSEP(
     return fluxratio
 
 def calculate_magnitude_difference_Casagrande_DSEP(
-    band, mass1, mass2, metallicity, bolcolor, age=1.5):
+    band, mass1, mass2, metallicity, bolcolor, age=1.5, bands=1, Y=1, afe=2):
     '''Calculate magnitude difference for components with Casagrande and DSEP.
 
     Given a binary with mass1 and mass2, this will calculate the magnitude
@@ -777,7 +973,8 @@ def calculate_magnitude_difference_Casagrande_DSEP(
     magnitude difference m_X,1 - m_X,2 where X is the band.
     '''
     fluxratio = calculate_binary_band_flux_ratio_Casagrande_DSEP(
-        band, mass1, mass2, metallicity, bolcolor, age=age)
+        band, mass1, mass2, metallicity, bolcolor, age=age, bands=bands, Y=Y,
+        afe=afe)
     return -2.5 * np.log10(fluxratio)
 
 
@@ -788,7 +985,7 @@ def calculate_magnitude_difference_Casagrande_DSEP(
 def single_color_excess_plot(
     color, primary_mass, secondary_masses, metallicity, age=8, bolcolor="B-V",
     method="Casagrande-DSEP", magdiff_band="V", linestyle="solid",
-    linecolor="black"):
+    linecolor="black", DSEP_lookup={}, Y=1, afe=2):
     '''Plots the color excess as a function of secondary mass.
 
     This function only plots a single color excess as a function of secondary
@@ -807,10 +1004,11 @@ def single_color_excess_plot(
                     age=age)[0]
             elif method == "DSEP":
                 colorval = calculate_binary_star_color_DSEP(
-                    color, primary_mass, smass, metallicity, age=age)
+                    color, primary_mass, smass, metallicity, DSEP_lookup, 
+                    age=age, Y=Y, afe=afe)
                 magdiff = calculate_magnitude_difference_DSEP(
                     magdiff_band, primary_mass, smass, metallicity, 
-                    age=age)
+                    age=age, bands=DSEP_lookup[magdiff_band], Y=Y, afe=afe)
             else:
                 raise ValueError("Don't recognize method {0}".format(method))
         except OutOfBoundsError:
@@ -820,24 +1018,32 @@ def single_color_excess_plot(
         magdiffs.append(magdiff)
     binary_colors = np.array(colors)
     binary_magdiffs = np.array(magdiffs)
+    primary_masses = secondary_masses[:len(binary_colors)]
 
     if method == "Casagrande-DSEP":
         primary_color = calculate_single_star_color_Casagrande_DSEP(
             color, primary_mass, metallicity, age=age)
     elif method == "DSEP":
         primary_color = calculate_single_star_color_DSEP(
-            color, primary_mass, metallicity, age=age)
+            color, primary_mass, metallicity, age=age, 
+            DSEP_lookup=DSEP_lookup, Y=Y, afe=afe)
     color_excess = binary_colors - primary_color
+    mag_excess = -2.5 * np.log10(1 + 10**(+0.4 * binary_magdiffs))
 
-    plt.plot(binary_magdiffs, color_excess, label=color, ls=linestyle,
+    plt.plot(primary_masses, color_excess, label=color, ls=linestyle,
              c=linecolor)
-    plt.xlabel("{0}-band Magnitude Difference".format(magdiff_band))
+    plt.xlabel("{0}-band Magnitude Excess".format(magdiff_band))
     plt.ylabel("Color Excess over primary")
+
+# Instead of colors, I might want to pass an object which creates the
+# relationship between the colors and pands for DSEP models.
+# Also *bands* is something that's a DSEP internal. So it should be a very
+# minor change.
 
 def color_excess_plot_comparison(
     colors, primary_mass, secondary_masses, metallicity, age=8, bolcolor="B-V",
     magdiff_band="V", linestyle="solid", linecolors=[], 
-    method="Casagrande-DSEP"):
+    method="Casagrande-DSEP", DSEP_bands=1, Y=1, afe=2):
     '''Plots multiple color excesses.
 
     The color excesses for all of the given colors in the colors list will be
@@ -853,7 +1059,220 @@ def color_excess_plot_comparison(
         single_color_excess_plot(
             color, primary_mass, secondary_masses, metallicity, age=age, 
             bolcolor=bolcolor, magdiff_band=magdiff_band, linestyle=linestyle,
-            linecolor=linecolor, method=method)
+            linecolor=linecolor, method=method, DSEP_lookup=DSEP_bands, Y=Y, 
+            afe=afe)
+
+def color_color_isochrone_plot(
+    ycolor, xcolor, DSEP_lookup, high_mass, low_mass=0.12, age=1.0):
+    '''Plots an isochrone line in a color-color space.
+
+    Plot the DSEP isochrone projected in the ycolor vs xcolor space. It ranges
+    from high_mass to low_mass.'''
+    masses = np.linspace(high_mass, low_mass)
+
+    ycolor_interp = mass_to_color_dsep_interpolator(
+        ycolor, DSEP_lookup, age=age)
+    xcolor_interp = mass_to_color_dsep_interpolator(
+        xcolor, DSEP_lookup, age=age)
+
+    ycolor_vals = ycolor_interp(masses)
+    xcolor_vals = xcolor_interp(masses)
+
+    plt.plot(xcolor_vals, ycolor_vals, 'r-')
+
+def simulated_color_color_diagram(
+    ycolor, xcolor, ycolorerr, xcolorerr, DSEP_lookup, uppermass=2, 
+    lowermass=0.12, binary_frac=0.5):
+    '''Create a color-color diagram of a simulated DSEP cluster with binaries.
+
+    This function will make a color-color plot between two masses to show what
+    the data should look like. As of now, this is NOT a good population
+    synthesis; it is only useful for exploring the spread in data.
+    '''
+    single_masses = np.linspace(lowermass, uppermass, 500)
+
+    y_singles = calculate_single_star_color_DSEP(
+        ycolor, single_masses, 0.0, DSEP_lookup, age=1.0)
+    x_singles = calculate_single_star_color_DSEP(
+        xcolor, single_masses, 0.0, DSEP_lookup, age=1.0)
+
+
+    y_single_simdata = y_singles + np.random.normal(scale=ycolorerr,
+                                                    size=y_singles.size)
+    x_single_simdata = x_singles + np.random.normal(scale=xcolorerr,
+                                                    size=x_singles.size)
+
+    plt.plot(x_single_simdata, y_single_simdata, 'b.')
+
+    if binary_frac > 0:
+        primary_masses = np.linspace(
+            lowermass, uppermass, 
+            int(single_masses.size*(1-binary_frac)/binary_frac))
+        secondary_masses = (np.random.uniform(size=primary_masses.size) *
+                            primary_masses)
+        # This is to avoid making the secondaries out of bounds.
+        secondary_masses[secondary_masses<lowermass] = lowermass
+        
+        y_binaries = calculate_binary_star_color_DSEP(
+            ycolor, single_masses, secondary_masses, 0.0, DSEP_lookup, 
+            age=1.0)
+        x_binaries = calculate_binary_star_color_DSEP(
+            xcolor, single_masses, secondary_masses, 0.0, DSEP_lookup, 
+            age=1.0)
+        y_binary_simdata = y_binaries + np.random.normal(scale=ycolorerr,
+                                                       size=y_binaries.size)
+        x_binary_simdata = x_binaries + np.random.normal(scale=xcolorerr,
+                                                       size=x_binaries.size)
+        plt.plot(x_binary_simdata, y_binary_simdata, 'm.')
+
+def plot_binary_loops(
+    ycolor, xcolor, DSEP_lookup, primary_masses, metallicity=0.0, age=1.0):
+    for prim in primary_masses:
+        secondaries = np.linspace(prim, 0.12, 20)
+        comb_ycolor = calculate_binary_star_color_DSEP(
+            ycolor, prim, secondaries, metallicity, DSEP_lookup, age=age)
+        comb_xcolor = calculate_binary_star_color_DSEP(
+            xcolor, prim, secondaries, metallicity, DSEP_lookup, age=age)
+        plt.plot(comb_xcolor, comb_ycolor, 'r-')
+
+def plot_binary_loop_excess(
+    ycolor, xcolor, DSEP_lookup, primary_mass, metallicity=0.0, age=1.0, Y=1,
+    afe=2, color="red", label=""):
+    '''Plot the excess of the binary loop above the DSEP isochrone.
+
+    Take the look for a binary and subtract the isochrone from it according to
+    xcolor. This should show how displaced from the isochrone the binaries
+    should be.
+    '''
+    secondaries = np.linspace(primary_mass, 0.12, 50)
+    comb_ycolor = calculate_binary_star_color_DSEP(
+        ycolor, primary_mass, secondaries, metallicity, DSEP_lookup, age=age)
+    comb_xcolor = calculate_binary_star_color_DSEP(
+        xcolor, primary_mass, secondaries, metallicity, DSEP_lookup, age=age)
+    ycolor_excess = subtract_DSEP_isochrone(
+        ycolor, xcolor, comb_ycolor, comb_xcolor, DSEP_lookup, age=age,
+        metallicity=metallicity, Y=Y, afe=afe)
+    print(ycolor_excess)
+    plt.plot(comb_xcolor, ycolor_excess, ls="-", c=color)
+
+
+def plot_mass_markers(
+    ycolor, xcolor, DSEP_lookup, masses, metallicity=0.0, age=1.0,
+    enlarge_first=True):
+    '''Plot where stars of given masses lie in color-color space.
+
+    Plots stars in the location of the stars with given mass in ycolor vs
+    xcolor. If the enlarge_first keyword is given, then the star for the first
+    mass will be enlarged.
+    '''
+    test_masses = np.array(masses)
+
+    ycolor_interp = mass_to_color_dsep_interpolator(
+        ycolor, DSEP_lookup, age=age)
+    xcolor_interp = mass_to_color_dsep_interpolator(
+        xcolor, DSEP_lookup, age=age)
+
+    test_ycolor = ycolor_interp(test_masses)
+    test_xcolor = xcolor_interp(test_masses)
+    if enlarge_first:
+        plt.plot(test_xcolor[0], test_ycolor[0], 'r*', ms=20)
+        plt.plot(test_xcolor[1:], test_ycolor[1:], 'r*', ms=10)
+    else:
+        plt.plot(test_xcolor, test_ycolor, 'r*', ms=10)
+
+####################
+# Standalone plots #
+####################
+def Casagrande_Colors_plot_excesses():
+    '''Make a plot with the different color excesses in Casagrande.'''
+    colors=["B-V", "V-J", "V-H", "V-KS", "J-KS"]
+    DSEP_lookup = {"B": 1, "V": 1, "J": 1, "H": 1, "KS": 1}
+    linecolors = ["blue", "purple", "pink", "orange", "red"]
+    primary_mass = 1.0
+    secondary_masses = np.linspace(primary_mass, 0.1, 30)
+    metallicity = 0.0
+    age=6
+
+    color_excess_plot_comparison(
+        colors, primary_mass, secondary_masses, metallicity, age=age,
+        bolcolor="V-KS", magdiff_band="V", linecolors=linecolors,
+        DSEP_bands=DSEP_lookup)
+    plt.legend(loc="upper left")
+    color_excess_plot_comparison(
+        colors, primary_mass, secondary_masses, metallicity, age=age,
+        bolcolor="V-KS", magdiff_band="V", linestyle="dashed", method="DSEP",
+        linecolors=linecolors, DSEP_bands=DSEP_lookup)
+    plt.show()
+ 
+def Johnson_2MASS_plot_excesses():
+    '''Make a plot with color excess for Johnson and 2MASS using DSEP.'''
+    colors=["B-V", "V-J", "V-H", "V-KS", "J-H", "H-KS"]
+    DSEP_lookup = {"B": 1, "V": 1, "J": 1, "H": 1, "KS": 1}
+    linecolors = ["blue", "purple", "green", "pink", "orange", "red"]
+    primary_mass = 1.0
+    secondary_masses = np.linspace(primary_mass, 0.1, 30)
+    metallicity = 0.0
+    age=6
+
+    color_excess_plot_comparison(
+        colors, primary_mass, secondary_masses, metallicity, age=age,
+        magdiff_band="V", method="DSEP",
+        linecolors=linecolors, DSEP_bands=DSEP_lookup)
+    plt.show()
+    plt.legend()
+ 
+
+def Bouy_Colors_plot_excesses():
+    '''Make a plot with the different color excesses in Bouy.'''
+    colors = ["i-K", "g-J", "g-H", "g-K", "g-i", "i-z", "g-r", "J-H", "H-K",
+              "r-i"]
+    DSEP_lookup = {"u": 11, "g": 11, "r": 11, "i": 11, "z": 11, "Y": 8, "J": 1,
+                   "H": 1, "K": 1}
+    linecolors = ["black", "brown", "gray", "blue", "purple", "green", "pink", 
+                  "yellow", "orange", "red"]
+    primary_mass = 1.0
+    secondary_masses = np.linspace(primary_mass, 0.1, 30)
+    metallicity = 0.0
+    age=6
+
+    color_excess_plot_comparison(
+        colors, primary_mass, secondary_masses, metallicity, age=age,
+        magdiff_band="i", linecolors=linecolors, method="DSEP",
+        DSEP_bands=DSEP_lookup)
+    plt.legend(loc="upper left")
+    plt.show()
+
+def plot_DSEP_excesses():
+    '''Plots to show sensitivity in most sensitive bands.'''
+    DSEP_lookup = {'B': 1, 'H': 1, 'J': 1, 'K': 1, 'Kp': 1, 'U': 1, 'V': 1, 
+                   'Y': 8, 'g': 11, 'i': 11, 'r': 11, 'u': 11, 'z': 11}
+    band_combinations_20msun = [
+        ("B-H", "H-K"), ("g-H", "H-K"), ("B-J", "H-K"), ("V-H", "H-K"), 
+        ("g-J", "H-K")]
+    band_combinations_15msun = [
+        ("B-H", "H-K"), ("g-H", "H-K"), ("B-J", "H-K"), ("V-H", "H-K"), 
+        ("g-J", "H-K")]
+    band_combinations_10msun = [
+        ("B-K", "Kp-r"), ("g-K", "Kp-r"), ("B-J", "Kp-r"), ("V-K", "Kp-r"), 
+        ("g-J", "Kp-r")]
+    band_combinations_05msun = [
+        ("g-K", "J-H"), ("B-K", "J-H"), ("g-H", "J-H"), ("B-J", "J-H"),
+        ("V-K", "J-H")]
+
+    colors = ["black", "blue", "green", "orange", "red"]
+
+    for i, lst in enumerate([
+            band_combinations_20msun, band_combinations_15msun, 
+            band_combinations_10msun, band_combinations_05msun]):
+        for combo in lst:
+            plt.figure()
+            plot_binary_loop_excess(combo[0], combo[1], DSEP_lookup, 2.0)
+            plt.ylabel(combo[0] + " Excess")
+            plt.xlabel(combo[1])
+            plt.title("{0:.1f} Msun Excess".format(2.0-0.5*i))
+            plt.tight_layout()
+
+
 
 ###############################################################################
 # Miscellaneous Routines
@@ -900,20 +1319,5 @@ def sum_binary_color(color1, color2, fluxratio):
     return summed_color
     
 if __name__ == "__main__":
-    colors=["B-V", "V-J", "V-H", "V-KS", "J-KS"]
-    linecolors = ["blue", "purple", "pink", "orange", "red"]
-    primary_mass = 1.0
-    secondary_masses = np.linspace(primary_mass, 0.1, 30)
-    metallicity = 0.0
-    age=6
 
-    color_excess_plot_comparison(
-        colors, primary_mass, secondary_masses, metallicity, age=age,
-        bolcolor="V-KS", magdiff_band="V", linecolors=linecolors)
-    plt.legend(loc="upper left")
-    color_excess_plot_comparison(
-        colors, primary_mass, secondary_masses, metallicity, age=age,
-        bolcolor="V-KS", magdiff_band="V", linestyle="dashed", method="DSEP",
-        linecolors=linecolors)
-    plt.show()
-
+    Bouy_Colors_plot_excesses()
