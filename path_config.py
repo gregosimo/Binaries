@@ -13,3 +13,18 @@ DSEP_PATH = HOME_DIR / "DSep"
 DSEP_ISOCHRONES= DSEP_PATH / "isochrones"
 DSEP_INTERPOLATOR_EXECUTABLE = DSEP_PATH / "iso_interp_feh"
 DSEP_SPLITTER_EXECUTABLE = DSEP_PATH / "isolf_split"
+
+CLUSTER_PATH = HEAD_DIR / "Clusters"
+PLEIADES_PATH = CLUSTER_PATH / "Pleiades"
+BOUY_TABLE_PATH = PLEIADES_PATH
+BOUY_TABLE_2 = BOUY_TABLE_PATH / "Bouy_15_Table_2.fits"
+BOUY_TABLE_6 = BOUY_TABLE_PATH / "Bouy_15_Table_6.fits"
+BOUY_GOOD_MEMBERS = BOUY_TABLE_PATH / "Bouy_good_members.fits"
+
+M67_PATH = CLUSTER_PATH / "M67"
+M67_TABLE = M67_PATH / "m67ensemblecal.pmem.dat"
+M67_TWOMASS = M67_PATH / "2mass_photometry.ipac"
+M67_EPIC = M67_PATH / "M67_WOCS_EPIC_match.txt"
+
+MCQUILLAN_CATALOG = HEAD_DIR / "McQuillan.fit"
+KEPLER_GALEX_BEST = HEAD_DIR / "KGGoldStandard.csv.gz"

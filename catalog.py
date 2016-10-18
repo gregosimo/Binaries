@@ -16,6 +16,7 @@ import requests
 
 import astropy_util as au
 import hrplots as hr
+import binarycalcs as bc
 
 WORKPATH = "/home/regulus/simonian/Binaries"
 
@@ -62,7 +63,48 @@ def create_joined_APOKASC_McQuillan_catalog(
     combocat = au.join_by_id(apocat, mcquillancat, "KEPLER_INT", "KIC")
     return combocat
 
+def visit_table(obj_ids, loc_ids):
+    '''Gets a table with all observations.
 
+    This function will look up all of the observations which were taken by a
+    list of given 2MASS IDs (obj_ids) and location IDs. As a result, obj_ids and
+    loc_ids should be the same length. It will return a table with the obj_id,
+    MJD, and V_LSR of each observation.'''
+    # This will hold a table for each obj_id/loc_id.
+    observation_table_list = []
+
+    for obj_id, loc_id in zip(obj_ids, loc_ids):
+        visit_table = get_APOGEE_visit_info(obj_id, loc_id)
+        observation_table_list.append(visit_table)
+
+    fulltable = vstack(observation_table_list)
+    return fulltable
+
+def calc_NOBS(object_table, visit_table, obs_col="NOBS"):
+    '''Add a NOBS column to the object table using the visit table.
+
+    This function is used to attach an NOBS column to the object table. NOBS is
+    a useful quantity which may be included in future versions of APOKASC, but
+    currently is not. Visit_table should be the outut of the visit_table
+    function with the obj_id column from the object table.
+    '''
+    nobs = NOBS_array(object_table, visit_table)
+    object_table[obs_col] = nobs
+
+def NOBS_array(object_table, visit_table):
+    '''Creates an array that calculates the number of observaions from visits.
+
+    Calculate the number of observations that were given to each object in the
+    object table using the visit history from the visit table.
+    '''
+    ids = object_table["2MASS_ID"]  # ID array used for looking up indices.
+    nobs = np.zeros(object_table["2MASS_ID"].shape) # Holds NOBS
+    visit_groups = visit_table.group_by("2MASS_ID")
+    for object_visits in visit_groups.groups:
+        object_index = np.where(ids == object_visits["2MASS_ID"][0])
+        nobs[object_index] = len(object_visits)
+
+    return nobs
 
 def velocity_evolution(variable, nonvariable):
     '''Automatically generate the velocity evolution of potential binaries.
@@ -108,21 +150,33 @@ def get_APOGEE_visit_info(twomass_id, loc_id):
     aspcap_resp = requests.post(
         SDSS3_URL+"/irSpectrumDetail", data={"apogeeid": twomass_id, "locid":
         loc_id, "commiss": 0, "show_aspcap": True})
-    # Find hyperlinks to individual visits.
-    aspcapsoup = BeautifulSoup(aspcap_resp.content, "html.parser")
-    visit_tags = aspcapsoup.find(
-        string="Visit Spectra").parent.find_all_next(
-            "a", href=re.compile("irSpectrum"))
-    visit_urls = [SDSS3_URL + tag["href"] for tag in visit_tags]
-    # Get MJD and vrel from individual pages.
-    for url in visit_urls:
-        visit_resp = requests.get(url)
-        visitsoup = BeautifulSoup(visit_resp.content, "html.parser")
-        mjds.append(extract_mjd(visitsoup))
-        vrels.append(extract_vrel(visitsoup))
+    # If the page loads successfully, then populate MJD and Vrel. If not, then
+    # return an empty table.
+    if aspcap_resp.status_code < 300:
+        # Find hyperlinks to individual visits.
+        aspcapsoup = BeautifulSoup(aspcap_resp.content, "html.parser")
+        visit_tags = aspcapsoup.find(
+            string="Visit Spectra").parent.find_all_next(
+                "a", href=re.compile("irSpectrum"))
+        visit_urls = [SDSS3_URL + tag["href"] for tag in visit_tags]
+        # Get MJD and vrel from individual pages.
+        for url in visit_urls:
+            visit_resp = requests.get(url)
+            visitsoup = BeautifulSoup(visit_resp.content, "html.parser")
+            visit_mjd = extract_mjd(visitsoup)
+            mjds.append(visit_mjd)
+            try:
+                visit_vrel = extract_vrel(visitsoup)
+            except TypeError:
+                visit_vrel = np.nan
+            vrels.append(visit_vrel)
 
-    # Return table with MJD and vrel.
-    object_table = Table([mjds, vrels], names=("MJD", "V_LSR"))
+    # Return table with 2MASS_ID, MJD and vrel.
+    table_names = ("2MASS_ID", "MJD", "V_LSR")
+    object_table = Table(
+        [[twomass_id]*len(mjds), mjds, vrels], names=table_names,
+        dtype=(np.str, np.int, np.float))
+
     return object_table
 
 def extract_mjd(soup):
@@ -364,6 +418,26 @@ def find_UKIRT_contaminants(
 
     return magdiffs
 
+def select_tidally_synchronized_binaries(table):
+    '''Cuts out the objects that are potentially TSBs.
+
+    This function provides a standardized way to select a sample of Tidally
+    Synchronized Binaries according to the prescription of Jen van Saders. This
+    function may evolve as TSB selection criteria improve; however, for a
+    standard, transparent selection, this will do.
+
+    The current criteria are that TSBs have orbital periods of around 3 days,
+    and effective temperatures between 5700 and 4600 K.
+    '''
+    period_cut = perform_period_cut(table, highperiod=3, periodcol="Prot")
+    try:
+        temp_cut = perform_teff_cut(period_cut, 4600, 5700, "TEFF_FIT")
+    except KeyError:
+        temp_cut = perform_teff_cut(period_cut, 4600, 5700, "Teff")
+
+    return temp_cut
+
+
 def progress_plot():
     '''Plots the various subclasses of objects so that they can be easily
     figured out.
@@ -408,12 +482,78 @@ def progress_plot():
     hr.logg_teff_plot(no_pulsators["TEFF_FIT"], no_pulsators["LOGG_FIT"],
                       style="bD", ms=6, label="Candidates")
 
+def EB_plot(eb_periods, eb_vs, eb_flags):
+    """Plots the eclipsing binary period vs velocity.
+
+    This function plots the period as determined from Kepler light curves vs
+    the vscatter calculated from APOGEE. In general, sin i ~ 1 for this case. 
+    This plot functions to note whether VSCATTER is a useful determinant of
+    whether an object is a tidally-synchronized binary.
+
+    VSCATTER by itself is generally not a good measure. However, I would now
+    like to see whether VMAX = VSCATTER * NOBS would be.
+    """
+    bad_indices = bad_ASPCAP_indices(eb_flags)
+    good_indices = np.logical_not(bad_indices)
+
+    # Plot the data.
+    plt.plot(eb_periods[bad_indices], eb_vs[bad_indices], 'ro')
+    plt.plot(eb_periods[good_indices], eb_vs[good_indices], 'ko')
+
+    # Plot the lines.
+    periodrange = np.linspace(0.01, 12, 100) * u.day
+    standard_vel = bc.calc_velocity_of_binary(1*u.solMass, periodrange, 0.5)
+    highmass_vel = bc.calc_velocity_of_binary(2*u.solMass, periodrange, 0.5)
+    lowmass_vel = bc.calc_velocity_of_binary(0.5*u.solMass, periodrange, 0.5)
+    highratio_vel = bc.calc_velocity_of_binary(1*u.solMass, periodrange, 1.0)
+    lowratio_vel = bc.calc_velocity_of_binary(1*u.solMass, periodrange, 0.1)
+    plt.plot(
+        periodrange.to(u.day).value, standard_vel.to(u.km/u.s).value, 'k--',
+        label="M=1, q=0.5")
+    plt.plot(
+        periodrange.to(u.day).value, highmass_vel.to(u.km/u.s).value, 'k--')
+    plt.plot(
+        periodrange.to(u.day).value, lowmass_vel.to(u.km/u.s).value, 'k--')
+    plt.plot(
+        periodrange.to(u.day).value, lowratio_vel.to(u.km/u.s).value, 'b--',
+        label="M=1, q=0.1")
+    plt.plot(
+        periodrange.to(u.day).value, highratio_vel.to(u.km/u.s).value, 'r--',
+        label="M=1, q=1.0")
+
+    plt.xlabel("Period (day)")
+    plt.ylabel("VMAX (km/s)")
+
+    plt.xlim(0, 12)
+
+def radial_velocity_tides_contour(combined_mass, tidal_limit=5*u.day):
+    '''Contour of RVs for given mass ratio and period.
+
+    A combined mass has to be given as an astropy mass unit. After that, a
+    contour plot will be made indicating the radial velocities corresponding to
+    each pair of mass ratio and period.
+    '''
+    periodrange = np.linspace(0.01, 15, 100)*u.day
+    ratiorange = np.linspace(0.01, 1, 100)
+
+    velocities = bc.calc_velocity_of_binary(
+        combined_mass, periodrange, ratiorange[:,np.newaxis])
+
+    plt.figure()
+    contourlevels = [1, 5, 10, 25, 50, 75, 100, 200]
+    CS = plt.contour(periodrange.to(u.day).value, ratiorange,
+                     velocities.to(u.km/u.s).value, levels=contourlevels,
+                     colors="k")
+    plt.clabel(CS, inline=1, fontsize=10)
+    plt.xlabel("Period (day)")
+    plt.ylabel("Mass ratio")
+    plt.title("Velocities for combined mass of {0}".format(combined_mass))
+
 def read_villanova_EBs(
     EBpath="/home/regulus/simonian/Binaries/Villanova_EB_v3.txt"):
     '''Reads in the Villanova Keler EB catalog.'''
     ebcat = Table.read(EBpath, format="ascii.commented_header",
                        header_start=-1)
-    del(ebcat["coll11"])
     return ebcat
 
 def filter_bad_ASPCAP_fits(apogee_table, warn=False):
@@ -423,12 +563,22 @@ def filter_bad_ASPCAP_fits(apogee_table, warn=False):
     keyword is also specified, it will also remove the STAR_WARN flag.
     '''
     flags = apogee_table["ASPCAPFLAGS"]
-    good_indices = npstr.find(flags, "STAR_BAD") == -1
-    if warn:
-        good_indices = np.logical_and(good_indices, npstr.find(
-            flags, "STAR_WARN") == -1)
+    good_indices = np.logical_not(bad_ASPCAP_indices(flags, warn))
     newtable = apogee_table[good_indices]
     add_cut_metadata(newtable, "ASPCAP STAR_BAD removed")
     if warn:
         add_cut_metadata(newtable, "ASPCAP STAR_WARN removed")
     return newtable
+
+def bad_ASPCAP_indices(aspcapflags, warn=False):
+    '''Picks bad ASPCAP flags from flag array.
+
+    Bad ASPCAP flags are defined as those with STAR_BAD in them. If the warn
+    keyword is given, STAR_WARN flags are also marked as bad.
+    '''
+    bad_indices = npstr.find(aspcapflags, "STAR_BAD") > 0
+    if warn:
+        bad_indices = np.logical_and(bad_indices, npstr.find(
+            aspcapflags, "STAR_WARN") > 0)
+
+    return bad_indices

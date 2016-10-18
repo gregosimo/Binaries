@@ -4,15 +4,20 @@ import subprocess
 import tempfile
 import shutil
 import itertools
+import pickle
+import collections
 
 import numpy as np
 import numpy.core.defchararray as npstr
 from scipy.interpolate import interp1d
+from scipy.optimize import minimize
+from scipy.stats import chi2, norm, multivariate_normal
 from astropy.table import Table
 from pathlib import Path
 import matplotlib.pyplot as plt
 
 import path_config as paths
+import catalog
 
 DESP_PATH = "/home/regulus/simonian/DSep/"
 
@@ -329,7 +334,7 @@ def Casagrande_Bolometric_Flux(
 # Internal DSEP Routines #
 ##########################
 
-def dsep_isochrone_interpolator(
+def DSEP_isochrone_interpolator(
     feh, output, bands=1, y=1, alpha=2, 
     executable=paths.DSEP_INTERPOLATOR_EXECUTABLE,
     isochrones=paths.DSEP_ISOCHRONES):
@@ -346,7 +351,7 @@ def dsep_isochrone_interpolator(
                str(output)]
     subprocess.run(command, cwd=str(isochrones.parent), check=True)
 
-def dsep_age_splitter(inputfile, outputdir,
+def DSEP_age_splitter(inputfile, outputdir,
                       executable=paths.DSEP_SPLITTER_EXECUTABLE):
     '''Calls the isochrone splitter.
 
@@ -385,15 +390,15 @@ def dsep_age_splitter(inputfile, outputdir,
 # Maybe add something to automatically download isochrones. But I don't think
 # it's particularly important now.
 
-def assign_dsep_sign(val):
+def assign_DSEP_sign(val):
     '''Returns p if val is positive and n if val is negative.
 
     If val is zero, then it will return p anyway.
     '''
     return sign_switch(val, "p", "m", 1)
 
-def format_dsep_isochrone_filename(feh, afe, Y, bands):
-    '''Creates a filename which follows the dsep format.
+def format_DSEP_isochrone_filename(feh, afe, Y, bands):
+    '''Creates a filename which follows the DSEP format.
 
     This format is feh(p|m)??afe(p|m)?[y??].{bands}. Where the two digits after
     feh are the metallicity, with p for positive and m for negative
@@ -404,8 +409,8 @@ def format_dsep_isochrone_filename(feh, afe, Y, bands):
     The bands is basically a suffix which contains every band that is contained
     in the isochrone. For example, one isochrone contains UBVRIJHKsKp.'''
     afe_val = 0.2 * (afe - 2)
-    feh_sign = assign_dsep_sign(feh)
-    afe_sign = assign_dsep_sign(afe_val)
+    feh_sign = assign_DSEP_sign(feh)
+    afe_sign = assign_DSEP_sign(afe_val)
 
     if Y == 1:
         ystring = ""
@@ -437,7 +442,7 @@ def format_dsep_isochrone_filename(feh, afe, Y, bands):
 
     return filename_template
 
-def format_dsep_age_isochrone_filename(age, feh, afe, y, bands):
+def format_DSEP_age_isochrone_filename(age, feh, afe, y, bands):
     '''Formats the filename of a post-split age file.
 
     This format is a?????feh(p|m)??afe(p|m)?[y??].{bands}. The 5 digits after a
@@ -452,7 +457,7 @@ def format_dsep_age_isochrone_filename(age, feh, afe, y, bands):
     in the isochrone. For example, one isochrone contains UBVRIJHKsKp.'''
 
     age_prefix = "a{0:05d}".format(int(age*1000))
-    return age_prefix + format_dsep_isochrone_filename(feh, afe, y, bands)
+    return age_prefix + format_DSEP_isochrone_filename(feh, afe, y, bands)
 
 def interpolate_split_multi_isochrones(
     fehs, outputdir, bands=1, Y=1, afe=2, isochrones=paths.DSEP_ISOCHRONES,
@@ -502,15 +507,15 @@ def interpolated_split_isochrone(
     '''
     with tempfile.TemporaryDirectory() as tempdir_object:
         tempdir = Path(tempdir_object)
-        isochrone_output = tempdir / format_dsep_isochrone_filename(
+        isochrone_output = tempdir / format_DSEP_isochrone_filename(
             feh, afe, Y, bands)
-        dsep_isochrone_interpolator(feh, isochrone_output, bands, Y, 
+        DSEP_isochrone_interpolator(feh, isochrone_output, bands, Y, 
                                     afe, interp_exec, isochrones)
-        dsep_age_splitter(isochrone_output, outputdir,
+        DSEP_age_splitter(isochrone_output, outputdir,
                           executable=split_exec)
 
-def read_dsep_age_table(tablepath):
-    '''Reads the post-split dsep table.
+def read_DSEP_age_table(tablepath):
+    '''Reads the post-split DSEP table.
 
     The table should be one which has been split from the monolithic isochrone
     file, and thus should contain only one age.
@@ -519,7 +524,7 @@ def read_dsep_age_table(tablepath):
                            header_start=-1)
     return age_table
 
-def read_dsep_isochrone(
+def read_DSEP_isochrone(
     feh, age, bands=1, Y=1, afe=2, tabledir=paths.DSEP_OUTPUT,
     isochrones=paths.DSEP_ISOCHRONES,
     interp_exec=paths.DSEP_INTERPOLATOR_EXECUTABLE,
@@ -530,80 +535,681 @@ def read_dsep_isochrone(
     table is not found, then the isochrone will be generated automatically from
     the grid if possible.
     '''
-    tablepath = (tabledir / format_dsep_age_isochrone_filename(
+    tablepath = (tabledir / format_DSEP_age_isochrone_filename(
         age, feh, afe, Y, bands))
     try:
-        age_table = read_dsep_age_table(tablepath)
+        age_table = read_DSEP_age_table(tablepath)
     except FileNotFoundError:
         interpolated_split_isochrone(
             feh, outputdir=tabledir, bands=bands, Y=Y, afe=afe, 
             isochrones=isochrones, interp_exec=interp_exec, 
             split_exec=split_exec)
-        age_table = read_dsep_age_table(tablepath)
+        age_table = read_DSEP_age_table(tablepath)
 
     return age_table
 
 # DSEP Interpolation Routines #
 ###############################
 
-def dsep_interpolation(fromcol, tocol, age=1.5, metallicity=0.0, bands=1, Y=1,
-                       afe=2):
+def DSEP_interpolation(fromcol, tocol, age=1.5, metallicity=0.0, bands=1, Y=1,
+                       afe=2, lowT=3000):
     '''Return an interpolator between two DSEP isochrone quantities.
 
     This will return a function which, given a value of fromcol which is
     covered by the DSEP isochrone, will interpolate a value of tocol. This
     interpolation uses a grid of the given age and metallicity.
     '''
-    isochrone = read_dsep_isochrone(metallicity, age, bands=bands, Y=Y, afe=afe)
+    isochrone = read_DSEP_isochrone(metallicity, age, bands=bands, Y=Y, afe=afe)
 
-    interpolator = interp1d(isochrone[fromcol], isochrone[tocol], kind="linear")
+    interp_isochrone = restrict_interpolation_table(
+        isochrone, highT=6000, lowT=lowT, minlogG=4.1)
+
+    interpolator = interp1d(interp_isochrone[fromcol], interp_isochrone[tocol], 
+                            kind="linear")
+
+    wrapped_interpolator = out_of_bounds_wrapper(
+        interpolator, fromcol, interp_isochrone[fromcol][0],
+        interp_isochrone[fromcol][-1])
+
+    return wrapped_interpolator
+
+def out_of_bounds_wrapper(interpolator, colname, bound1, bound2):
+    '''Wraps the interpolator in a wrapper that raises an OutofBoundsError.
+
+    For cases where the input to the interpolator extends past the
+    interpolation bounds, this funtion will cause the interpolator to raise an
+    OutofBoundsError instead of a ValueError. This makes them easier to debug.
+    '''
+    minbound = min((bound1, bound2))
+    maxbound = max((bound1, bound2))
 
     def exception_wrapper(x):
         try:
             return interpolator(x)
         except ValueError:
-            raise OutOfBoundsError
+            raise OutOfBoundsError(
+                "{0} is out of the range of {1:.2f}-{2:.2f}.".format(
+                    colname, minbound, maxbound))
+
+    exception_wrapper.__dict__ = interpolator.__dict__
 
     return exception_wrapper
 
+
+def restrict_interpolation_table(
+    isochrone, highT=6000, lowT=3000, minlogG=4.1):
+    '''Remove isochrone models which lie outside of cuts.
+
+    These restrictions are largely to make all the color relations
+    well-behaved. At too low stellar temps, the relations can be double-valued.
+    At too high stellar temps, we can get stars turning off the MS.
+    '''
+    if lowT is not None:
+        lowT = np.log10(lowT)
+
+    if highT is not None:
+        highT = np.log10(highT)
+    tempcut = catalog.perform_teff_cut(
+        isochrone, lowtemp=lowT, hightemp=highT, teffcol="LogTeff")
+    loggcut = perform_logg_cut(tempcut, lowlogg=minlogG)
+    restricted_table = loggcut
+    return restricted_table
+
+def perform_logg_cut(tbl, highlogg=None, lowlogg=None, loggcol="LogG"):
+    '''Perform a cut on log g for a table sample.
+
+    Used to restrict the range of log g for a sample.'''
+    return catalog.perform_cut(tbl, loggcol, lowlogg, highlogg)
+
+# This is a list that I decided to use in order to persistently store
+# what the single-valued colors are when going from color to mass.
+single_valued_colors_path = paths.HEAD_DIR / "single_valued_colors.pickle"
+try:
+    with open(str(single_valued_colors_path), 'rb') as svf:
+        single_valued_colors = pickle.load(svf)
+except FileNotFoundError:
+    single_valued_colors = []
+
+# Like single valued colors except this will be a dictionary that holds where
+# the colors branch off.
+multi_valued_colors_path = paths.HEAD_DIR / "multi_valued_colors.pickle"
+try:
+    with open(str(multi_valued_colors_path), 'rb') as svf:
+        multi_valued_colors = pickle.load(svf)
+except FileNotFoundError:
+    multi_valued_colors = collections.defaultdict(list)
+
+# Interpolators to and from magnitudes and colors #
+
+# Interpolators to deal with double-valued colors. 
+def color_to_mass_DSEP_interpolator(
+    color, DSEP_lookup, mass_order="descending", init_mass=0.0, age=1.5, 
+    metallicity=0.0, Y=1, afe=2, bound_error=True, lowT=3000, redden_EBV=0.0):
+    '''Return function to interpolate mass given a color.
+
+    This function will return an interpolator which will map colors to masses.
+    Since this relation can be double-valued, special care needs to be taken in
+    order to ensure the interpolator works correctly. Before this function can
+    return a relation from color, it must know whether it is single-valued or
+    not. This is done through the populate_double_valued_colors() function. 
+    The function is automated, but needs to be manually run whenever an
+    interpolator with different stellar parameters is needed. There may be an
+    automated way of doing this in the future. Once that has been run, there
+    are several ways the interpolator can be constructed:
+
+    If the relation is single-valued, then the interpolator is constructed
+    straightforwardly as a function.
+
+    If the relation is double-valued, then the behavior of this function
+    depends on the parameters given.
+
+    If init_mass is given, then the branch of the double-valued function which
+    contains the specified mass is used. If not, then the behavior is
+    determined by the mass_order parameter. It will assume that the colors
+    passed to it were from a sequence of models with either an ascending or
+    descending mass, depending on what the passed value is. This mode can't be
+    used for interpolations with only a single point.
+    '''
+    blue, red = split_color(color)
+    packet = pack_color_packet(
+        color, DSEP_lookup[blue], DSEP_lookup[red], age, metallicity, Y,
+        afe)
+    if packet in single_valued_colors:
+        blue, red = split_color(color)
+        blue_DSEP = DSEP_band_converter(blue, DSEP_lookup[blue])
+        red_DSEP = DSEP_band_converter(red, DSEP_lookup[red])
+
+        blue_table = restrict_interpolation_table(read_DSEP_isochrone(
+            metallicity, age, bands=DSEP_lookup[blue], Y=Y,
+            afe=afe), lowT=lowT)
+        red_table = restrict_interpolation_table(read_DSEP_isochrone(
+            metallicity, age, bands=DSEP_lookup[red], Y=Y,
+            afe=afe), lowT=lowT)
+
+        blue_masses = blue_table["M/Mo"]
+        red_masses = red_table["M/Mo"]
+        assert(np.all(blue_masses == red_masses))
+        masses = blue_masses
+        blue_col = blue_table[blue_DSEP]
+        red_col = red_table[red_DSEP]
+        color_val = blue_col - red_col
+
+        reddened_color = redden_color(color, color_val, redden_EBV)
+
+        interpolator = interp1d(reddened_color, masses, kind="linear",
+                                bounds_error=bound_error)
+        color_to_mass = out_of_bounds_wrapper(interpolator, color,
+                                              max(color_val), min(color_val))
+    elif packet in multi_valued_colors:
+        if init_mass == 0:
+            color_to_mass = color_to_mass_interpolator_mass_array(
+                color, DSEP_lookup, mass_order=mass_order, age=age,
+                metallicity=metallicity, Y=Y, afe=afe, bound_error=bound_error,
+            redden_EBV=redden_EBV)
+        else:
+            color_to_mass = color_to_mass_interpolator_with_mass(
+                color, DSEP_lookup, init_mass, age=age,
+                metallicity=metallicity, Y=Y, afe=afe, bound_error=bound_error,
+            redden_EBV=redden_EBV)
+    else:
+        raise ValueError("Don't know how to classify this color.")
+
+    return color_to_mass
+
+def color_to_mass_interpolator_mass_array(
+    color, DSEP_lookup, mass_order="descending", age=1.5, metallicity=0.0, 
+    Y=1, afe=2, bound_error=True, lowT=3000, redden_EBV=0.0):
+    '''Recover masses for a sequence of colors generated by an isochrone.
+
+    Return a function which interpolates mass values from colors that is able
+    to distinguish between double-valued  colors. This is possible only if more
+    than one mass is given. It assumes that the array of masses was generated
+    according to mass_order. If the mass_order is descending, that means this
+    function assumes that the colors were generated by models according to
+    descending mass. Hence, it is able to determine which branch of the
+    double-valued color is it on based on whether the colors are ascending or
+    descending.
+    '''
+    blue, red = split_color(color)
+    blue_DSEP = DSEP_band_converter(blue, DSEP_lookup[blue])
+    red_DSEP = DSEP_band_converter(red, DSEP_lookup[red])
+
+    blue_isochrone = restrict_interpolation_table(read_DSEP_isochrone(
+        metallicity, age, bands=DSEP_lookup[blue], Y=Y, afe=afe), lowT=3000)
+    masses = blue_isochrone["M/Mo"]
+    bluevalues = blue_isochrone[blue_DSEP]
+    # If they come from the same set of bands, then pick the red band from the
+    # blue isochrone. Otherwise, read in the correct isochrone corresponding to
+    # the red band.
+    if DSEP_lookup[blue] == DSEP_lookup[red]:
+        redvalues = blue_isochrone[red_DSEP]
+    else:
+        red_isochrone = restrict_interpolation_table(read_DSEP_isochrone(
+            metallicity, age, bands=DSEP_lookup[red], Y=Y, afe=afe), lowT=3000)
+        redvalues = red_isochrone[red_DSEP]
+
+    DSEP_color = bluevalues - redvalues
+    color_packet = pack_color_packet(
+        color, DSEP_lookup[blue], DSEP_lookup[red], age, metallicity, Y, afe)
+
+    # The turnoffs and whether the values are maxima or minima
+    turnoff, local = multi_valued_colors[color_packet]
+
+    DSEP_turnoff_index = np.argmin(np.abs(DSEP_color - turnoff))
+
+    lowmass_branch_masses = masses[:DSEP_turnoff_index+1]
+    lowmass_branch_colors = DSEP_color[:DSEP_turnoff_index+1]
+    highmass_branch_masses = masses[DSEP_turnoff_index:]
+    highmass_branch_colors = DSEP_color[DSEP_turnoff_index:]
+
+    lowmass_reddened_colors = redden_color(
+        color, lowmass_branch_colors, redden_EBV)
+    highmass_reddened_colors = redden_color(
+        color, highmass_branch_colors, redden_EBV)
+
+
+    lowmass_branch_interp = interp1d(
+        lowmass_reddened_colors, lowmass_branch_masses, kind='linear',
+        bounds_error=bound_error)
+    highmass_branch_interp = interp1d(
+        highmass_reddened_colors, highmass_branch_masses, kind="linear",
+        bounds_error=bound_error)
+
+    # Maybe I can tell whether it's a local max or min from the interpolated
+    # values.
+
+    def better_interpolator(colorvals):
+        if colorvals[0] <= colorvals[1]:
+            color_order = "ascending"
+        else:
+            color_order = "descending"
+
+        color_min_index = np.argmin(colorvals)
+        color_max_index = np.argmax(colorvals)
+
+        monotonic = ((color_max_index == len(colorvals)-1 and 
+                      color_min_index == 0) or 
+                     (color_max_index == 0 and 
+                      color_min_index == len(colorvals)-1))
+
+        # If the points are monotonic, then just decide what branch you are on.
+        if monotonic:
+            try:
+                if ((color_order == mass_order and local == "min") or 
+                        (color_order != mass_order and local == "max")):
+                    masses = highmass_branch_interp(colorvals)
+                else:
+                    masses = lowmass_branch_interp(colorvals)
+            except ValueError:
+                raise OutOfBoundsError(
+                    "{0} values are not in the range {1:.2f}-{2:.2f}".format(
+                        color, DSEP_color[0], DSEP_color[-1]))
+        else:
+            if local == "min":
+                color_turnoff_index = color_min_index
+            else:
+                color_turnoff_index = color_max_index
+
+            if mass_order == "descending":
+                highmass_colors = colorvals[:color_turnoff_index]
+                lowmass_colors = colorvals[color_turnoff_index:]
+            else:
+                lowmass_colors = colorvals[:color_turnoff_index]
+                highmass_colors = colorvals[color_turnoff_index:]
+            
+            try:
+                lowmass_masses = lowmass_branch_interp(lowmass_colors)
+                highmass_masses = highmass_branch_interp(highmass_colors)
+            except ValueError:
+                raise OutOfBoundsError(
+                    "{0} values are not in the range {1:.2f}-{2:.2f}".format(
+                        color, DSEP_color[0], DSEP_color[-1]))
+            
+            if mass_order == "descending":
+                mass_array_order = (highmass_masses, lowmass_masses)
+            else:
+                mass_array_order = (lowmass_masses, highmass_masses)
+
+            masses = np.concatenate(mass_array_order)
+
+        return masses
+
+    return better_interpolator
+
+def color_to_mass_interpolator_with_mass(
+    color, DSEP_lookup, initmass, age=1.5, metallicity=0.0, Y=1, afe=2,
+    bound_error=True, lowT=3000, redden_EBV=0.0):
+    '''Convert color to mass assuming mass is around given initmass.
+
+    This function will essentially assume that the mass values given are around
+    initmass. So it will only use the branch corresponding to initmass. 
+    '''
+    blue, red = split_color(color)
+    blue_DSEP = DSEP_band_converter(blue, DSEP_lookup[blue])
+    red_DSEP = DSEP_band_converter(red, DSEP_lookup[red])
+
+    blue_isochrone = restrict_interpolation_table(read_DSEP_isochrone(
+        metallicity, age, bands=DSEP_lookup[blue], Y=Y, afe=afe), lowT=lowT)
+    masses = blue_isochrone["M/Mo"]
+    bluevalues = blue_isochrone[blue_DSEP]
+    # If they come from the same set of bands, then pick the red band from the
+    # blue isochrone. Otherwise, read in the correct isochrone corresponding to
+    # the red band.
+    if DSEP_lookup[blue] == DSEP_lookup[red]:
+        redvalues = blue_isochrone[red_DSEP]
+    else:
+        red_isochrone = restrict_interpolation_table(read_DSEP_isochrone(
+            metallicity, age, bands=DSEP_lookup[red], Y=Y, afe=afe), lowT=lowT)
+        redvalues = red_isochrone[red_DSEP]
+
+    DSEP_color = bluevalues - redvalues
+    color_packet = pack_color_packet(
+        color, DSEP_lookup[blue], DSEP_lookup[red], age, metallicity, Y, afe)
+
+    # The turnoffs and whether the values are maxima or minima
+    turnoff, local = multi_valued_colors[color_packet]
+
+    DSEP_turnoff_index = np.argmin(np.abs(DSEP_color - turnoff))
+
+    lowmass_branch_masses = masses[:DSEP_turnoff_index+1]
+    lowmass_branch_colors = DSEP_color[:DSEP_turnoff_index+1]
+    highmass_branch_masses = masses[DSEP_turnoff_index:]
+    highmass_branch_colors = DSEP_color[DSEP_turnoff_index:]
+
+    lowmass_reddened_colors = redden_color(
+        color, lowmass_branch_colors, redden_EBV)
+    highmass_reddened_colors = redden_color(
+        color, highmass_branch_colors, redden_EBV)
+
+    if initmass < lowmass_branch_masses[-1]:
+        masses, colors = lowmass_branch_masses, lowmass_reddened_colors
+    else:
+        masses, colors = highmass_branch_masses, highmass_reddened_colors
+
+    interper = interp1d(
+        colors, masses, kind="linear", bounds_error=bound_error)
+
+    wrapped_interpolator = out_of_bounds_wrapper(
+        interper, color, colors[0], colors[-1])
+
+    return wrapped_interpolator
+            
+def test_color_to_mass_interpolator(
+    color, DSEP_lookup, init_mass=0.0, mass_order="descending", age=1.0,
+    metallicity=0.0, Y=1, afe=2, lowT=3000):
+    '''Test the performance of the interpolator compared to the actual
+    isochrone for a specific color'''
+    blue, red = split_color(color)
+    blue_DSEP = DSEP_band_converter(blue, DSEP_lookup[blue])
+    red_DSEP = DSEP_band_converter(red, DSEP_lookup[red])
+
+    blue_isochrone = read_DSEP_isochrone(
+        metallicity, age, bands=DSEP_lookup[blue], Y=Y,
+        afe=afe)
+    red_isochrone = read_DSEP_isochrone(
+        metallicity, age, bands=DSEP_lookup[red], Y=Y,
+        afe=afe)
+
+    blue_restricted = restrict_interpolation_table(blue_isochrone, lowT=lowT)
+    red_restricted = restrict_interpolation_table(red_isochrone, lowT=lowT)
+
+    blue_col = blue_restricted[blue_DSEP]
+    red_col = red_restricted[red_DSEP]
+    blue_mass_col = blue_restricted["M/Mo"]
+    red_mass_col = red_restricted["M/Mo"]
+
+    assert(np.all(blue_mass_col == red_mass_col))
+
+    color_DSEP = blue_col - red_col
+
+    interpolator = color_to_mass_DSEP_interpolator(
+        color, DSEP_lookup, init_mass=init_mass,
+        mass_order=mass_order, age=age, metallicity=metallicity, Y=Y, afe=afe)
+    interpolated_color = np.linspace(
+        min(color_DSEP), max(color_DSEP), 100)
+    interpolated_masses= interpolator(interpolated_color)
+
+    plt.plot(color_DSEP, blue_mass_col, 'r*')
+    plt.plot(interpolated_color, interpolated_masses, 'k-')
+
+def populate_double_valued_colors(
+    bands, DSEP_lookup, age=1.5, metallicity=0.0, Y=1, afe=2):
+    '''Populates single and double-valued colors.
+
+    Uses an automatic algorithm to go through the bands and insert them into
+    the single- and multi-valued color arrays.'''  
+    for color in iterate_colors(bands):
+        blue, red = split_color(color)
+        color_packet = pack_color_packet(
+            color, DSEP_lookup[blue], DSEP_lookup[red], age, metallicity, Y, 
+            afe)
+        if (color_packet not in single_valued_colors and 
+                color_packet not in multi_valued_colors):
+            double_params = check_if_double_valued(
+                color, DSEP_lookup, age=age, metallicity=metallicity, Y=Y, 
+                afe=afe)
+            if double_params:
+                multi_valued_colors[color_packet] = double_params
+            else: 
+                single_valued_colors.append(color_packet)
+
+    with open(str(single_valued_colors_path), "wb") as svf:
+        pickle.dump(single_valued_colors, svf)
+    with open(str(multi_valued_colors_path), "wb") as mvf:
+        pickle.dump(multi_valued_colors, mvf)
+    
+
+
+
+def check_if_double_valued(
+    color, DSEP_lookup, age=1.5, metallicity=1.0, Y=1, afe=2, lowT=3000):
+    '''Performs a primitive check to see if the color is double-valued.
+
+    This function essentailly checks whether the DSEP models predict that the
+    color should be double-valued. It does this by checking whether the
+    maximum value is at the endpoints, in which case the color is
+    single-valued. If there are multiple overlaps, then this function will
+    fail.
+    '''
+    blue, red = split_color(color)
+    blue_DSEP = DSEP_band_converter(blue, DSEP_lookup[blue])
+    red_DSEP = DSEP_band_converter(red, DSEP_lookup[red])
+
+    blue_isochrone = restrict_interpolation_table(read_DSEP_isochrone(
+        metallicity, age, bands=DSEP_lookup[blue], Y=Y, afe=afe), lowT=lowT)
+    masses = blue_isochrone["M/Mo"]
+    bluevalues = blue_isochrone[blue_DSEP]
+    # If they come from the same set of bands, then pick the red band from the
+    # blue isochrone. Otherwise, read in the correct isochrone corresponding to
+    # the red band.
+    if DSEP_lookup[blue] == DSEP_lookup[red]:
+        redvalues = blue_isochrone[red_DSEP]
+    else:
+        red_isochrone = restrict_interpolation_table(read_DSEP_isochrone(
+            metallicity, age, bands=DSEP_lookup[red], Y=Y, afe=afe), lowT=lowT)
+        redvalues = red_isochrone[red_DSEP]
+
+    DSEP_color = bluevalues - redvalues
+    max_index = np.argmax(DSEP_color)
+    min_index = np.argmin(DSEP_color)
+
+    maximum_present = not (max_index == 0 or max_index == len(DSEP_color)-1)
+    minimum_present = not (min_index == 0 or min_index == len(DSEP_color)-1)
+    if maximum_present and minimum_present:
+        raise ValueError("Color {0} is too complicated to "
+                         "interpolate".format(color))
+    elif maximum_present and not minimum_present:
+        return (DSEP_color[max_index], "max")
+    elif not maximum_present and minimum_present:
+        return (DSEP_color[min_index], "min")
+    else:
+        return False
+
+def test_multi_valued_colors(
+    bands, DSEP_lookup, age=1.5, metallicity=0.0, Y=1, afe=2, lowT=3000):
+    '''Check whether colors are correctly predicted as double-valued.
+
+    Take a bunch of bands and iterate through combinations of them to run the
+    double-value checker, as well as plot them for verification by eye.
+    '''
+    for color in iterate_colors(bands):
+        blue, red = split_color(color)
+        blue_DSEP = DSEP_band_converter(blue, DSEP_lookup[blue])
+        red_DSEP = DSEP_band_converter(red, DSEP_lookup[red])
+
+        blue_isochrone = restrict_interpolation_table(read_DSEP_isochrone(
+            metallicity, age, bands=DSEP_lookup[blue], Y=Y, afe=afe), lowT=lowT)
+        masses = blue_isochrone["M/Mo"]
+        bluevalues = blue_isochrone[blue_DSEP]
+        # If they come from the same set of bands, then pick the red band from the
+        # blue isochrone. Otherwise, read in the correct isochrone corresponding to
+        # the red band.
+        if DSEP_lookup[blue] == DSEP_lookup[red]:
+            redvalues = blue_isochrone[red_DSEP]
+        else:
+            red_isochrone = restrict_interpolation_table(read_DSEP_isochrone(
+                metallicity, age, bands=DSEP_lookup[red], Y=Y, afe=afe), 
+                lowT=lowT)
+            redvalues = red_isochrone[red_DSEP]
+
+        DSEP_color = bluevalues - redvalues
+        double_valued = check_if_double_valued(
+            color, DSEP_lookup, age=age, metallicity=metallicity, Y=Y, afe=afe)
+
+        plt.plot(masses, DSEP_color, 'r*')
+        plt.xlabel("Mass")
+        plt.ylabel(color)
+        input("Double_valued: {0}".format(str(double_valued)))
+        plt.close()
+        
+def pack_color_packet(color, blueband, redband, age, metallicity, Y, afe):
+    '''Packs quantities needed to make a color packet.'''
+    return (color, blueband, redband, age, metallicity, Y, afe)
+
+def prompt_unknown_color(
+    color_packet, DSEP_color, masses, kind="linear"):
+    '''Indicate whether a color is single or double-valued.
+
+    Has the user input where the color becomes double-valued. The function then
+    saves it so that the location will be known for this particular color
+    combination.
+    '''
+    prompt = "It's not known if this color is single or double-valued."
+    print(prompt)
+    plt.plot(masses, DSEP_color, 'r*')
+    prompt = "Please indicate whether this color is single-valued [Y/N]: "
+    single_valued = input(prompt)
+    if single_valued.startswith("Y") or single_valued.startswith("y"):
+        single_valued_colors.append(color_packet)
+        with open(str(single_valued_colors_path), 'wb') as svf:
+            pickle.dump(single_valued_colors, svf)
+    elif single_valued.startswith("N") or single_valued.startswith("n"):
+        prompt = ("Please input the highest-mass color where there is a "
+            "turnoff: ")
+        while True:
+            stringvalue = input(prompt)
+            if stringvalue == "" or stringvalue == "q" or stringvalue == "Q":
+                break
+            else:
+                try:
+                    value = float(stringvalue)
+                except ValueError:
+                    print("Entered value was not a valid number.")
+            while True:
+                prompt = "Is the peak a minimum or maximum? [min/max]"
+                stringvalue = input(prompt)
+            multi_valued_colors[color_packet].append(value)
+            with open(str(multi_valued_colors_path), "wb") as mvf:
+                pickle.dump(multi_valued_colors, mvf)
+            prompt = ("If that's the last turnoff, just press return. If there "
+                      " are more, then enter another: ")
+    print("All done!")
+
+
+
 def color_to_color_DSEP_interpolator(
-    fromcolor, tocolor, DSEP_lookup, age=1.5, metallicity=0.0, Y=1, afe=2):
+    fromcolor, tocolor, DSEP_lookup, init_mass=0, mass_order="descending", 
+    age=1.5, metallicity=0.0, Y=1, afe=2, bound_error=True, lowT=3000,
+    redden_EBV=0.0):
     '''Return function to interpolate between colors in DSEP.
 
     Return a function which, given a color that can be calculated from the DSEP
     isochrone, will interpolate to another color. This interpolation uses a
-    grid of the given age and metallicity.'''
-    fromblue, fromred = split_color(fromcolor)
-    fromblue_DSEP = DSEP_band_converter(fromblue, DSEP_lookup[fromblue])
-    fromred_DSEP = DSEP_band_converter(fromred, DSEP_lookup[fromred])
+    grid of the given age and metallicity.
+    
+    If the interpolator should silently mask the objects are outside with
+    colors outside of the isochrone bounds, then bound_error should be set to
+    False.'''
+    blue, red = split_color(fromcolor)
+    frompacket = pack_color_packet(
+        fromcolor, DSEP_lookup[blue], DSEP_lookup[red], age, metallicity, Y,
+        afe)
+    if frompacket in single_valued_colors:
+        fromblue, fromred = split_color(fromcolor)
+        fromblue_DSEP = DSEP_band_converter(fromblue, DSEP_lookup[fromblue])
+        fromred_DSEP = DSEP_band_converter(fromred, DSEP_lookup[fromred])
 
-    toblue, tored = split_color(tocolor)
-    toblue_DSEP = DSEP_band_converter(toblue, DSEP_lookup[toblue])
-    tored_DSEP = DSEP_band_converter(tored, DSEP_lookup[tored])
+        toblue, tored = split_color(tocolor)
+        toblue_DSEP = DSEP_band_converter(toblue, DSEP_lookup[toblue])
+        tored_DSEP = DSEP_band_converter(tored, DSEP_lookup[tored])
 
-    fromblue_col = read_dsep_isochrone(
-        metallicity, age, bands=DSEP_lookup[fromblue], Y=Y,
-        afe=afe)[fromblue_DSEP]
-    fromred_col = read_dsep_isochrone(
-        metallicity, age, bands=DSEP_lookup[fromred], Y=Y,
-        afe=afe)[fromred_DSEP]
-    toblue_col = read_dsep_isochrone(
-        metallicity, age, bands=DSEP_lookup[toblue], Y=Y, afe=afe)[toblue_DSEP]
-    tored_col = read_dsep_isochrone(
-        metallicity, age, bands=DSEP_lookup[tored], Y=Y, afe=afe)[tored_DSEP]
+        fromblue_col = restrict_interpolation_table(read_DSEP_isochrone(
+            metallicity, age, bands=DSEP_lookup[fromblue], Y=Y,
+            afe=afe), lowT=lowT)[fromblue_DSEP]
+        fromred_col = restrict_interpolation_table(read_DSEP_isochrone(
+            metallicity, age, bands=DSEP_lookup[fromred], Y=Y,
+            afe=afe), lowT=lowT)[fromred_DSEP]
+        toblue_col = restrict_interpolation_table(read_DSEP_isochrone(
+            metallicity, age, bands=DSEP_lookup[toblue], Y=Y, 
+            afe=afe), lowT=lowT)[toblue_DSEP]
+        tored_col = restrict_interpolation_table(read_DSEP_isochrone(
+            metallicity, age, bands=DSEP_lookup[tored], Y=Y, 
+            afe=afe), lowT=lowT)[tored_DSEP]
 
-    fromcolor_val = fromblue_col - fromred_col
-    tocolor_val = toblue_col - tored_col
+        fromcolor_val = fromblue_col - fromred_col
+        tocolor_val = toblue_col - tored_col
 
-    interpolator = interp1d(fromcolor_val, tocolor_val, kind="linear")
+        reddened_fromcolor = redden_color(fromcolor, fromcolor_val, redden_EBV)
+        reddened_tocolor = redden_color(tocolor, tocolor_val, redden_EBV)
 
-    def exception_wrapper(x):
-        try:
-            return interpolator(x)
-        except ValueError:
-            raise OutOfBoundsError
+        interpolator = interp1d(reddened_fromcolor, reddened_tocolor, 
+                                kind="linear", bounds_error=bound_error)
 
-    return exception_wrapper
+        wrapped_interpolator = out_of_bounds_wrapper(
+            interpolator, fromcolor, fromcolor_val[0], fromcolor_val[-1])
+
+    elif frompacket in multi_valued_colors:
+        mass_to_color = mass_to_color_DSEP_interpolator(
+            tocolor, DSEP_lookup, age=age, metallicity=metallicity, Y=Y,
+            afe=afe)
+        if init_mass == 0:
+            color_to_mass = color_to_mass_interpolator_mass_array(
+                fromcolor, DSEP_lookup, mass_order=mass_order, age=age,
+                metallicity=metallicity, Y=Y, afe=afe, bound_error=bound_error,
+                lowT=lowT)
+        else:
+            color_to_mass = color_to_mass_interpolator_with_mass(
+                fromcolor, DSEP_lookup, init_mass, age=age,
+                metallicity=metallicity, Y=Y, afe=afe, bound_error=bound_error,
+                lowT=lowT)
+        # This is a bitch to debug
+        wrapped_interpolator = (lambda x: mass_to_color(color_to_mass(x)))
+        # Add these so that the endpoints of the interpolator can be known.
+        wrapped_interpolator.x = color_to_mass.x
+        wrapped_interpolator.y = mass_to_color(color_to_mass.y)
+    else:
+        raise ValueError("Don't know how to classify this color.")
+
+
+
+    return wrapped_interpolator
+
+def test_color_to_color_interpolator(
+    ycolor, xcolor, DSEP_lookup, init_mass=0.0, mass_order="descending", 
+    age=1.0, metallicity=0.0, Y=1, afe=2, lowT=3000):
+    '''Test the performance of the interpolator compared to the actual
+    isochrone.'''
+    xblue, xred = split_color(xcolor)
+    xblue_DSEP = DSEP_band_converter(xblue, DSEP_lookup[xblue])
+    xred_DSEP = DSEP_band_converter(xred, DSEP_lookup[xred])
+
+    yblue, yred = split_color(ycolor)
+    yblue_DSEP = DSEP_band_converter(yblue, DSEP_lookup[yblue])
+    yred_DSEP = DSEP_band_converter(yred, DSEP_lookup[yred])
+
+    xblue_isochrone = read_DSEP_isochrone(
+        metallicity, age, bands=DSEP_lookup[xblue], Y=Y,
+        afe=afe)
+    xred_isochrone = read_DSEP_isochrone(
+        metallicity, age, bands=DSEP_lookup[xred], Y=Y,
+        afe=afe)
+    yblue_isochrone = read_DSEP_isochrone(
+        metallicity, age, bands=DSEP_lookup[yblue], Y=Y, afe=afe)
+    yred_isochrone = read_DSEP_isochrone(
+        metallicity, age, bands=DSEP_lookup[yred], Y=Y, afe=afe)
+
+    xblue_restricted = restrict_interpolation_table(xblue_isochrone, lowT=lowT)
+    xred_restricted = restrict_interpolation_table(xred_isochrone, lowT=lowT)
+    yblue_restricted = restrict_interpolation_table(yblue_isochrone, lowT=lowT)
+    yred_restricted = restrict_interpolation_table(yred_isochrone, lowT=lowT)
+
+    xblue_col = xblue_restricted[xblue_DSEP]
+    xred_col = xred_restricted[xred_DSEP]
+    yblue_col = yblue_restricted[yblue_DSEP]
+    yred_col = yred_restricted[yred_DSEP]
+
+    xcolor_DSEP = xblue_col - xred_col
+    ycolor_DSEP = yblue_col - yred_col
+
+    interpolator = color_to_color_DSEP_interpolator(
+        xcolor, ycolor, DSEP_lookup, init_mass=init_mass,
+        mass_order=mass_order, age=age, metallicity=metallicity, Y=Y, afe=afe,
+        lowT=lowT)
+    interpolated_xcolor = np.linspace(min(xcolor_DSEP), max(xcolor_DSEP), 1000)
+    interpolated_ycolor = interpolator(interpolated_xcolor)
+    
+    plt.plot(xcolor_DSEP, ycolor_DSEP, 'r*')
+    plt.plot(interpolated_xcolor, interpolated_ycolor, 'k-')
 
 def convert_to_colors(
     fromcolor, tocolor, fromcolor_val, DSEP_lookup, age=1.0, metallicity=0, 
@@ -617,6 +1223,183 @@ def convert_to_colors(
         afe=afe)
     interpolated_colors = interpolator(fromcolor_val)
     return interpolated_colors
+
+def mass_to_band_DSEP_interpolator(
+    band, age=1.5, metallicity=0.0, bands=1, Y=1, afe=2, lowT=3000,
+    redden_EBV=0.0, D=10):
+    '''Return function to interpolate a magnitude for a given mass.
+
+    This function returns an interpolator to map mass and magnitude in the
+    given band. 
+    '''
+    band = DSEP_band_converter(band, bands)
+    try:
+        interpolator = DSEP_interpolation(
+            "M/Mo", band, age=age, metallicity=metallicity, bands=bands, Y=Y,
+            afe=afe, lowT=lowT)
+    except IndexError:
+        interpolator = DSEP_interpolation(
+            "M/Mo", band[0], age=age, metallicity=metallicity, bands=bands,
+            Y=Y, afe=afe, lowT=lowT)
+
+    # I hope weird bugs don't result from this.
+    interpolator.y = redden_mag(band, interpolator.y, redden_EBV)
+    interpolator.y = interpolator.y + 5 * np.log10(D/10)
+
+    return interpolator
+
+def mass_to_color_DSEP_interpolator(
+    color, DSEP_lookup, age=1.5, metallicity=0.0, Y=1, afe=2,
+    bound_error=True, lowT=3000, redden_EBV=0.0):
+    '''Return function to interpolate color for a given mass.
+
+    This function will return an interpolator which will map mass and color for
+    the given color, for a star of the given age and metallicity.'''
+
+    blue, red = split_color(color)
+    blue_DSEP = DSEP_band_converter(blue, DSEP_lookup[blue])
+    red_DSEP = DSEP_band_converter(red, DSEP_lookup[red])
+
+    blue_table = restrict_interpolation_table(read_DSEP_isochrone(
+        metallicity, age, bands=DSEP_lookup[blue], Y=Y,
+        afe=afe), lowT=lowT)
+    red_table = restrict_interpolation_table(read_DSEP_isochrone(
+        metallicity, age, bands=DSEP_lookup[red], Y=Y,
+        afe=afe), lowT=lowT)
+
+    blue_masses = blue_table["M/Mo"]
+    red_masses = red_table["M/Mo"]
+    assert(np.all(blue_masses == red_masses))
+    masses = blue_masses
+    blue_col = blue_table[blue_DSEP]
+    red_col = red_table[red_DSEP]
+    color_val = blue_col - red_col
+
+    reddened_color = redden_color(color, color_val, redden_EBV)
+
+    interpolator = interp1d(masses, reddened_color, kind="linear",
+                            bounds_error=bound_error)
+    mass_to_color = out_of_bounds_wrapper(
+        interpolator, color, max(reddened_color), min(reddened_color))
+
+    return mass_to_color
+
+def mag_to_color_DSEP_interpolator(
+    mag, color, DSEP_lookup, age=1.5, metallicity=0.0, Y=1, afe=2,
+    bound_error=True, lowT=3000, redden_EBV=0.0, D=10):
+    '''Return a function interpolating from magnitudes to colors.
+
+    This function will return an interpolator which will map the apparent
+    magnitude of a star to its color.'''
+
+    blue, red = split_color(color)
+    blue_DSEP = DSEP_band_converter(blue, DSEP_lookup[blue])
+    red_DSEP = DSEP_band_converter(red, DSEP_lookup[red])
+    mag_DSEP = DSEP_band_converter(mag, DSEP_lookup[mag])
+
+    blue_table = restrict_interpolation_table(read_DSEP_isochrone(
+        metallicity, age, bands=DSEP_lookup[blue], Y=Y,
+        afe=afe), lowT=lowT)
+    red_table = restrict_interpolation_table(read_DSEP_isochrone(
+        metallicity, age, bands=DSEP_lookup[red], Y=Y,
+        afe=afe), lowT=lowT)
+    mag_table = restrict_interpolation_table(read_DSEP_isochrone(
+        metallicity, age, bands=DSEP_lookup[mag], Y=Y,
+        afe=afe), lowT=lowT)
+
+    blue_mags = blue_table["M/Mo"]
+    red_mags = red_table["M/Mo"]
+    assert(np.all(blue_mags == red_mags))
+    mags = mag_table[mag_DSEP]
+    appmags = mags + 5 * np.log10(D/10)
+    print("Distance: " + str(D))
+    reddened_mags = redden_mag(mag, appmags, redden_EBV)
+    blue_col = blue_table[blue_DSEP]
+    red_col = red_table[red_DSEP]
+    color_val = blue_col - red_col
+    reddened_color = redden_color(color, color_val, redden_EBV)
+
+    interpolator = interp1d(reddened_mags, reddened_color, kind="linear",
+                            bounds_error=bound_error)
+    mags_to_color = out_of_bounds_wrapper(interpolator, color,
+                                          max(color_val), min(color_val))
+
+    return mags_to_color
+
+def color_to_mag_DSEP_interpolator(
+    fromcolor, tomag, DSEP_lookup, init_mass=0, mass_order="descending", 
+    age=1.5, metallicity=0.0, Y=1, afe=2, bound_error=True, lowT=3000,
+    redden_EBV=0.0, D=10):
+    '''Return function to interpolate between colors in DSEP.
+
+    Return a function which, given a color that can be calculated from the DSEP
+    isochrone, will interpolate to another color. This interpolation uses a
+    grid of the given age and metallicity.
+    
+    If the interpolator should silently mask the objects are outside with
+    colors outside of the isochrone bounds, then bound_error should be set to
+    False.'''
+    blue, red = split_color(fromcolor)
+    frompacket = pack_color_packet(
+        fromcolor, DSEP_lookup[blue], DSEP_lookup[red], age, metallicity, Y,
+        afe)
+    if frompacket in single_valued_colors:
+        fromblue, fromred = split_color(fromcolor)
+        fromblue_DSEP = DSEP_band_converter(fromblue, DSEP_lookup[fromblue])
+        fromred_DSEP = DSEP_band_converter(fromred, DSEP_lookup[fromred])
+
+        tomag_DSEP = DSEP_band_converter(tomag, DSEP_lookup[tomag])
+
+        fromblue_col = restrict_interpolation_table(read_DSEP_isochrone(
+            metallicity, age, bands=DSEP_lookup[fromblue], Y=Y,
+            afe=afe), lowT=lowT)[fromblue_DSEP]
+        fromred_col = restrict_interpolation_table(read_DSEP_isochrone(
+            metallicity, age, bands=DSEP_lookup[fromred], Y=Y,
+            afe=afe), lowT=lowT)[fromred_DSEP]
+        tomag_col = restrict_interpolation_table(read_DSEP_isochrone(
+            metallicity, age, bands=DSEP_lookup[tomag], Y=Y, 
+            afe=afe), lowT=lowT)[tomag_DSEP]
+
+        # Convert the isochrone to apparent magnitudes.
+        tomag_apparent = tomag_col + 5 * np.log10(D/10)
+
+        fromcolor_val = fromblue_col - fromred_col
+        reddened_color = redden_color(fromcolor, fromcolor_val, redden_EBV)
+        reddened_mag = redden_mag(tomag, tomag_apparent, redden_EBV)
+
+        interpolator = interp1d(reddened_color, reddened_mag, kind="linear",
+                                bounds_error=bound_error)
+
+        wrapped_interpolator = out_of_bounds_wrapper(
+            interpolator, fromcolor, fromcolor_val[0], fromcolor_val[-1])
+
+    elif frompacket in multi_valued_colors:
+        mass_to_mag = mass_to_band_DSEP_interpolator(
+            tomag, DSEP_lookup, age=age, metallicity=metallicity, Y=Y,
+            afe=afe, redden_EBV=redden_EBV)
+        if init_mass == 0:
+            color_to_mass = color_to_mass_interpolator_mass_array(
+                fromcolor, DSEP_lookup, mass_order=mass_order, age=age,
+                metallicity=metallicity, Y=Y, afe=afe, bound_error=bound_error,
+                lowT=lowT, redden_EBV=redden_EBV)
+        else:
+            color_to_mass = color_to_mass_interpolator_with_mass(
+                fromcolor, DSEP_lookup, init_mass, age=age,
+                metallicity=metallicity, Y=Y, afe=afe, bound_error=bound_error,
+                lowT=lowT, redden_EBV=redden_EBV)
+        # This is a bitch to debug
+        wrapped_interpolator = (lambda x: mass_to_color(color_to_mass(x)))
+        # Add these so that the endpoints of the interpolator can be known.
+        wrapped_interpolator.x = color_to_mass.x
+        wrapped_interpolator.y = mass_to_color(color_to_mass.y)
+    else:
+        raise ValueError("Don't know how to classify this color.")
+
+
+
+    return wrapped_interpolator
+
+# DSEP utility functions #
 
 def DSEP_band_converter(band, bandno):
     '''Maps other representations of band to those outputted by DSEP.
@@ -645,8 +1428,10 @@ def exponentify_interpolator(interp, base=10):
     '''
     return (lambda x: base**interp(x))
 
-def mass_to_bolometric_luminosity_dsep_interpolator(
-    age=1.5, metallicity=0.0, bands=1, Y=1, afe=2):
+# Interpolate between intrinsic stellar values #
+
+def mass_to_bolometric_luminosity_DSEP_interpolator(
+    age=1.5, metallicity=0.0, bands=1, Y=1, afe=2, lowT=3000):
     '''Return function to interpolate bolometric luminosity for a given mass.
 
     This provides one of the important mappings between mass and bolometric
@@ -655,13 +1440,14 @@ def mass_to_bolometric_luminosity_dsep_interpolator(
     
     This interpolator interpolates log Luminosity, not luminosity itself.'''
 
-    interpolator = dsep_interpolation(
-        "M/Mo", "LogL/Lo", age, metallicity, bands=bands, Y=Y, afe=afe)
+    interpolator = DSEP_interpolation(
+        "M/Mo", "LogL/Lo", age, metallicity, bands=bands, Y=Y, afe=afe,
+        lowT=lowT)
 
     return exponentify_interpolator(interpolator)
 
-def mass_to_teff_dsep_interpolator(
-    age=1.5, metallicity=0.0, bands=1, Y=1, afe=2):
+def mass_to_teff_DSEP_interpolator(
+    age=1.5, metallicity=0.0, bands=1, Y=1, afe=2, lowT=3000):
     '''Return function to interpolate effective temperature for a given mass.
 
     This provides one of the important mappings between mass and effective
@@ -670,79 +1456,25 @@ def mass_to_teff_dsep_interpolator(
 
     This interpolator interpolates log Teff, not Teff itself.'''
 
-    interpolator = dsep_interpolation(
-        "M/Mo", "LogTeff", age, metallicity, bands=bands, Y=Y, afe=afe)
+    interpolator = DSEP_interpolation(
+        "M/Mo", "LogTeff", age, metallicity, bands=bands, Y=Y, afe=afe,
+        lowT=lowT)
 
     return exponentify_interpolator(interpolator)
 
-def mass_to_band_dsep_interpolator(
-    band, age=1.5, metallicity=0.0, bands=1, Y=1, afe=2):
-    '''Return function to interpolate a magnitude for a given mass.
-
-    This function returns an interpolator to map mass and magnitude in the
-    given band. 
-    '''
-    band = DSEP_band_converter(band, bands)
-    try:
-        interpolator = dsep_interpolation(
-            "M/Mo", band, age=age, metallicity=metallicity, bands=bands, Y=Y,
-            afe=afe)
-    except IndexError:
-        interpolator = dsep_interpolation(
-            "M/Mo", band[0], age=age, metallicity=metallicity, bands=bands,
-            Y=Y, afe=afe)
-
-    return interpolator
-
-def create_color_interpolator(blue_interp, red_interp):
-    '''Create a color interpolator from two band interpolators.
-
-    The most straightfoward way to interpolate colors from an isochrone is to
-    generate a function that uses the interpolators from each band, and
-    subtracts them.'''
-    return (lambda x: blue_interp(x) - red_interp(x))
-
-
-def mass_to_color_dsep_interpolator(
-    color, DSEP_lookup, age=1.5, metallicity=0.0, Y=1, afe=2):
-    '''Return function to interpolate color for a given mass.
-
-    This function will return an interpolator which will map mass and color for
-    the given color, for a star of the given age and metallicity.'''
-
-    band1, band2 = split_color(color)
-    band1_interpolator = mass_to_band_dsep_interpolator(
-        band1, age=age, metallicity=metallicity, bands=DSEP_lookup[band1], Y=Y, 
-        afe=afe)
-    band2_interpolator = mass_to_band_dsep_interpolator(
-        band2, age=age, metallicity=metallicity, bands=DSEP_lookup[band2], Y=Y, 
-        afe=afe)
-
-    return create_color_interpolator(band1_interpolator, band2_interpolator)
-
-def color_to_mass_dsep_interpolator(
-    color, DSEP_lookup, age=1.5, metallicity=0.0, Y=1, afe=2):
-    '''Return function to interpolate mass given a color.
-
-    This function will return an interpolator which will map colors to masses.
-    Unfortunately, this relation is generally double-valued. There needs to be
-    a good way to deal with this.
-    '''
-
-# Stellar properties with DSEP only #
-#####################################
-
+# Directly calculate fluxes and colors from mass #
 
 def calculate_single_star_magnitude_DSEP(
-    band, mass, metallicity, age=1.5, bands=1, Y=1, afe=2):
+    band, mass, metallicity, age=1.5, bands=1, Y=1, afe=2, redden_EBV=0.0):
     '''Calculate the magnitude of a star using DSEP.
 
     DSEP assumes the star is some fixed distance away, most likely, and this
     will return the magnitude that DSEP associates with the star. That will be
     useful in getting flux-related quantities such as color and flux ratios.
     '''
-    mass_mag_interpolator = mass_to_band_dsep_interpolator(
-        band, age=age, metallicity=metallicity, bands=bands, Y=Y, afe=afe)
+    mass_mag_interpolator = mass_to_band_DSEP_interpolator(
+        band, age=age, metallicity=metallicity, bands=bands, Y=Y, afe=afe,
+        redden_EBV=redden_EBV)
     star_mag = mass_mag_interpolator(mass)
 
     return star_mag
@@ -755,12 +1487,74 @@ def calculate_binary_band_flux_ratio_DSEP(
     using isochrones, the flux ratio can be calculated directly, and does not
     have to be calculated through bolometric corrections.
     '''
-    band1 = calculate_single_star_magnitude_DSEP(
+    mag1 = calculate_single_star_magnitude_DSEP(
         band, mass1, metallicity, age=age, bands=bands, Y=Y, afe=afe)
-    band2 = calculate_single_star_magnitude_DSEP(
+    mag2 = calculate_single_star_magnitude_DSEP(
         band, mass2, metallicity, age=age, bands=bands, Y=Y, afe=afe)
 
-    return 10**(-0.4 * (band1 - band2))
+    return 10**(-0.4 * (mag1 - mag2))
+
+def calculate_single_star_color_DSEP(
+    color, mass, metallicity, DSEP_lookup, age=1.5, Y=1, afe=2, redden_EBV=0.0):
+    '''Calculate the color of a star using only DSEP.
+
+    The color will be calculated directly from DSEP using the mass-color
+    relations in the isochrones.
+    '''
+    bluemag, redmag = split_color(color)
+    bluemag = calculate_single_star_magnitude_DSEP(
+        bluemag, mass, metallicity, age=age, bands=DSEP_lookup[bluemag], Y=Y, 
+        afe=afe, redden_EBV=redden_EBV)
+    redmag = calculate_single_star_magnitude_DSEP(
+        redmag, mass, metallicity, age=age, bands=DSEP_lookup[redmag], Y=Y, 
+        afe=afe, redden_EBV=redden_EBV)
+
+    star_color = bluemag - redmag
+
+    return star_color
+
+def calculate_binary_star_color_DSEP(
+    color, mass1, mass2, metallicity, DSEP_lookup, age=1.5, Y=1, afe=2,
+    redden_EBV=0.0):
+    '''Calculate the color of a binary star system using DSEP.
+
+    The colors will be calculated directly from the DSEP isochrones.
+    '''
+    # Since the combined light from a binary is not additive (at least I
+    # haven't shown that it isn't), it may be more straightforward to just
+    # calculate an unreddened color and then redden the combined flux.
+    color1 = calculate_single_star_color_DSEP(
+        color, mass1, metallicity, age=age, DSEP_lookup=DSEP_lookup, Y=Y, 
+        afe=afe, redden_EBV=0.0)
+    color2 = calculate_single_star_color_DSEP(
+        color, mass2, metallicity, age=age, DSEP_lookup=DSEP_lookup, 
+        Y=Y, afe=afe, redden_EBV=0.0)
+
+    blueband, redband = split_color(color)
+    fluxratio = calculate_binary_band_flux_ratio_DSEP(
+        blueband, mass1, mass2, metallicity, age=age,
+        bands=DSEP_lookup[blueband], Y=Y, afe=afe)
+
+    binary_color = sum_binary_color(color1, color2, fluxratio)
+    reddened_binary = redden_color(color, binary_color, redden_EBV)
+    return reddened_binary
+
+def calculate_binary_star_mag_DSEP(
+    mag, mass1, mass2, metallicity, DSEP_lookup, age=1.5, Y=1, afe=2,
+    redden_EBV=0.0):
+    '''Calculate the magnitude of a combined system.
+
+    Magnitudes are calculated directly from the DSEP isochrones.
+    '''
+    mag1 = calculate_single_star_magnitude_DSEP(
+        DSEP_lookup[mag], mass1, metallicity, age=age, Y=Y, afe=afe)
+    mag2 = calculate_single_star_magnitude_DSEP(
+        DSEP_lookup[mag], mass2, metallicity, age=age, Y=Y, afe=afe)
+
+    binary_mag = sum_binary_mag(mag1, mag2)
+    extincted_binary = redden_mag(mag, binary_mag, redden_EBV)
+
+    return extincted_binary
 
 def calculate_magnitude_difference_DSEP(
     band, mass1, mass2, metallicity, age=1.5, bands=1, Y=1, afe=2):
@@ -773,71 +1567,277 @@ def calculate_magnitude_difference_DSEP(
         band, mass1, mass2, metallicity, age=age, bands=bands, Y=Y, afe=afe)
     return -2.5 * np.log10(fluxratio)
 
-def calculate_single_star_color_DSEP(
-    color, mass, metallicity, DSEP_lookup, age=1.5, Y=1, afe=2):
-    '''Calculate the color of a star using only DSEP.
-
-    The color will be calculated directly from DSEP using the mass-color
-    relations in the isochrones.
-    '''
-    bluemag, redmag = split_color(color)
-    bluemag = calculate_single_star_magnitude_DSEP(
-        bluemag, mass, metallicity, age=age, bands=DSEP_lookup[bluemag], Y=Y, 
-        afe=afe)
-    redmag = calculate_single_star_magnitude_DSEP(
-        redmag, mass, metallicity, age=age, bands=DSEP_lookup[redmag], Y=Y, 
-        afe=afe)
-
-    return bluemag - redmag
-
-def calculate_binary_star_color_DSEP(
-    color, mass1, mass2, metallicity, DSEP_lookup, age=1.5, Y=1, afe=2):
-    '''Calculate the color of a binary star system using DSEP.
-
-    The colors will be calculated directly from the DSEP isochrones.
-    '''
-    color1 = calculate_single_star_color_DSEP(
-        color, mass1, metallicity, age=age, DSEP_lookup=DSEP_lookup, Y=Y, 
-        afe=afe)
-    color2 = calculate_single_star_color_DSEP(
-        color, mass2, metallicity, age=age, DSEP_lookup=DSEP_lookup, 
-        Y=Y, afe=afe)
-
-    blueband, redband = split_color(color)
-    fluxratio = calculate_binary_band_flux_ratio_DSEP(
-        blueband, mass1, mass2, metallicity, age=age,
-        bands=DSEP_lookup[blueband], Y=Y, afe=afe)
-
-    binary_color = sum_binary_color(color1, color2, fluxratio)
-    return binary_color
-
 # Binary Loop Calculations #
 ############################
 
-def color_color_excess_rms(
-    ycolor, xcolor, primary_mass, DSEP_lookup, age=1.0, metallicity=0.0, Y=1,
-    afe=2, numsecs=20):
-    '''Calculate the RMS of the binary excess above the DSEP isochrone.
+def color_mag_excess_chi2(
+    color, mag, primary_mass, DSEP_lookup, photometric_errors={}, age=1.0,
+    metallicity=0.0, Y=1, afe=2, numsecs=20, minsec=0.4, redden_EBV=0.0, 
+    plot=False):
+    '''Calculate a representative chi-squared figure above CMD for binaries.
 
-    This function calculates the typical excursion of the binary above the DSEP
-    isochrone using the RMS excess as the figure of merit.
+    Using photometric errors, this function calculates a chi-squared statistic
+    for each of the secondaries, and returns a the median chi-squared value
+    from the isochrone.
     '''
-    secondaries = np.linspace(primary_mass, 0.12, numsecs)
-    comb_ycolor = calculate_binary_star_color_DSEP(
-        ycolor, primary_mass, secondaries, metallicity, DSEP_lookup, age=age)
-    comb_xcolor = calculate_binary_star_color_DSEP(
-        xcolor, primary_mass, secondaries, metallicity, DSEP_lookup, age=age)
-    ycolor_excess = subtract_DSEP_isochrone(
-        ycolor, xcolor, comb_ycolor, comb_xcolor, DSEP_lookup, age=age,
+    secondaries = np.linspace(primary_mass, minsec, numsecs)
+    comb_color = calculate_binary_star_color_DSEP(
+        color, primary_mass, secondaries, metallicity, DSEP_lookup, age=age)
+    comb_mag = calculate_binary_star_color_DSEP(
+        color2, primary_mass, secondaries, metallicity, DSEP_lookup, age=age, Y=Y, afe=afe)
+    single_isochrone = color_to_mag_DSEP_interpolator(
+        color, mag, DSEP_lookup, init_mass=primary_mass, age=age,
+        metallicity=metallicity, Y=Y, afe=afe, redden_EBV=redden_EBV)
+    blue, red = split_color(color)
+
+    # Finish this.
+    if photometric_errors:
+        colorerr = sum_errors(photometric_errors[blue], photometric_errors[red])
+        magerr = photometric_errors[mag]
+        covar = calc_color_mag_covariance(color, mag, photometric_errors[mag])
+    else:
+        colorerr = 1
+        magerr = 1
+        covar = 0
+
+    xlist = []
+    for i in range(len(secondaries)):
+        try:
+            closest_x = isochrone_minimum_chi_squared(
+                single_isochrone, comb_color, comb_mag, xerr=colorerr, 
+                yerr=magerr2, cov=covar, npoints=1000)
+        except OutOfBoundsError:
+            print("Encountered an error?")
+            print(single_isochrone.x)
+            print(single_isochrone.y)
+        xlist.append(closest_x)
+
+    xintersections = np.array(xlist)
+    yintersections = single_isochrone(xintersections)
+    foms = chi_squared(
+        yintersections, xintersections, comb_color, comb_mag, 
+        colorerr, magerr, cov=covar)
+
+    median_index =  np.argsort(foms)[len(foms)//2]
+
+    if plot:
+        xmed = xintersections[median_index]
+        ymed = yintersections[median_index]
+        plt.figure()
+        color_mag_isochrone_plot(color, mag, DSEP_lookup, 1.0, age=age,
+                                 redden_EBV=redden_EBV)
+        plot_binary_loops(color2, color1, DSEP_lookup, [primary_mass], age=age,
+                          minsec=0.3, numsec=100, redden_EBV=redden_EBV)
+        plot_error_ellipse(comb_color[median_index], comb_mag[median_index],
+                           colorerr, magerr, cov=covar)
+        plt.plot([comb_color[median_index], xmed], [comb_mag[median_index],
+                 ymed], 'b-')
+
+    return foms[median_index]
+
+def color_color_excess_chi2(
+    color1, color2, primary_mass, DSEP_lookup, photometric_errors={}, age=1.0, 
+    metallicity=0.0, Y=1, afe=2, numsecs=20, minsec=0.4, plot=False):
+    '''Calculate a representative chi-squared displacement in color-color.
+
+    Using photometric errors, this function calculates a chi-squared statistic
+    for each of the secondaries, and returns the median chi-squared value from
+    the isochrone.
+    '''
+    secondaries = np.linspace(primary_mass, minsec, numsecs)
+    comb_color1 = calculate_binary_star_color_DSEP(
+        color1, primary_mass, secondaries, metallicity, DSEP_lookup, age=age)
+    comb_color2 = calculate_binary_star_color_DSEP(
+        color2, primary_mass, secondaries, metallicity, DSEP_lookup, age=age, Y=Y, afe=afe)
+    single_isochrone = color_to_color_DSEP_interpolator(
+        color1, color2, DSEP_lookup, init_mass=primary_mass, age=age,
         metallicity=metallicity, Y=Y, afe=afe)
-    print(ycolor_excess)
-    fom = np.sqrt(np.mean(ycolor_excess**2))
-    print(fom)
-    return fom
+    blue1, red1 = split_color(color1)
+    blue2, red2 = split_color(color2)
+
+    if photometric_errors:
+        colorerr1 = sum_errors(
+            photometric_errors[blue1], photometric_errors[red1])
+        colorerr2 = sum_errors(
+            photometric_errors[blue2], photometric_errors[red2])
+        covar = calc_color_color_covariance(
+            color1, color2, photometric_errors[blue1],
+            photometric_errors[red1])
+    else:
+        colorerr1 = 1
+        colorerr2 = 1
+        covar = 0
+
+
+    xlist = []
+    for i in range(len(secondaries)):
+        try:
+            closest_x = isochrone_minimum_chi_squared(
+                single_isochrone, comb_color1[i], comb_color2[i], 
+                xerr=colorerr1, yerr=colorerr2, cov=covar, npoints=1000)
+        except OutOfBoundsError:
+            print("Encountered an error?")
+            print(single_isochrone.x)
+            print(single_isochrone.y)
+        xlist.append(closest_x)
+
+    xintersections = np.array(xlist)
+    yintersections = single_isochrone(xintersections)
+    foms = chi_squared(
+        yintersections, xintersections, comb_color2, comb_color1, 
+        colorerr2, colorerr1, cov=covar)
+
+    median_index =  np.argsort(foms)[len(foms)//2]
+
+    if plot:
+        xmed = xintersections[median_index]
+        ymed = yintersections[median_index]
+        plt.figure()
+        color_color_isochrone_plot(color2, color1, DSEP_lookup, 1.0, age=age)
+        plot_binary_loops(color2, color1, DSEP_lookup, [primary_mass], age=age,
+                          minsec=0.3, numsec=100)
+        plot_error_ellipse(comb_color1[median_index], comb_color2[median_index],
+                           colorerr1, colorerr2, cov=covar)
+        plt.plot([comb_color1[median_index], xmed], [comb_color2[median_index],
+                 ymed], 'b-')
+
+    return foms[median_index]
+
+def calc_color_color_covariance(
+    color1, color2, blueerr, rederr):
+    '''Calculate the Color-color covariance term.
+
+    If it turns out that a band is chared between color1 and color2, it will
+    return the covariance expected between the two colors.'''
+    blue1, red1 = split_color(color1)
+    blue2, red2 = split_color(color2)
+
+    if blue1 == blue2:
+        covar = blueerr**2
+    elif blue1 == red2:
+        covar = - blueerr**2
+    elif red1 == blue2:
+        covar = - rederr**2
+    elif red1 == red2:
+        covar = rederr**2
+    else:
+        covar = 0
+
+    return covar
+
+def calc_color_mag_covariance(
+    color, mag, magerr):
+    '''Calculate the covariance between a color and magnitude combination.'''
+    blueband, redband = split_color(color)
+
+    if mag == blueband:
+        cov = magerr**2
+    elif mag == redband:
+        cov = -magerr**2
+    else:
+        cov = 0.0
+
+    return cov
+
+
+def chi_squared(modely, modelx, datay, datax, yerr, xerr, cov=0):
+    '''Calculate the chi-squared value between two points.
+    
+    The model should be given as modely and modelx. The data points are datay
+    and data x, along with the errors and covariance. If an array of data
+    points are used, then the data, err, and covariance should be
+    broadcastable. The model points do not necessarily have to be.'''
+    try:
+        modelx = modelx.reshape(len(modelx), 1)
+        modely = modely.reshape(len(modely), 1)
+    # Happens if models are not actually an array of values.
+    except (TypeError, AttributeError):
+        pass
+    corr = cov / yerr / xerr
+    xdiff = modelx - datax
+    ydiff = modely - datay
+    xfrac = xdiff / xerr
+    yfrac = ydiff / yerr
+    chisq = (xfrac**2 + yfrac**2 - 2 * corr * xfrac * yfrac) / (1 - corr**2)
+    return chisq
+
+def isochrone_minimum_chi_squared(isoc, xval, yval, xerr=1, yerr=1, cov=0,
+                                  npoints=10000):
+    '''Find a minimum chi-squared value for an isochrone.
+
+    Picks the point on the isochrone which has the smallest chi-squared value
+    for the point given. If the xerr and yerr values aren't given, then they
+    will be assumed to be equally-weighted.
+    
+    Note that this function does not actually do an intelligent chi-squared
+    minimization routine. It literally calculates chi-squared on a numpy array
+    and returns the minimum index.
+    
+    This can accept multiple data points through xval and yval. In that case,
+    it will return an array of x-values which minimize the chi-squared for
+    those points.'''
+
+    isox = np.linspace(isoc.x[0], isoc.x[-1], npoints)
+    isoy = isoc(isox)
+
+    chisq = chi_squared(isoy, isox, yval, xval, yerr, xerr, cov)
+    minind = np.argmin(chisq, axis=0)
+    return isox[minind]
+
+def plot_minimized_isochrone_distance(
+    isoc, ypoint, xpoint, yerr=1, xerr=1, cov=0):
+    '''Test the isochrone minimization routine graphically.'''
+    
+    xmin = isochrone_minimum_chi_squared(
+        isoc, xpoint, ypoint, xerr=xerr, yerr=yerr, cov=cov, npoints=10000)
+    ymin = isoc(xmin)
+    plt.plot([xpoint, xmin], [ypoint, ymin], 'b-')
+    plot_isochrone(isoc)
+    plot_error_ellipse(xpoint, ypoint, xerr, yerr, cov)
+    print("Chi2: {0}".format(chi_squared(ypoint, xpoint, ymin, xmin, yerr,
+                                         xerr, cov)))
+
+def plot_color_color_minimized_isochrone_distance(
+    ycolor, xcolor, DSEP_lookup, ypoint, xpoint, yerr, xerr, cov=0, age=4.0, 
+    metallicity=0.0, Y=1, afe=2, lowT=3000, redden_EBV=0.0):
+    '''Plot the minimized isochrone distance in a color-color plot.'''
+    isoc = color_to_color_DSEP_interpolator(
+        xcolor, ycolor, DSEP_lookup, age=age, metallicity=metallicity, Y=Y,
+        afe=afe, lowT=lowT, redden_EBV=redden_EBV)
+    plot_minimized_isochrone_distance(isoc, ypoint, xpoint, yerr, xerr, cov)
+
+def plot_color_mag_minimized_isochrone_distance(
+    color, mag, DSEP_lookup, colorpoint, magpoint, colorerr, magerr, cov=0, 
+    age=4.0, metallicity=0.0, Y=1, afe=2, lowT=3000, redden_EBV=0.0, D=10):
+    '''Plot the minimized isochrone distance in a color-magnitude plot. 
+
+    Note that the magnitude should be an absolute magnitude.'''
+    isoc = color_to_mag_DSEP_interpolator(
+        color, mag, DSEP_lookup, age=age, metallicity=metallicity, Y=Y,
+        afe=afe, lowT=lowT, redden_EBV=redden_EBV, D=D)
+    plot_minimized_isochrone_distance(
+        isoc, magpoint, colorpoint, magerr, colorerr, cov)
+    ylim = plt.ylim()
+    if ylim[0] < ylim[1]:
+        plt.ylim(plt.ylim()[::-1])
+    plt.ylabel(mag)
+    plt.xlabel(color)
+
+def iterate_colors(bands):
+    '''Create all color combinations of bands.
+
+    This function makes all color combinations of bands exactly once. If bands
+    is sorted according to increasing wavelength, then the bluer band will 
+    always be on the left, and the redder band will always be on the right, as
+    is generally expected of colors.'''
+    color_iterator = map(
+        lambda p: "{0}-{1}".format(p[0], p[1]), 
+        itertools.combinations(bands, 2))
+    return color_iterator
 
 def explore_color_combination_fom(
-    bands, primary_mass, DSEP_lookup, age=1.0, metallicity=0.0, Y=1, afe=2,
-    numsecs=20):
+    bands, primary_mass, DSEP_lookup, photometric_errors, age=1.0, 
+    metallicity=0.0, Y=1, afe=2, numsecs=20, minsec=0.62):
     '''Calculate figures of merit for color combinations.
 
     Iterate through the combinations of bands and calculate a figure of merit
@@ -846,46 +1846,118 @@ def explore_color_combination_fom(
     xcolorlist = []
     fomlist = []
 
-    for ytuple in itertools.combinations(bands, 2):
-        for xtuple in itertools.combinations(bands, 2):
-            ycolor = (ytuple[0] + "-" + ytuple[1])
-            xcolor = (xtuple[0] + "-" + xtuple[1])
-            if ycolor != xcolor:
-                fom = color_color_excess_rms(
-                    ycolor, xcolor, primary_mass, DSEP_lookup, age=age,
-                    metallicity=metallicity, Y=Y, afe=afe, numsecs=numsecs)
-                ycolorlist.append(ycolor)
-                xcolorlist.append(xcolor)
-                fomlist.append(fom)
+    for xcolor, ycolor in itertools.combinations(iterate_colors(bands), 2):
+        point_chi2 = color_color_excess_chi2(
+            ycolor, xcolor, primary_mass, DSEP_lookup,
+            photometric_errors, age=age, metallicity=metallicity, Y=Y, 
+            afe=afe, numsecs=numsecs, minsec=minsec)
+        print("{0} vs {1}: {2}".format(ycolor, xcolor, point_chi2))
+        sigmas = chi_squared_to_sigma(point_chi2)
+        ycolorlist.append(ycolor)
+        xcolorlist.append(xcolor)
+        fomlist.append(sigmas)
 
     fomtable = Table([ycolorlist, xcolorlist, fomlist], names=(
-        "ycolor", "xcolor", "RMS"))
-    fomtable.sort("RMS")
+        "ycolor", "xcolor", "sigma"))
+    fomtable.sort("sigma")
     fomtable.reverse()
     print(fomtable)
 
     return fomtable
 
-
-
-# DSEP Tools #
-##############
-
-def subtract_DSEP_isochrone(
-    color, inputcolor, vals, inputvals, DSEP_lookup, age=1.0, metallicity=0.0, 
-    Y=1, afe=2):
-    '''Subtract a DSEP isochrone from vals using inputvals.
-
-    Isochrones interpolated from inputvals will be subtracted from vals and
-    returned. The actual colors which vals and inputvals correspond to should 
-    be indicated in color and inputcolor.
+def chi_squared_to_sigma(chi2_val, dof=2):
+    '''Translates a chi-squared value to a sigma probability interval.
     '''
-    interp = color_to_color_DSEP_interpolator(
-        inputcolor, color, DSEP_lookup, age=age, metallicity=metallicity, Y=Y,
-        afe=afe)
-    isochrone_values = interp(inputvals)
-    subtracted_values = vals - isochrone_values
-    return subtracted_values
+    prob = chi2.sf(chi2_val, dof)
+    sigmas = norm.isf(prob/2)
+    return sigmas
+
+def sum_errors(err1, err2):
+    '''Add errors in quadrature.'''
+    return np.sqrt(err1**2 + err2**2)
+
+def rotate_points(x, y, angle):
+    '''Rotate points x and y through the given angle counterclockwise.
+    
+    Returns the rotated coordinates as a 2-tuple.'''
+    xnew = x * np.cos(angle) - y * np.sin(angle)
+    ynew = x * np.sin(angle) + y * np.cos(angle)
+    return (xnew, ynew)
+
+def plot_error_ellipse(x, y, xerr, yerr, cov=0):
+    '''Plot error ellipses around a point with given errors and covariance.
+
+    This function will plot three ellipses corresponding to 1, 2, and 3 sigma.
+    The ellipses will go from darkest to lightest.
+    '''
+    # These are needed for indexing to work out.
+    x = np.array(x)
+    y = np.array(y)
+    xerr = np.array(xerr)
+    yerr = np.array(yerr)
+    cov = np.array(cov)
+
+    sigma1 = "#4dac26"
+    sigma2 = "#b8e186"
+    sigma3 = "#f7f7f7"
+    sigma4 = "#f1b6da"
+    sigma5 = "#d01c8b"
+    colors = [sigma1, sigma2, sigma3, sigma4, sigma5] 
+
+    sigma_scales = np.array([1.52, 2.48, 3.44, 4.40, 5.36])
+    sigma_scales = sigma_scales.reshape((len(sigma_scales), 1))
+
+    semimajor = sigma_scales * np.sqrt(((xerr**2 + yerr**2) / 2 + np.sqrt(
+        (xerr**2 - yerr**2)**2 / 4 + cov**2)))
+    semiminor = sigma_scales * np.sqrt(((xerr**2 + yerr**2) / 2 - np.sqrt(
+        (xerr**2 - yerr**2)**2 / 4 + cov**2)))
+    eccentricity = np.sqrt(1 - semiminor**2 / semimajor**2)
+
+
+    # Note that the thetas start at the semimajor axis, and then go around.
+    thetas = np.linspace(0, 2*np.pi, 1000)
+    thetas = thetas.reshape(len(thetas), 1, 1)
+    # This should now be a 1000x5xN array, where N is the number of data
+    # points.
+    radii = semimajor * (1 - eccentricity**2) / (1 + eccentricity *
+                                                 np.cos(thetas))
+    horizontal_xvals = semimajor * eccentricity + radii * np.cos(thetas)
+    horizontal_yvals = radii * np.sin(thetas)
+
+    # If the y-axis is the semimajor axis, then rotate by 90 degrees.
+    vertical_xvals, vertical_yvals = rotate_points(
+        horizontal_xvals, horizontal_yvals, np.pi/2)
+    unrotated_xvals = np.where(yerr > xerr, vertical_xvals, horizontal_xvals)
+    unrotated_yvals = np.where(yerr > xerr, vertical_yvals, horizontal_yvals)
+
+    # 0/0 yields a nan, so I want to prevent that.
+    rotation = np.nan_to_num(np.arctan(
+        2 * cov / (xerr**2 - yerr**2)))/2
+    rotated_xvals, rotated_yvals = rotate_points(
+        unrotated_xvals, unrotated_yvals, rotation)
+    xvals = x + rotated_xvals
+    yvals = y + rotated_yvals
+
+    for i in range(len(x)):
+        for j in range(len(sigma_scales)):
+            plt.plot(xvals[:,j,i], yvals[:,j,i], color=colors[j])
+
+# Variate #
+###########
+
+def scattered_point(xcen, ycen, xerr, yerr, cov=0, npoints=1):
+    '''Returns points representative of correlated error.
+
+    Given a central point, this function returns an array of length npoints
+    distributed as a gaussian with correlated errors.
+    
+    This returns an npointsx2 array. So to get all of the x values, do
+    out[:,0], and out[:,1] for the y values.''' 
+    means = [xcen, ycen]
+    covmat = [[xerr**2, cov], [cov, yerr*2]]
+
+    values = multivariate_normal.rvs(means, covmat, npoints)
+    return values
 
 
 ###############################################################################
@@ -929,7 +2001,7 @@ def calculate_single_star_color_Casagrande_DSEP(
     between Teff and Color. The relationship between mass and Teff will be
     taken from the DSEP isochrones.
     '''
-    mass_teff_interpolator = mass_to_teff_dsep_interpolator(age=age,
+    mass_teff_interpolator = mass_to_teff_DSEP_interpolator(age=age,
         metallicity=metallicity, bands=bands, Y=Y, afe=afe)
     star_teff = mass_teff_interpolator(mass)
 
@@ -956,7 +2028,7 @@ def calculate_binary_band_flux_ratio_Casagrande_DSEP(
                 Casagrande_Bolometric_Flux(
         band, 0, bolcolor, bol_color1, metallicity))
 
-    mass_lum_interpolator = mass_to_bolometric_luminosity_dsep_interpolator(
+    mass_lum_interpolator = mass_to_bolometric_luminosity_DSEP_interpolator(
         age, metallicity, bands=bands, Y=Y, afe=afe)
     lumratio = mass_lum_interpolator(mass1) / mass_lum_interpolator(mass2)
 
@@ -1063,22 +2135,40 @@ def color_excess_plot_comparison(
             afe=afe)
 
 def color_color_isochrone_plot(
-    ycolor, xcolor, DSEP_lookup, high_mass, low_mass=0.12, age=1.0):
+    ycolor, xcolor, DSEP_lookup, lowT=3000, age=1.0, metallicity=0.0, Y=1, 
+    afe=2, redden_EBV=0.0):
     '''Plots an isochrone line in a color-color space.
 
     Plot the DSEP isochrone projected in the ycolor vs xcolor space. It ranges
     from high_mass to low_mass.'''
-    masses = np.linspace(high_mass, low_mass)
+    interpolator = color_to_color_DSEP_interpolator(
+        xcolor, ycolor, DSEP_lookup, age=age, metallicity=metallicity, Y=Y,
+        afe=afe, redden_EBV=redden_EBV, lowT=lowT)
 
-    ycolor_interp = mass_to_color_dsep_interpolator(
-        ycolor, DSEP_lookup, age=age)
-    xcolor_interp = mass_to_color_dsep_interpolator(
-        xcolor, DSEP_lookup, age=age)
+    plot_isochrone(interpolator)
 
-    ycolor_vals = ycolor_interp(masses)
-    xcolor_vals = xcolor_interp(masses)
+def color_mag_isochrone_plot(
+    color, mag, DSEP_lookup, lowT=3000, age=1.0, metallicity=0.0, Y=1, afe=2, 
+    redden_EBV=0.0, D=10, fmt="r-"):
+    '''Plot the isochrone line as a colormagnitude diagram.
 
-    plt.plot(xcolor_vals, ycolor_vals, 'r-')
+    Plot the DSEP isochrone projected in the color-magnitude space specified.
+    It will range from high_mass to low_mass. Reddening will be applied
+    according to the E(B-V) given in redden_EBV. This function will also adjust
+    the apparent magnitude by the appropriate distance modulus where D is given
+    in parsecs (under the assumption that the DSEP isochrones are in absolute
+    magnitudes).
+    '''
+
+    interpolator = color_to_mag_DSEP_interpolator(
+        color, mag, DSEP_lookup, age=age, metallicity=metallicity, Y=Y,
+        afe=afe, redden_EBV=redden_EBV, D=D, lowT=lowT)
+
+    plot_isochrone(interpolator)
+
+    ylimits = plt.ylim()
+    if ylimits[0] < ylimits[1]:
+        plt.ylim(ylimits[::-1])
 
 def simulated_color_color_diagram(
     ycolor, xcolor, ycolorerr, xcolorerr, DSEP_lookup, uppermass=2, 
@@ -1095,7 +2185,6 @@ def simulated_color_color_diagram(
         ycolor, single_masses, 0.0, DSEP_lookup, age=1.0)
     x_singles = calculate_single_star_color_DSEP(
         xcolor, single_masses, 0.0, DSEP_lookup, age=1.0)
-
 
     y_single_simdata = y_singles + np.random.normal(scale=ycolorerr,
                                                     size=y_singles.size)
@@ -1126,34 +2215,41 @@ def simulated_color_color_diagram(
         plt.plot(x_binary_simdata, y_binary_simdata, 'm.')
 
 def plot_binary_loops(
-    ycolor, xcolor, DSEP_lookup, primary_masses, metallicity=0.0, age=1.0):
+    ycolor, xcolor, DSEP_lookup, primary_masses, metallicity=0.0, age=1.0,
+    minsec=0.62, numsec=20, redden_EBV=0.0):
     for prim in primary_masses:
-        secondaries = np.linspace(prim, 0.12, 20)
+        secondaries = np.linspace(prim, minsec, numsec)
         comb_ycolor = calculate_binary_star_color_DSEP(
-            ycolor, prim, secondaries, metallicity, DSEP_lookup, age=age)
+            ycolor, prim, secondaries, metallicity, DSEP_lookup, age=age,
+            redden_EBV=redden_EBV)
         comb_xcolor = calculate_binary_star_color_DSEP(
-            xcolor, prim, secondaries, metallicity, DSEP_lookup, age=age)
+            xcolor, prim, secondaries, metallicity, DSEP_lookup, age=age,
+            redden_EBV=redden_EBV)
         plt.plot(comb_xcolor, comb_ycolor, 'r-')
 
 def plot_binary_loop_excess(
     ycolor, xcolor, DSEP_lookup, primary_mass, metallicity=0.0, age=1.0, Y=1,
-    afe=2, color="red", label=""):
+    afe=2, color="red", label="", minsec=0.62, redden_EBV=0.0):
     '''Plot the excess of the binary loop above the DSEP isochrone.
 
     Take the look for a binary and subtract the isochrone from it according to
     xcolor. This should show how displaced from the isochrone the binaries
     should be.
     '''
-    secondaries = np.linspace(primary_mass, 0.12, 50)
+    secondaries = np.linspace(primary_mass, minsec, 50)
     comb_ycolor = calculate_binary_star_color_DSEP(
-        ycolor, primary_mass, secondaries, metallicity, DSEP_lookup, age=age)
+        ycolor, primary_mass, secondaries, metallicity, DSEP_lookup, age=age,
+        redden_EBV=redden_EBV)
     comb_xcolor = calculate_binary_star_color_DSEP(
-        xcolor, primary_mass, secondaries, metallicity, DSEP_lookup, age=age)
+        xcolor, primary_mass, secondaries, metallicity, DSEP_lookup, age=age,
+        redden_EBV=redden_EBV)
     ycolor_excess = subtract_DSEP_isochrone(
         ycolor, xcolor, comb_ycolor, comb_xcolor, DSEP_lookup, age=age,
-        metallicity=metallicity, Y=Y, afe=afe)
-    print(ycolor_excess)
+        metallicity=metallicity, Y=Y, afe=afe, redden_EBV=redden_EBV)
     plt.plot(comb_xcolor, ycolor_excess, ls="-", c=color)
+    plt.xlabel(xcolor)
+    plt.ylabel(ycolor + " Excess")
+    plt.title("Color excess for {0:.1f} Msun star".format(primary_mass))
 
 
 def plot_mass_markers(
@@ -1167,9 +2263,9 @@ def plot_mass_markers(
     '''
     test_masses = np.array(masses)
 
-    ycolor_interp = mass_to_color_dsep_interpolator(
+    ycolor_interp = mass_to_color_DSEP_interpolator(
         ycolor, DSEP_lookup, age=age)
-    xcolor_interp = mass_to_color_dsep_interpolator(
+    xcolor_interp = mass_to_color_DSEP_interpolator(
         xcolor, DSEP_lookup, age=age)
 
     test_ycolor = ycolor_interp(test_masses)
@@ -1179,6 +2275,37 @@ def plot_mass_markers(
         plt.plot(test_xcolor[1:], test_ycolor[1:], 'r*', ms=10)
     else:
         plt.plot(test_xcolor, test_ycolor, 'r*', ms=10)
+
+def plot_mass_color(color, DSEP_lookup, metallicity=0.0, age=1.0):
+    '''Plot the color vs. mass relation for the given color.
+
+    This function is to verify whether a color is double-valued or not.
+    '''
+    # USe test_multi_valued_colors for now. Though the code there can probably
+    # be transferred here.
+    pass
+
+def plot_isochrone(isochrone, npoints=1000):
+    '''Take an isochrone of some kind and plot it internally.
+
+    This function essentially takes the bounds contained within the isochrone
+    and plots them in order to check that they are well-behaved.
+    '''
+    testpoints = np.linspace(isochrone.x[0], isochrone.x[-1], 1000)
+    testvalues = isochrone(testpoints)
+    plt.plot(testpoints, testvalues, 'r-')
+
+def test_isochrone(isochrone, npoints=1000):
+    '''Plot actual isochrone points on top of interpolations.
+
+    In cases where there is a double-valued isochrone, this would mean that the
+    isochrone in practice would not be smooth as expected from the sequence of
+    points. This should be obvious to the human eye. This function helps
+    illustrate that.
+    '''
+    plot_isochrone(isochrone, npoints=npoints)
+    plt.plot(isochrone.x, isochrone.y, 'bo')
+
 
 ####################
 # Standalone plots #
@@ -1272,8 +2399,61 @@ def plot_DSEP_excesses():
             plt.title("{0:.1f} Msun Excess".format(2.0-0.5*i))
             plt.tight_layout()
 
+###############################################################################
+# Reddening Routines #
+###############################################################################
 
+reddening_coeffs = {"B": 1.337, "V": 1.000, "I": 0.479, "J": 0.282, "H": 0.190,
+                    "K": 0.114, "Ks": 0.114, "Kp": 0.9}
 
+# These are coefficients that are given by the IRSA dust map service.
+reddening_coeffs = {"B": 1.337, "V": 1.000, "I": 0.479, "J": 0.282, "H": 0.190,
+                    "K": 0.114, "Ks": 0.114, "Kp": 0.9}
+
+def redden_mag(band, truemag, EB_V, Rv=3.1):
+    '''Redden the true magnitude value given E(B-V).
+    
+    Uses calculated values from CCM to calculate the reddened magnitude given
+    an E(B-V) value.
+    '''
+    extinction = Rv * reddening_coeffs[band] * EB_V
+    extinctedmag = truemag + extinction
+
+    return extinctedmag
+
+def deredden_mag(band, extinctedmag, EB_V, Rv=3.1):
+    '''Deredden an observed magnitude given E(B-V).
+
+    Uses calculated values from CCM to obtain the dereddened magnitude given an
+    E(B-V) value.
+    '''
+    extinction = redden_mag(band, 0, EB_V, Rv=Rv)
+    truemag = extinctedmag - extinction
+
+    return truemag
+
+def redden_color(color, truecolor, EB_V, Rv=3.1):
+    '''Redden the true color given E(B-V).
+
+    Use calculated values from CCM to calculate the reddened color given an
+    E(B-V) value.
+    '''
+    blueband, redband = split_color(color)
+    blue_extinction = redden_mag(blueband, 0, EB_V, Rv=Rv)
+    red_extinction = redden_mag(redband, 0, EB_V, Rv=Rv)
+    reddened_color = truecolor + (blue_extinction - red_extinction)
+
+    return reddened_color
+
+def deredden_color(color, extincted_color, EB_V, Rv=3.1):
+    '''Deredden the observed colro given E(B-V).
+
+    Use calculated values from CCM to deredden a cover given an E(B-V) value.
+    '''
+    reddening_coeff = redden_color(color, 0, EB_V, Rv=Rv)
+    dereddened_color = extincted_color - reddening_coeff
+
+    return dereddened_color
 ###############################################################################
 # Miscellaneous Routines
 ###############################################################################
@@ -1317,6 +2497,14 @@ def sum_binary_color(color1, color2, fluxratio):
     summed_color = color2 - 2.5 * np.log10(
         (1 + fluxratio) / (1 + fluxratio * 10**(-0.4*(color2 - color1))))
     return summed_color
+
+def sum_binary_mag(mag1, mag2):
+    '''Calculate summed magnitude from components.
+
+    This function takes two magnitude values in a given band and adds them in
+    order to make the combined magnitude in that band.'''
+    summed_mag = mag1 - 2.5 * np.log10(1 + 10**(0.4 * (mag2 - mag1)))
+    return summed_mag
     
 if __name__ == "__main__":
 
