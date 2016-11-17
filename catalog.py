@@ -6,9 +6,10 @@ import itertools
 
 import numpy as np
 import numpy.core.defchararray as npstr
+from scipy.io import readsav
 import matplotlib.pyplot as plt
 import astropy.units as u
-from astropy.table import Table, join, vstack
+from astropy.table import Table, join, vstack, unique
 from astropy.coordinates import SkyCoord
 from bs4 import BeautifulSoup
 import requests
@@ -17,6 +18,7 @@ import requests
 import astropy_util as au
 import hrplots as hr
 import binarycalcs as bc
+import path_config as paths
 
 WORKPATH = "/home/regulus/simonian/Binaries"
 
@@ -25,7 +27,15 @@ MCQUILLAN_PATH = os.path.join(WORKPATH, "McQuillan.fit")
 
 SDSS3_URL = "http://data.sdss3.org"
 
-def read_APOKASC_catalog(filepath=APOKASC_PATH, exclude_single_epoch=False):
+NUM_KEPLER_QUARTERS = 17
+
+###############################################################################
+# Reading catalogs #
+###############################################################################
+
+def read_APOKASC_catalog(
+    filepath=APOKASC_PATH, exclude_single_epoch=False, filter_BAD=False, 
+    filter_WARN=False):
     '''Reads in the APOKASC catalog.
 
     The catalog should be located at filepath.
@@ -34,15 +44,134 @@ def read_APOKASC_catalog(filepath=APOKASC_PATH, exclude_single_epoch=False):
     if exclude_single_epoch:
         apocat = apocat[np.where(apocat["VSCATTER"] > 0.0)]
         add_cut_metadata(apocat, "VSCATTER > 0")
+    if filter_BAD:
+        apocat = filter_bad_ASPCAP_fits(apocat, filter_WARN)
     return apocat
 
-def read_McQuillan_catalog(filepath=MCQUILLAN_PATH):
+def read_EHK_catalog(filepath=str(paths.EHK_PATH)):
+    '''Reads in the UBV catalog fof the Kepler field.'''
+    cat = Table.read(
+        filepath, format="ascii.csv", 
+        names=["RA", "Dec", "U", "U_err", "B", "B_err", "V", "V_err"] )
+    return cat
+
+def read_McQuillan_catalog(
+    filepath=MCQUILLAN_PATH, Huber_KIC=True, huberpath=paths.HUBER_CATALOG):
     '''Reads in the McQuillan catalog.
 
     The catalog shoul be located at filepath.
     '''
     mcquillancat = Table.read(filepath, format="fits")
+    if Huber_KIC:
+        hubercat = read_Huber_KIC_catalog(huberpath)
+        del(mcquillancat["log_g_"])
+        del(mcquillancat["Teff"])
+        mcquillancat = au.join_by_id(mcquillancat, hubercat, "KIC", "KIC")
     return mcquillancat
+
+def read_Huber_KIC_catalog(huberpath=paths.HUBER_CATALOG):
+    '''Read the HUBER KIC parameters.'''
+    hubercat = Table.read(str(huberpath), format="ascii.cds")
+    return hubercat
+
+def read_van_Saders_file(vspath=paths.VAN_SADERS_SDSS):
+    '''Read the APOGEE dwarf targets from Jen's catalog.'''
+    # I don't use these columns, or know what they are, and they are 
+    # 8-dimensional so they mess up the table.
+    exclude_columns = ["KOIPERIOD", "TRANSITEPOCH"]
+    vsidl = readsav(str(vspath))
+    vsdata = vsidl["dat"]
+    comments = vsidl["comments"]
+    datafile = Table()
+    for name in vsdata.dtype.names:
+        if name not in exclude_columns:
+            data_array = vsdata[name][0]
+            # I want this to just be 1-d this time.
+            datafile[name] = np.reshape(data_array, len(data_array))
+    datafile["COMMENTS"] = vsidl["comments"]
+    return datafile
+
+def read_van_Saders_catalog(
+    vspath=paths.VAN_SADERS_SDSS, mastpath=paths.VAN_SADERS_MAST):
+    '''Table with relevant quantities for Jen's sample.
+
+    This table will essentially be curated in detail to ensure that the
+    returned catalog has the relevant and desired quantities.
+    '''
+    pass
+
+def read_van_Saders_Kepler(vspath=paths.VAN_SADERS_MAST):
+    '''Read MAST output for Jen's sample.'''
+    mastdata = Table.read(
+        vspath, format="ascii.csv", header_start=2, data_start=4)
+    return mastdata
+
+def read_van_Saders_APOGEE_catalog(vspath1=paths.JEN_APOGEE_1,
+                                   vspath2=paths.JEN_APOGEE_2):
+    '''Read the APOGEE information for Jen's sample.'''
+    table1 = Table.read(str(vspath1), format="ascii.csv", comment="#")
+    table2 = Table.read(str(vspath2), format="ascii.csv", comment="#")
+    apogeetable = vstack([table1, table2])
+    return apogeetable
+
+###############################################################################
+# Catalog Curation
+###############################################################################
+
+# def van_Saders_relevant_table(
+
+###############################################################################
+# Writing to databases #
+###############################################################################
+
+def write_MAST_files(outputtable, kiccol="KIC", outputpath=paths.HEAD_DIR,
+                     output_filename="Kepler_MAST.txt"):
+    '''Writes KICs so that they are able to be read by the MAST target form.
+
+    This function will take a table and write out the KIC column to the given 
+    filename. This file will then be able to be uploaded to the MAST Target
+    Search (File Upload) page with the "KIC" File Contents.
+
+    Note that since queries may occasionally be greater than the maximum file
+    length allowable by the MAST target form, this function will write queries
+    of over 10,000 objects to multiple files. Those files will be have the same
+    basename, but will have a sequential ordering to them. For example,
+    "output.txt" will become "output_1.txt", "output_2.txt", etc.
+    '''
+    MAST_LIMIT = 10000
+    if len(outputtable) > MAST_LIMIT:
+        basename, ext = output_filename.split(".")
+        output_filename = ".".join([basename+"_{0:d}", ext])
+    for i in range(len(outputtable) // MAST_LIMIT + 1):
+        startind = MAST_LIMIT * i
+        endind = min(MAST_LIMIT*(i+1), len(outputtable))
+        outputfile = str(outputpath / output_filename.format(i))
+        names = [kiccol]
+        outputsegment = outputtable[startind:endind]
+        print(outputsegment)
+        outputsegment.write(outputfile, format="ascii.no_header", 
+                            include_names=names)
+
+def write_crossID_file(
+    outputtable, racol="RA", deccol="DEC", outputpath=paths.HEAD_DIR, 
+    output_filename="APOGEE_targets.txt"):
+    '''Writes a file to submit to SDSS crossID.
+
+    This file can be used to submit to:
+    http://skyserver.sdss.org/dr13/en/tools/crossid/crossid.aspx
+    '''
+    APOGEE_LIMIT = 1000
+    if len(outputtable) > APOGEE_LIMIT:
+        basename, ext = output_filename.split(".")
+        output_filename = ".".join([basename+"_{0:d}", ext])
+    for i in range(len(outputtable) // APOGEE_LIMIT + 1):
+        startind = APOGEE_LIMIT * i
+        endind = min(APOGEE_LIMIT*(i+1), len(outputtable))
+        outputfile = str(outputpath / output_filename.format(i))
+        names = ["ra", "dec"]
+        outputsegment = outputtable[startind:endind]
+        outputsegment[[racol, deccol]].write(outputfile, format="ascii.csv", 
+                                             names=names)
 
 def create_joined_APOKASC_McQuillan_catalog(
         apocat=None, mcquillancat=None, apofile=APOKASC_PATH,
@@ -105,6 +234,79 @@ def NOBS_array(object_table, visit_table):
         nobs[object_index] = len(object_visits)
 
     return nobs
+
+def add_Everett_photometry(inputtable, racol, deccol):
+    '''Adds UBV photometry from the EHK survey to table.
+
+    Read in the EHK photometry and append that to the columns in inputtable.
+    The table names will be the same as those in the photometry file.'''
+    photcatalog = read_EHK_catalog()
+    newcat = join_by_ra_dec(inputtable, photcatalog, racol, deccol)
+
+def number_binned_by_temperature(
+    mcquillan, hightemp=6500, lowtemp=3000, dtemp=50, teffcol="Teff"):
+    '''Return array with number as a function of temperature.'''
+    # Add dtemp because hist wants the rightmost edge.
+    tempbins = np.arange(lowtemp, hightemp+dtemp, dtemp)
+    hist, binedges = np.histogram(
+        mcquillan[teffcol], bins=tempbins, range=(lowtemp, hightemp))
+    return (hist, binedges)
+
+def plot_number_bin(hist, binedges):
+    '''Plot the number objects in each temperature bin.'''
+    bincenters = (binedges[:-1] + binedges[1:])/2
+    plt.plot(bincenters, hist)
+    plt.xlabel("Teff (K)")
+    plt.ylabel("Number of McQuillan objects in Temp bin")
+
+def number_histogram(
+    mcquillan, hightemp=6500, lowtemp=3000, dtemp=50, teffcol="Teff"):
+    '''Plot a histogram of the number of McQuillan objects in temperature bins.
+
+    Uses the matplotlib hist function to make the histogram plot.'''
+    tempbins = np.arange(lowtemp, hightemp+dtemp, dtemp)
+    plt.hist(mcquillan[teffcol], bins=tempbins, range=(lowtemp, hightemp),
+             histtype="step")
+    plt.xlim(plt.xlim()[::-1])
+    plt.xlabel("Teff (K)")
+    plt.ylabel("Number of McQuillan objects in Teff bin")
+
+def rapid_fraction_histogram(
+    mcquillan, hightemp=6500, lowtemp=3000, dtemp=50, maxper=5, teffcol="Teff",
+    periodcol="Prot", label=""):
+    '''Plot a histogram of the fraction of rapid rotators in McQuillan sample.
+    '''
+    totalhist, totbins = number_binned_by_temperature(
+        mcquillan, hightemp=hightemp, lowtemp=lowtemp, dtemp=dtemp,
+        teffcol=teffcol)
+    rapid_mcquillan = perform_period_cut(
+        mcquillan, highperiod=maxper, periodcol=periodcol)
+    rapidhist, rapidbins = number_binned_by_temperature(
+        rapid_mcquillan, hightemp=hightemp, lowtemp=lowtemp, dtemp=dtemp,
+        teffcol=teffcol)
+    plt.step(totbins[:-1], rapidhist/totalhist, where="post", label=label)
+    plt.xlim(plt.xlim()[::-1])
+    plt.xlabel("Teff (K)")
+    plt.ylabel("Fraction of Rapid Rotators in Teff bin")
+    plt.title("Fraction of rotators with P < {0} day".format(maxper))
+
+def rapid_fraction_multiple_limits(
+    mcquillan, hightemp=6500, lowtemp=3000, dtemp=50, maxper=5, dper=1, 
+    teffcol="Teff", periodcol="Prot"):
+    '''Plot histograms of rapid rotator fraction for different max periods.
+
+    Bin the McQuillan sample by temperature, and then note the fraction of
+    rapid rotators in each temerature bin for different criteria for rapid
+    rotation. The maximum period for rapid rotators will start at maxper, and
+    decrement by dper until reaching zero.'''
+    period_boundaries = np.arange(maxper, 0, -dper)
+    for bound in period_boundaries:
+        perlabel = "P < {0} day".format(bound)
+        rapid_fraction_histogram(
+            mcquillan, hightemp=hightemp, lowtemp=lowtemp, dtemp=dtemp, 
+            maxper=bound, teffcol=teffcol, periodcol=periodcol, label=perlabel)
+    plt.title("Rapid Rotator Fraction up to {0} day".format(maxper))
+    plt.legend(loc="upper center")
 
 def velocity_evolution(variable, nonvariable):
     '''Automatically generate the velocity evolution of potential binaries.
@@ -199,25 +401,95 @@ def extract_vrel(soup):
         "sub", string="lsr").parent.next_sibling.next_sibling.string)
     return vrad
 
+def VIM_effect_on_McQuillan_standout_plot(
+    fullsample, rv_nonvar, rv_var, minvim=3, Teff_colname="TEFF_FIT",
+    Prot_colname="Prot", KIC_colname="KEPLER_INT"):
+    '''Creates a plot showing what the effects of VIM are with APOKASC data.'''
+    vimtable = read_KepVIM_catalog()
+    quartertable = kepVIM_quarter_table(vimtable)
+    for q in range(minvim, NUM_KEPLER_QUARTERS+1):
+        plt.figure()
+        # These are the KICs of the objects which have at least q quarters of
+        # VIM detections.
+        kic_at_least_q_indices = np.unique(quartertable["KIC"][
+            quartertable["Num_Q"] >= q])
+        
+        # Get the indices of the VIM detections.
+        rv_nonvar_vim_indices = au.astropy_table_indices(
+            rv_nonvar, KIC_colname, kic_at_least_q_indices)
+        rv_var_vim_indices = au.astropy_table_indices(
+            rv_var, KIC_colname, kic_at_least_q_indices)
+        # These then are the indices of the nonVIM detections.
+        rv_nonvar_nonvim_indices = au.get_complement_indices(
+            rv_nonvar_vim_indices, len(rv_nonvar))
+        rv_var_nonvim_indices = au.get_complement_indices(
+            rv_var_vim_indices, len(rv_var))
+
+        # Now make the tables that should be plotted
+        rv_nonvar_nonvim = rv_nonvar[rv_nonvar_nonvim_indices]
+        rv_var_nonvim = rv_var[rv_var_nonvim_indices]
+        vims = vstack([rv_nonvar[rv_nonvar_vim_indices],
+                       rv_var[rv_var_vim_indices]])
+        print("Number of VIMs is {0}.".format(len(vims)))
+        McQuillan_standout_plot(
+            fullsample, rv_nonvar_nonvim, rv_var_nonvim, 
+            Teff_colname=Teff_colname, Prot_colname=Prot_colname)
+        plt.semilogy(vims[Teff_colname], vims[Prot_colname], 'm*', ms=12,
+                     label="VIM blends")
+        plt.legend(loc="lower left")
+        plt.title("Vim cutoff {0:n} Quarters".format(q))
+        return vims
+
 def McQuillan_standout_plot(
     fullsample, rv_nonvar, rv_var, Teff_colname="TEFF_FIT",
-    Prot_colname="Prot"):
+    Prot_colname="Prot", data_label="McQuillan/APOKASC"):
     '''Creates a plot like McQuillan et al. but overplots RV samples.
 
     Takes the full McQuillan sample and overplots the RV-variable and
     RV-nonvariable samples on top in red and blue.
     '''
-    plt.semilogy(fullsample[Teff_colname], fullsample[Prot_colname], 'c.',
-                 label="McQuillan/APOKASC")
-    plt.semilogy(rv_var[Teff_colname], rv_var[Prot_colname], 'r*', ms=12, 
-                 label="RV Variable")
-    plt.semilogy(rv_nonvar[Teff_colname], rv_nonvar[Prot_colname], 'b*', ms=12, 
-                 label="RV Nonvariable")
+    McQuillan_plot(fullsample, Teff_colname=Teff_colname,
+                   Prot_colname=Prot_colname, color="c", marker=".",
+                   label=data_label)
+    McQuillan_plot(rv_var, Teff_colname=Teff_colname,
+                   Prot_colname=Prot_colname, color="r", marker="*",
+                   label="RV Variable", ms=12)
+    McQuillan_plot(rv_nonvar, Teff_colname=Teff_colname,
+                   Prot_colname=Prot_colname, color="b", marker="*",
+                   label="RV Nonvariable", ms=12)
     hr.invert_x_axis()
     plt.xlabel("Teff (K)")
     plt.ylabel("Prot (day)")
     plt.title("Jen van Saders-cut sample (Multiepoch)")
     plt.legend(loc="lower left")
+
+def McQuillan_plot(sample, Teff_colname="Teff", Prot_colname="Prot", color="c",
+                   marker=".", label="", ms=2.0):
+    '''Creates a plot like in McQuillan.
+
+    Takes the sample in McQuillan and plots the rotation period, given in
+    Prot_colname, versus the temperature given in Teff_colname. The rotation
+    period is plotted on a log scale.'''
+    plt.semilogy(
+        sample[Teff_colname], sample[Prot_colname], color=color, 
+        marker=marker, label=label, ms=ms, linestyle="")
+    hr.invert_x_axis()
+    plt.xlabel("Teff (K)")
+    plt.ylabel("Prot (day)")
+
+
+def rotation_radial_velocity_variation(
+    rv_nonvar, rv_var, vsini_colname="VSINI", Prot_colname="Prot"):
+    '''Create a plot showing RV-variable/nonvariable objects.'''
+
+    plt.semilogy(rv_nonvar[vsini_colname], rv_nonvar[Prot_colname], 'b*', 
+                 ms=12, label="RV Variable")
+    plt.semilogy(rv_var[vsini_colname], rv_var[Prot_colname], 'r*', ms=12,
+                 label="RV Variable")
+    plt.xlabel("v sin i (km/s)")
+    plt.ylabel("Prot (day)")
+    plt.title("Multiepoch with rotation")
+    plt.legend(loc="upper right")
 
 def HR_standout_plot(
     fullsample, rv_nonvar, rv_var, Teff_colname="TEFF_FIT",
@@ -331,19 +603,20 @@ def read_pulsators(pulsatorfile=os.path.join(WORKPATH, "pulsators.kic")):
         pulsatorfile, format="ascii.no_header", names=["KIC"])
     return pulsatortable
 
-def filter_pulsators(fulltable, quiet=False):
+def filter_pulsators(fulltable, quiet=False, KICcol="KEPLER_INT"):
     '''Removes known Kepler pulsators from a table of Kepler objects.
 
     If the quiet keyword is disabled, then this function will print the KIC IDs
     of the objects that were found to be pulsators.
     '''
     filteredtable = au.filter_column_from_subtable(
-        fulltable, "KEPLER_INT", read_pulsators()["KIC"])
+        fulltable, KICcol, read_pulsators()["KIC"])
     if not quiet:
         pulsators = au.get_complement_table(
-            filteredtable, fulltable, "KEPLER_INT")["KEPLER_ID"]
+            filteredtable, fulltable, KICcol)[KICcol]
         for kic in pulsators:
             print("KIC {0} is a Kepler Pulsator".format(kic))
+    add_cut_metadata(filteredtable, "Pulsators removed")
     return filteredtable
 
 def write_UKIRT_file(catalogtable, outputpath):
@@ -429,11 +702,12 @@ def select_tidally_synchronized_binaries(table):
     The current criteria are that TSBs have orbital periods of around 3 days,
     and effective temperatures between 5700 and 4600 K.
     '''
-    period_cut = perform_period_cut(table, highperiod=3, periodcol="Prot")
+    period_cut = perform_period_cut(table, lowperiod=1, highperiod=5, 
+                                    periodcol="Prot")
     try:
-        temp_cut = perform_teff_cut(period_cut, 4600, 5700, "TEFF_FIT")
+        temp_cut = perform_teff_cut(period_cut, 4850, 5600, "TEFF_FIT")
     except KeyError:
-        temp_cut = perform_teff_cut(period_cut, 4600, 5700, "Teff")
+        temp_cut = perform_teff_cut(period_cut, 4850, 5600, "Teff")
 
     return temp_cut
 
@@ -556,6 +830,105 @@ def read_villanova_EBs(
                        header_start=-1)
     return ebcat
 
+###############################################################################
+# KepVIM #
+###############################################################################
+
+def read_KepVIM_catalog(
+    KepVIMpath="/home/regulus/simonian/Binaries/KepVIM.fits"):
+    '''Reads in the KepVIM catalog (Makarov & Goldin 2016).
+
+    Catalog contains objects whose centroid positions in Kepler change with
+    their variability.'''
+    kepvim = Table.read(KepVIMpath, format="fits")
+    return kepvim
+
+def filter_by_quarters(kepvimtable, vimquarters, kic_col="KIC"):
+    '''Remove objects with fewer than the specified quarters of VIM detections.
+
+    Return a table with only the entries which have at least vimquarters number
+    of observations.'''
+    filtered_objects = []
+    # Using groups takes a REALLY long time. Is there a way to avoid this?
+    vimgroups = kepvimtable.group_by(kic_col)
+    for kicgroup in vimgroups.groups:
+        if len(kicgroup) >= vimquarters:
+            filtered_objects.append(kicgroup)
+    filtered_table = vstack(filtered_objects)
+    return filtered_table
+
+def KICs_with_VIM_quarters(kepvimtable, minquarters, kic_col="KIC"):
+    '''Get KIC IDs for objects with VIM detections over minquarters.
+
+    Gets the KIC IDs for all of the KIC objects which have at least minquarters
+    VIM detections over the campaign.
+    '''
+    newvim = filter_by_quarters(kepvimtable, minquarters, kic_col=kic_col)
+    kepvimgroup = newvim.group_by(kic_col)
+    kictable = au.first_row_in_group(kepvimgroup)
+    return kictable[kic_col]
+
+
+
+# Also want function that returns just KIC numbers that have VIM in at least n
+# quarters.
+
+def compress_kepVIM(kepvimtable, kic_col="KIC"):
+    '''Compress each KIC to a unique row.
+
+    The raw organization of the KepVIM catalog has a row for each unique
+    combination of KIC and quarter. This function moves the quarter information
+    from rows to columns; that way TBD'''
+    fullcolnames = kepvimtable.colnames
+    vimvariable_colnames = {
+        'F50', 'Xpix', 'Ypix', 'r', 'AX', 'AY', 'ds_dF', 'PA', 'Ch', 'Q'}
+    remaining_colnames = [fixedcol for fixedcol in fullcolnames if fixedcol not 
+                          in vimvariable_colnames]
+    unique_table = unique(kepvimtable[remaining_colnames], keys=kic_col)
+
+    for quarter in range(1, 18):
+        quarter_colname = "Q{0:d}".format(quarter)
+        unique_table[quarter_colname] = np.zeros(len(unique_table))
+
+        # Find all KIC values with VIM detections in a given quarter, and set
+        # the corresponding entries in quarter_column to true.
+        kic_detection_in_quarter = kepvimtable[kic_col][
+            au.astropy_table_index(kepvimtable, "Q", quarter)]
+        unique_kic_indices = au.astropy_table_indices(
+            unique_table, kic_col, kic_detection_in_quarter)
+        unique_table[quarter_colname][unique_kic_indices] = 1
+
+    return unique_table
+
+def kepVIM_quarter_table(kepvimtable, kic_col="KIC"):
+    '''Create a table indicating which in quarters each KIC object had VIM.
+    
+    For the sake of making things sane again, this table has one row for each
+    KIC object, and columns for each quarter, indicating in which quarter the 
+    KIC object had VIM observations.'''
+    quarter_table = Table([kepvimtable[kic_col]])
+    colcount = np.zeros(len(quarter_table))
+
+    for quarter in range(1, 18):
+        quarter_colname = "Q{0:d}".format(quarter)
+        quarter_table[quarter_colname] = np.zeros(len(quarter_table))
+
+        # Find all KIC values with VIM detections in a given quarter, and set
+        # the corresponding entries in quarter_column to true.
+        kic_detection_in_quarter = kepvimtable[kic_col][
+            au.astropy_table_index(kepvimtable, "Q", quarter)]
+        unique_kic_indices = au.astropy_table_indices(
+            quarter_table, kic_col, kic_detection_in_quarter)
+        quarter_table[quarter_colname][unique_kic_indices] = 1
+        colcount += quarter_table[quarter_colname]
+
+    quarter_table["Num_Q"] = colcount
+    return quarter_table
+
+###############################################################################
+# ASPCAP #
+###############################################################################
+
 def filter_bad_ASPCAP_fits(apogee_table, warn=False):
     '''Removes entries which have ASPCAP flags.
 
@@ -582,3 +955,28 @@ def bad_ASPCAP_indices(aspcapflags, warn=False):
             aspcapflags, "STAR_WARN") > 0)
 
     return bad_indices
+
+###############################################################################
+# Double-Lined Spectroscopic Binaries #
+###############################################################################
+DLSB_LIST = [3654549, 6368779, 6381934, 6436652, 8520982]
+DLSB_PATH = paths.HOME_DIR / "DLSB.kic"
+
+def filter_double_lined_spectroscopic_binaries(apocat, kiccol="KEPLER_ID"):
+    '''Remove the Double-Lined Spectroscopic Binaries stored in DLSB_LIST.'''
+    filtered_cat = au.filter_column_from_subtable(apocat, kiccol, DLSB_LIST)
+    add_cut_metadata(
+        filtered_cat, "Removed DLSBs: see {0} for list".format( DLSB_PATH))
+    return filtered_cat
+
+def write_DLSB_list(outputpath=DLSB_PATH):
+    '''Write the list of double-lined spectroscopic binaries to a file.'''
+    dlsb_table = Table([DLSB_LIST])
+    comments = [
+        "These are KIC values of APOGEE objects which are double-lined "
+        "spectroscopic binaries.", "They do not include objects with the "
+        "STAR_BAD flag."]
+    dlsb_table.write(
+        str(DLSB_PATH), format="ascii.no_header", comment=comments)
+    DLSB_PATH.chmod(0o744)
+
