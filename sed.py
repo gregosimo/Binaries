@@ -1686,6 +1686,7 @@ def color_color_excess_chi2(
     foms = chi_squared(
         yintersections, xintersections, comb_color2, comb_color1, 
         colorerr2, colorerr1, cov=covar)
+    foms = np.diagonal(foms)
 
     median_index =  np.argsort(foms)[len(foms)//2]
 
@@ -1953,11 +1954,128 @@ def scattered_point(xcen, ycen, xerr, yerr, cov=0, npoints=1):
     
     This returns an npointsx2 array. So to get all of the x values, do
     out[:,0], and out[:,1] for the y values.''' 
-    means = [xcen, ycen]
-    covmat = [[xerr**2, cov], [cov, yerr*2]]
+    # 2 
+    means = np.array([xcen, ycen])
+    # 2 x 2 
+    covmat = [[xerr**2, cov], [cov, yerr**2]]
 
     values = multivariate_normal.rvs(means, covmat, npoints)
+    # npoints x 2
     return values
+
+def scatter_along_isochrone(
+    ycolor, xcolor, masses, DSEP_lookup, photometric_errors={}, npoints=1,
+    metallicity=0.0, age=4.0, Y=1, afe=2, lowT=4000, redden_EBV=0.0):
+    '''Scatter isochrone points at masses with photometric error.
+
+    Takes an array of masses, and returns a 2xlen(masses)xnpoints array which
+    contains the scattered points along the isochrone. The first dimension
+    indicates x-values or y-values.'''
+    xblue, xred = split_color(xcolor)
+    yblue, yred = split_color(ycolor)
+
+    xerr = sum_errors(photometric_errors[xblue], photometric_errors[xred])
+    yerr = sum_errors(photometric_errors[yblue], photometric_errors[yred])
+    cov = calc_color_color_covariance(
+        ycolor, xcolor, photometric_errors[xblue], photometric_errors[xred])
+    mass_xcolor_isochrone = mass_to_color_DSEP_interpolator(
+        xcolor, DSEP_lookup, metallicity=metallicity, age=age, Y=Y, afe=afe,
+        lowT=lowT, redden_EBV=redden_EBV)
+    # Since the scatter function can't take an array of masses, we'll just do
+    # things according to this for loop.
+    totallist = []
+    for m in masses:
+        xcolor_ycolor_isochrone = color_to_color_DSEP_interpolator(
+            xcolor, ycolor, DSEP_lookup, init_mass=m, metallicity=metallicity, 
+            age=age, Y=Y, afe=afe, lowT=lowT, redden_EBV=redden_EBV)
+        xcolor_val = mass_xcolor_isochrone(m)
+        ycolor_val = xcolor_ycolor_isochrone(xcolor_val)
+        # Returns npoints x 2
+        pointarray = scattered_point(
+            xcolor_val, ycolor_val, xerr, yerr, cov, npoints)
+        totallist.append(pointarray)
+    
+    # This will be len(masses) x npoints x 2
+    masses_array = np.array(totallist)
+
+    return masses_array
+
+def plot_scattered_isochrone_points(
+    ycolor, xcolor, DSEP_lookup, photometric_errors={}, npoints=1,
+    metallicity=0.0, age=4.0, Y=1, afe=2, lowT=4000, redden_EBV=0.0):
+    '''Plot an isochrone with modelled data scattered about it.
+
+    Creates synthetic data based on the errors and plots it over the
+    isochrone.'''
+    massrange = np.linspace(1.0, 0.65, 400)
+    scattered_data = scatter_along_isochrone(
+        ycolor, xcolor, massrange, DSEP_lookup,
+        photometric_errors=photometric_errors, npoints=npoints,
+        metallicity=metallicity, age=age, Y=Y, afe=afe, lowT=lowT,
+        redden_EBV=redden_EBV)
+
+    # This stuff is to plot. It may need to be moved to a different place.
+    xvalues = np.ravel(masses_array[:,:,0])
+    yvalues = np.ravel(masses_array[:,:,1])
+
+    plot_isochrone(xcolor_ycolor_isochrone)
+    plt.plot(xvalues, yvalues, 'k.')
+    plt.xlabel(xcolor)
+    plt.ylabel(ycolor)
+
+# Isochrone subtraction #
+#########################
+
+def subtract_isochrone_from_data(isochrone, ydata, xdata):
+    '''Subtract the isochrone from the ydata.
+
+    Evaluate the isochrone at xdata and then subtract that from ydata. Return
+    the differences. Remember that this operation is not symmetric with x and y
+    data.
+    '''
+    iso_y = isochrone(xdata)
+    difference = ydata - iso_y
+    return difference
+
+##################################
+# Forward-modeling Uncertainties #
+##################################
+
+def plot_modeled_color_color_differences(
+    color1, color2, DSEP_lookup, photometric_errors={}, metallicity=0.0, 
+    age=4.0, Y=1, afe=2, redden_EBV=0.0, lowT=4000, npoints=10):
+    '''Plot differences between isochrone and simulated data for two colors.
+
+    Makes two plots which show the difference between modeled data points given
+    correlated errors and the isochrones. Maybe these should be Gaussian?'''
+    isomasses = np.linspace(1.0, 0.61, 400)
+    modelled_data = scatter_along_isochrone(
+        color2, color1, isomasses, DSEP_lookup,
+        photometric_errors=photometric_errors, metallicity=metallicity,
+        age=age, Y=Y, afe=afe, redden_EBV=redden_EBV, lowT=lowT,
+        npoints=npoints)
+    xvalues = np.ravel(modelled_data[:,:,0])
+    yvalues = np.ravel(modelled_data[:,:,1])
+
+    iso1to2 = color_to_color_DSEP_interpolator(
+        color1, color2, DSEP_lookup, metallicity=metallicity, age=age, Y=Y,
+        afe=afe, redden_EBV=redden_EBV, lowT=lowT)
+    iso2to1 = color_to_color_DSEP_interpolator(
+        color2, color1, DSEP_lookup, metallicity=metallicity, age=age, Y=Y,
+        afe=afe, redden_EBV=redden_EBV, lowT=lowT)
+
+    ydiffs = subtract_isochrone_from_data(iso1to2, yvalues, xvalues)
+    xdiffs = subtract_isochrone_from_data(iso2to1, xvalues, yvalues)
+
+    plt.figure()
+    plt.plot(xvalues, ydiffs, 'k.')
+    plt.xlabel(color1)
+    plt.ylabel(color2 + " Diff")
+    plt.figure()
+    plt.plot(yvalues, xdiffs, 'k.')
+    plt.xlabel(color2)
+    plt.ylabel(color1 + " Diff")
+
 
 
 ###############################################################################
