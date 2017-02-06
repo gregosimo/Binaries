@@ -3,17 +3,22 @@
 import os
 import re
 import itertools
+import io
 
 import numpy as np
 import numpy.core.defchararray as npstr
+import scipy
 from scipy.io import readsav
+from scipy.interpolate import interp1d
 import matplotlib.pyplot as plt
+from matplotlib import cm
+from mpl_toolkits.axes_grid1.inset_locator import inset_axes
 import astropy.units as u
-from astropy.table import Table, join, vstack, unique
+from astropy.table import Table, join, vstack, unique, Column
 from astropy.coordinates import SkyCoord
 from bs4 import BeautifulSoup
 import requests
-
+# from apogee.tools import bitmask
 
 import astropy_util as au
 import hrplots as hr
@@ -74,6 +79,12 @@ def read_Huber_KIC_catalog(huberpath=paths.HUBER_CATALOG):
     hubercat = Table.read(str(huberpath), format="ascii.cds")
     return hubercat
 
+def read_KIC_DR25_catalog(kicpath=paths.KIC_CATALOG):
+    '''Read the KIC DR2 Stellar Parameter catalog.'''
+    kiccat = Table.read(str(kicpath), format="ascii.ipac")
+    fix_table_coordinates_units(kiccat, "ra", "dec")
+    return kiccat
+
 def read_van_Saders_file(vspath=paths.VAN_SADERS_SDSS):
     '''Read the APOGEE dwarf targets from Jen's catalog.'''
     # I don't use these columns, or know what they are, and they are 
@@ -114,15 +125,333 @@ def read_van_Saders_APOGEE_catalog(vspath1=paths.JEN_APOGEE_1,
     apogeetable = vstack([table1, table2])
     return apogeetable
 
+def read_UKIRT_file(resultfile):
+    '''Reads in a file from UKIRT.'''
+    results = read_split_file(resultfile, "ascii.commented_header")
+    return results
+
+def read_split_file(filepath, table_format):
+    '''Reads a file that has been split into multiple parts.
+
+    This function essentially re-reads a table which has been split according
+    to the large_table_multiple_files_split function. However, it uses the
+    existing files in the directory instead of predicting using table
+    information. For example, if filepath is /path/to/foo.txt, this will find
+    foo.txt, if it exists, or foo.0.txt, foo.1.txt, foo.2.txt, etc. and read
+    them all in if it doesn't.
+
+    Since the input table isn't used, this means that when writing split files,
+    care has to be taken to delete all previous queries made with them.
+    '''
+    try:
+        inputtable = Table.read(str(filepath), format=table_format)
+    except FileNotFoundError:
+        inputfiles = find_split_files(filepath)
+        table_pieces = []
+        for inputfile in inputfiles:
+            table_piece = Table.read(inputfile, format=table_format)
+            table_pieces.append(table_piece)
+        inputtable = vstack(table_pieces)
+
+    return inputtable
+
+def find_split_files(filepath):
+    '''Finds the extant filenames which filepath would have if it were split.
+
+    Given a filepath, returns a list of filepaths that match the basename being
+    split in the path parent. For example, if the pathpath is /path/to/foo.txt, 
+    it will return a list file paths called foo.0.txt foo.1.txt, foo.2.txt if 
+    they reside in /path/to/.
+    '''
+    folder = filepath.parent
+    filename = filepath.name
+    base, ext = split_filename(filename)
+    glob_pattern = format_split_filename(base, "*", ext)
+    files = folder.glob(glob_pattern)
+    return files
+
+def read_APOGEE_dwarfs(apopath=paths.APOGEE_DWARF_PATH):
+    '''Read a query for all APOGEE dwarfs.
+
+    This was a query manually submitted for understanding how the RV error and
+    SNR vary. The SQL query to get these objects was:
+
+    SELECT
+        a.target_id, a.apogee_id a.apogee_target1, a.apogee_target2, 
+        a.extratarg, a.dec, a.mjd, a.plate, a.ra, a.snr, a.starflag, a.vhelio, 
+        a.vrel, a.vrelerr, a.vtype, c.fe_h, c.fe_h_err, c.fe_h_flag, 
+        c.fparam_logg, c.teff, c.teff_err, c.teff_flag, c.vsini, o.h, o.h_err, 
+        o.sfd_ebv
+    FROM apogeeVisit a
+    JOIN aspcapstar c on a.apogee_id = c.apogee_id
+    JOIN apogeeObject o on a.apogee_id = o.apogee_id
+    WHERE 
+        a.ra BETWEEN 277.5 and 305 AND
+        a.dec BETWEEN 33.75 and 44.5 AND
+        c.fparam_logg > 4.1 AND dbo.fApogeeExtraTarg('TELLURIC') > 0
+    '''
+    dwarfs = Table.read(str(apopath), format="ascii.csv", header_start=1)
+    np.ma.masked_equal(dwarfs["vrelerr"], -9999)
+    return dwarfs
+
+def apogee_kepler_field(apogee_allvisit, apogee_allstar):
+    '''Take the APOGEE allVisit file and pick out targets in the kepler field.
+
+    This function essentially performs the same location cut as the query in
+    read_APOGEE_dwarfs.
+    '''
+    joined_table = join_by_id(
+        apogee_allvisit, apogee_allstar, "apogee_id", "apogee_id")
+    kepler_field = np.logical_and(np.logical_and(np.logical_and(
+        joined_table["RA"] > 277.5, joined_table["RA"] < 305), 
+        joined_table["DEC"] > 33.75), joined_table["DEC"] < 44.5)
+    return kepler_field
+
+
+
+def read_UCAC4_Mcquillan_Tidsync(
+    upath=paths.UCAC_TIDSYNC_PATH, kic_col="KIC"):
+    '''Reads the UCAC4 table of Tidally-synchronized binaries in McQuillan.
+
+    The UCAC-4 table was obtained from Vizier
+    (http://cdsbib.u-strasbg.fr/cgi-bin/cdsbib?2012yCat.1322....0Z).'''
+    pm_table = Table.read(str(upath), format="ascii.basic", delimiter=";",
+                          data_start=3, header_start=0)
+    pm_groups = pm_table.group_by("_1")
+    # Want to find the entry in each group with the smallest distance.
+    matched_rows = []
+    for grp in pm_groups.groups:
+        matched_rows.append(grp[np.argmin(grp["_r"])])
+    UCAC_table = Table(rows=matched_rows, names=pm_table.colnames)
+    kic_numbers = npstr.replace(UCAC_table["_1"], "KIC ", "")
+    kic_ints = Column(kic_numbers, name=kic_col, dtype=np.int)
+    del(UCAC_table["_1"])
+    UCAC_table.add_column(kic_ints, index=0)
+    return UCAC_table
+
+def read_UCAC4_Rafa_Tidsync(
+    upath=paths.UCAC_TIDSYNC_RAFA_PATH, kic_col="KIC"):
+    '''Reads the UCAC4 table of Tidally-synchronized binaries in McQuillan.
+
+    The UCAC-4 table was obtained from Vizier
+    (http://cdsbib.u-strasbg.fr/cgi-bin/cdsbib?2012yCat.1322....0Z).'''
+    pm_table = Table.read(str(upath), format="ascii.basic", delimiter=";",
+                          data_start=3, header_start=0)
+    pm_groups = pm_table.group_by("_1")
+    # Want to find the entry in each group with the smallest distance.
+    matched_rows = []
+    for grp in pm_groups.groups:
+        matched_rows.append(grp[np.argmin(grp["_r"])])
+    UCAC_table = Table(rows=matched_rows, names=pm_table.colnames)
+    kic_numbers = npstr.replace(UCAC_table["_1"], "KIC ", "")
+    kic_ints = Column(kic_numbers, name=kic_col, dtype=np.int)
+    del(UCAC_table["_1"])
+    UCAC_table.add_column(kic_ints, index=0)
+    return UCAC_table
+
+def join_by_2MASS_key(tbl1, tbl2, tm1, tm2, join_type="inner",
+                      skip_missing=True):
+    '''Join two tables by their 2MASS key.
+
+    Join tables according to a 2MASS key. Since different catalogs store the
+    2MASS ID in different ways ways, this will be able to distinguish between
+    them transparently. Currently this can interchange the APOGEE and KIC
+    formats.
+    '''
+    kic_prefix = "2MASS J"
+    apogee_prefix = "2M"
+
+    try:
+        tbl1 = tbl1[~tbl1[tm1].mask]
+    except AttributeError:
+        pass
+
+    try:
+        tbl2 = tbl2[~tbl2[tm2].mask]
+    except AttributeError:
+        pass
+
+    if np.any(npstr.startswith(tbl1[tm1], kic_prefix)):
+        tbl1_type = "KIC"
+    elif np.any(npstr.startswith(tbl1[tm1], apogee_prefix)):
+        tbl1_type = "APOGEE"
+    else:
+        raise ValueError("Don't recognize 2MASS key: " + tbl1[tm1][0])
+
+    if np.any(npstr.startswith(tbl2[tm2], kic_prefix)):
+        tbl2_type = "KIC"
+    elif np.any(npstr.startswith(tbl2[tm2], apogee_prefix)):
+        tbl2_type = "APOGEE"
+    else:
+        raise ValueError("Don't recognize 2MASS key: " + tbl2[tm2][0])
+
+    if tbl1_type == tbl2_type:
+        new_table = au.join_by_id(tbl1, tbl2, tm1, tm2)
+    else:
+        def transform(oldcol):
+            if tbl1_type == "KIC" and tbl2_type == "APOGEE":
+                npstr.replace(oldcol, apogee_prefix, kic_prefix)
+            elif tbl1_type == "APOGEE" and tbl2_type == "KIC":
+                npstr.replace(oldcol, kic_prefix, apogee_prefix)
+        tbl2_oldcol = tbl2[tm2]
+        tbl2_newcol = npstr.replace(tbl2_oldcol, apogee_prefix, kic_prefix)
+        del(tbl2[tm2])
+        tbl2[tm2] = tbl2_newcol
+        new_table = au.join_by_id(tbl1, tbl2, tm1, tm2, join_type=join_type)
+        del(table2[tm2])
+        tbl2[tm2] = tbl2_oldcol
+
+    return new_table
+
+def read_dr14_allVisit(allvisitpath=paths.DS14_ALLVISIT_PATH):
+    '''Read the DR14 allVisit file.
+
+    This function reads the l31c.1 version of the allVisit file.'''
+
+    allvisit = Table.read(str(allvisitpath), format="fits")
+    allvisit["APOGEE_ID"] = npstr.rstrip(allvisit["APOGEE_ID"])
+    return allvisit
+
+def read_dr14_allSky(allskypath=paths.DS14_ALLSKY_PATH):
+    '''Reads the allSky file for DR14.'''
+
+def read_Rafa_rotation(rottable=paths.RAFA_SAVITA_PERIODS):
+    '''Reads in the rotation periods as determined by Rafa's pipeline.
+
+    This function will read in a file which, at the very least, contains the
+    KICs and corresponding periods of all of the stars which have detections of
+    rotation periods according to Rafa's pipeline.'''
+    rafa = Table.read(
+        str(rottable), format="ascii.no_header", names=["KIC", "Prot"])
+    return rafa
+            
 ###############################################################################
 # Catalog Curation
 ###############################################################################
 
 # def van_Saders_relevant_table(
 
+def select_samples_for_Rafa(
+    kic_catalog=None, hightemp=5500, lowtemp=0, loggcut=3.5, teffcol="teff",
+    loggcol="logg"):
+    '''Select a sample of objects for Rafa to analyze.
+
+    The default cuts for Rafa will be the requirements:
+    T < 5500 K
+    logg > 3.5
+    '''
+    if not kic_catalog:
+        kic_catalog = read_KIC_DR25_catalog()
+    tempcut = perform_teff_cut(kic_catalog, lowtemp=lowtemp, hightemp=hightemp,
+                               teffcol=teffcol)
+    giantcut = perform_logg_cut(tempcut, lowlogg=3.5, loggcol=loggcol)
+    rafacat = giantcut
+    return rafacat
+
+def fix_table_coordinates_units(tbl, ra_col, dec_col):
+    '''Fixes the units for coordinates in the table. 
+
+    For each of the coordinate columns, check that the unit entries for 
+    the coordinates are recognized by astropy.units. This has been made because
+    there are non-standard representations of units in the KIC catalog (and
+    possibly others), such as using "degrees" instead of "degree", which the
+    units framework can automatically determine.
+    '''
+    if tbl[ra_col].unit == "degrees":
+        tbl[ra_col].unit = u.degree
+    if tbl[dec_col].unit == "degrees":
+        tbl[dec_col].unit = u.degree
+
 ###############################################################################
 # Writing to databases #
 ###############################################################################
+
+def split_filename(filename):
+    '''Splits the suffix from the filename.
+
+    Will take a filename and then split it between the base name and the file
+    extension. For example, foo.bar becomes ("foo", "bar") or test.tar.gz
+    becomes ("test", "tar.gz"). Note that this function splits on the first
+    period. So basenames should not have a period in them.'''
+    return filename.split(".", maxsplit=1)
+
+def format_split_filename(base, num, ext):
+    '''Returns a filename formatted for sequential numbering.
+
+    This filename is currently in the form {base}.{num}.{ext}.
+    '''
+    return "{0}.{1}.{2}".format(base, num, ext)
+
+def delete_split_files(filename, outputpath):
+    '''Delete the split files generated from filename.
+
+    This function finds all files in outputpath that were generated by
+    splitting filename and deletes them all.'''
+    # Delete old split files before making new ones.
+    singlefile = outputpath / filename
+    previous_files = find_split_files(singlefile)
+    for oldfile in previous_files:
+        oldfile.unlink()
+
+
+def large_table_multiple_files_split(filename, tablelen, maxlen):
+    '''Formats input files into many broken files.
+
+    This function essentially splits a filename into a list of filenames that
+    are sequentially numbered. For example, if a service has a maximum limit of
+    5000 rows, and the table with 12,000 entries was supposed to be saved in 
+    a file called "test.txt", this function would output a list with
+    [test.0.txt, test.1.txt, test.2.txt]. If the table only had 2,000 entries,
+    it would return a single-item list with [test.txt]. 
+    
+    Note that this function splits on the first ".", so filenames periods 
+    before the extension will likely not behave as intended.
+    '''
+    filenames = []
+    if tablelen <= maxlen:
+        filenames.append(filename)
+    else:
+        name, ext = split_filename(filename)
+        for i in range((tablelen-1) // maxlen + 1):
+            numberedname = format_split_filename(name, i, ext)
+            filenames.append(numberedname)
+    return filenames
+
+def test_split():
+    filename = "test.txt"
+    assert (large_table_multiple_files_split(filename, 0, 3) == ["test.txt"])
+    assert (large_table_multiple_files_split(filename, 1, 3) == ["test.txt"])
+    assert (large_table_multiple_files_split(filename, 3, 3) == ["test.txt"])
+    assert (large_table_multiple_files_split(filename, 4, 3) == [
+        "test.0.txt", "test.1.txt"])
+    assert (large_table_multiple_files_split(filename, 6, 3) == [
+        "test.0.txt", "test.1.txt"])
+
+def write_columns_for_input(outputtable, filename, maxlen, table_format,
+                            output_columns=None, outputpath=paths.HEAD_DIR):
+    '''Write a table so that it can be uploaded to a service.
+
+    This function takes a table that should be written out to a (series of)
+    file(s) given in filename to be uploaded to a catalog. The outputtable 
+    should have only those columns that need to be written out. If the columns 
+    need to be renamed, then the names should be supplied in output_columns. 
+    The format of the table should be specified as table_format.
+    
+    If the length of of the table is larger than maxlen, then this function
+    will write several files, each containing at most maxlen entries. This is
+    useful for when catalogs have limits on how many entries can be given. In
+    this case, the filename will be split up to incorporate counters.'''
+    # Delete old split files before making new ones.
+    delete_split_files(filename, outputpath)
+
+    filenames = large_table_multiple_files_split(filename, len(outputtable),
+                                                 maxlen)
+    for i, outputfile in enumerate(filenames):
+        startind = maxlen * i
+        endind = min(maxlen * (i+1), len(outputtable))
+        outputsegment = outputtable[startind:endind]
+        outputsegment.write(str(outputpath / outputfile), format=table_format,
+                            include_names=output_columns)
 
 def write_MAST_files(outputtable, kiccol="KIC", outputpath=paths.HEAD_DIR,
                      output_filename="Kepler_MAST.txt"):
@@ -139,20 +468,10 @@ def write_MAST_files(outputtable, kiccol="KIC", outputpath=paths.HEAD_DIR,
     "output.txt" will become "output_1.txt", "output_2.txt", etc.
     '''
     MAST_LIMIT = 10000
-    if len(outputtable) > MAST_LIMIT:
-        basename, ext = output_filename.split(".")
-        output_filename = ".".join([basename+"_{0:d}", ext])
-    for i in range(len(outputtable) // MAST_LIMIT + 1):
-        startind = MAST_LIMIT * i
-        endind = min(MAST_LIMIT*(i+1), len(outputtable))
-        outputfile = str(outputpath / output_filename.format(i))
-        names = [kiccol]
-        outputsegment = outputtable[startind:endind]
-        print(outputsegment)
-        outputsegment.write(outputfile, format="ascii.no_header", 
-                            include_names=names)
+    write_columns_for_input(outputtable[[kiccol]], output_filename, MAST_LIMIT,
+                            "ascii.no_header")
 
-def write_crossID_file(
+def write_SDSS_crossID_file(
     outputtable, racol="RA", deccol="DEC", outputpath=paths.HEAD_DIR, 
     output_filename="APOGEE_targets.txt"):
     '''Writes a file to submit to SDSS crossID.
@@ -161,10 +480,9 @@ def write_crossID_file(
     http://skyserver.sdss.org/dr13/en/tools/crossid/crossid.aspx
     '''
     APOGEE_LIMIT = 1000
-    if len(outputtable) > APOGEE_LIMIT:
-        basename, ext = output_filename.split(".")
-        output_filename = ".".join([basename+"_{0:d}", ext])
-    for i in range(len(outputtable) // APOGEE_LIMIT + 1):
+    filenames = large_table_multiple_files_split(
+        output_filename, len(outputtable), APOGEE_LIMIT)
+    for i, outputfile in enumerate(filenames):
         startind = APOGEE_LIMIT * i
         endind = min(APOGEE_LIMIT*(i+1), len(outputtable))
         outputfile = str(outputpath / output_filename.format(i))
@@ -172,6 +490,21 @@ def write_crossID_file(
         outputsegment = outputtable[startind:endind]
         outputsegment[[racol, deccol]].write(outputfile, format="ascii.csv", 
                                              names=names)
+
+def write_UKIRT_file(
+    catalogtable, racol="RA", deccol="DEC", outputpath=paths.HEAD_DIR, 
+    output_filename="ukirt_input.txt", search_radius=30):
+    '''Takes RA and DEC columns from catalog to make an upload file.'''
+    if search_radius >= 5:
+        UKIRT_LIMIT = 5000
+    else:
+        UKIRT_LIMIT = 50000
+    coords = SkyCoord(
+        ra=catalogtable[racol], dec=catalogtable[deccol], unit="deg")
+    coordTable = Table(
+        [coords.ra.degree, coords.dec.degree], names=("RA", "DEC"))
+    write_columns_for_input(coordTable, output_filename, UKIRT_LIMIT,
+                            "ascii.no_header")
 
 def create_joined_APOKASC_McQuillan_catalog(
         apocat=None, mcquillancat=None, apofile=APOKASC_PATH,
@@ -252,6 +585,16 @@ def number_binned_by_temperature(
         mcquillan[teffcol], bins=tempbins, range=(lowtemp, hightemp))
     return (hist, binedges)
 
+def cumulative_number_binned_by_temperature(
+    mcquillan, hightemp=6500, lowtemp=3000, dtemp=50, teffcol="Teff"):
+    '''Plots a cumulative histogram of number based on temperature.'''
+    tempbins = np.arange(lowtemp, hightemp+dtemp, dtemp)
+    plt.hist(mcquillan[teffcol], bins=tempbins, range=(lowtemp, hightemp),
+             cumulative=True, histtype="step")
+    plt.xlim(plt.xlim()[::-1])
+    plt.xlabel("Teff (K)")
+    plt.ylabel("Number of cooler than Teff")
+
 def plot_number_bin(hist, binedges):
     '''Plot the number objects in each temperature bin.'''
     bincenters = (binedges[:-1] + binedges[1:])/2
@@ -281,6 +624,7 @@ def rapid_fraction_histogram(
         teffcol=teffcol)
     rapid_mcquillan = perform_period_cut(
         mcquillan, highperiod=maxper, periodcol=periodcol)
+    print("Rapid Rotator Number: " + rapid_mcquillan)
     rapidhist, rapidbins = number_binned_by_temperature(
         rapid_mcquillan, hightemp=hightemp, lowtemp=lowtemp, dtemp=dtemp,
         teffcol=teffcol)
@@ -381,6 +725,216 @@ def get_APOGEE_visit_info(twomass_id, loc_id):
 
     return object_table
 
+# Also want function that takes list of apogee fields and kic binaries and only
+# returns the ones that are in the given fields.
+def targets_in_APOGEE_fields(
+    apogee_fields, kic_targets, kic_racol="ra", kic_raunit=u.deg, 
+    kic_deccol="dec", kic_decunit=u.deg, field_col="APOGEE_Field"):
+    '''Determine which KIC targets lie within the given APOGEE fields.
+
+    Returns the subset of kic_targets which can be found in the given APOGEE
+    fields. The APOGEE fields that each target can be found in will be in the
+    column given by field_col.'''
+    all_apogee_fields = read_APOGEE_KASC_fields()
+    found_apogee_fields = unique(au.extract_subtable_from_column(
+        all_apogee_fields, "NAME", apogee_fields), keys="NAME")
+    field_coords = SkyCoord(
+        l=found_apogee_fields["Lon"]*u.deg, b=found_apogee_fields["Lat"]*u.deg, 
+        frame="galactic")
+    
+    try:
+        object_coords = SkyCoord(
+            kic_targets[kic_racol], kic_targets[kic_deccol], frame="icrs")
+    except u.UnitsError:
+        object_coords = SkyCoord(
+            kic_targets[kic_racol], kic_targets[kic_deccol], frame="icrs",
+            unit=(kic_raunit, kic_decunit))
+    target_fields = APOGEE_plates(
+        object_coords, found_apogee_fields["NAME"], field_coords)
+    found_target_indices = np.where(target_fields != "")
+    apogee_kics = kic_targets[found_target_indices]
+    apogee_kics[field_col] = target_fields[found_target_indices]
+    return apogee_kics
+
+def write_APOGEE_proposal_table(
+    field_targets, outputpath=paths.APOGEE_ANCILLARY_TARGETS_TABLE, 
+    apogee_field_col="APOGEE_Field", twomass_col="tm_designation", ra_col="ra", 
+    dec_col="dec", coord_source="KIC", hmag_col="hmag", hmag_source="2MASS", 
+    pmra_col="pmRA", pm_cosdec_applied=True, pmdec_col="pmDE", 
+    pm_source="UCAC-4", apokasc_visits=3, koi_visits=4, apokasc_SN=13, 
+    koi_SN=100):
+    '''Write the target table for the APOGEE Ancillary science proposal.
+
+    TYPE 1 PROPOSALS: Provide a table with the following information for each target, one target per line and sorted by field:
+
+    APOGEE-2 or MaNGA field name (e.g., "008-02", or "K12_074+15", see https://trac.sdss.org/wiki/APOGEE2/TargetingPlan for APOGEE-2 field names, and ​https://data.sdss.org/sas/mangawork/manga/target/tiles/v2_3/tilecenters_alladjusted.fits for MaNGA tile centers/names)
+    target name (2MASS ID if available; if no 2MASS ID is available, proposers must provide an alternate name and separately describe the targeting/analysis plan for such targets, which present challenges for the APOGEE-2 targeting/reduction pipelines, and will most likely deliver spectra with marginal S/N);
+    J2000.0 target coordinates (RA,Dec) in the format 00:00:00.0 +01:00:00
+    Source of coordinates ("Gaia", "2MASS" etc.)
+    H-band fiber magnitude (e.g., "10.5")
+    source for H-band photometry (e.g., "2MASS"; "VVV")
+    proper motion measurements, in units of mas/yr;
+    source for proper motion measurements (e.g., "UCAC-4")
+    minimum number of visits requested for target (e.g., "3")
+    total requested S/N (e.g., "100") 
+    '''
+    # This is the seed output table.
+    output_table = field_targets[[apogee_field_col, hmag_col]]
+
+    # Format the 2MASS ID correctly
+    output_table[twomass_col] = npstr.replace(field_targets[twomass_col],
+                                              "2MASS J", "2M")
+
+    # Now include Coordinates
+    target_coordinates = SkyCoord(
+        ra=field_targets[ra_col], dec=field_targets[dec_col])
+    ra_strings = target_coordinates.ra.to_string(
+        unit="hour", sep=":", precision=1)
+    dec_strings = target_coordinates.dec.to_string(
+        decimal=False, sep=":", alwayssign=True, precision=0)
+    coord_strings = npstr.add(ra_strings, npstr.add(" ", dec_strings))
+    output_table["Coords"] = coord_strings
+
+    # H-band magnitude
+    output_table[hmag_col].unit = None
+
+    # Proper motions
+    output_table[r"$\mu_\alpha \cos \delta$"] = np.ma.masked_invalid(
+        field_targets[pmra_col])
+    output_table[r"$\mu_\delta$"] = np.ma.masked_invalid(
+        field_targets[pmdec_col])
+
+    # Visits and S/N
+    KASC_sources = np.logical_or(
+        field_targets[apogee_field_col] == "K16_075+11",
+        field_targets[apogee_field_col] == "K20_073+09")
+    KOI_sources = ~KASC_sources
+    minvisits = np.zeros(len(field_targets), dtype=np.int)
+    minvisits[KASC_sources] = apokasc_visits
+    minvisits[KOI_sources] = koi_visits
+    output_table["Min. visits"] = minvisits
+
+    requestedSN = np.zeros(len(field_targets))
+    requestedSN[KASC_sources] = apokasc_SN
+    requestedSN[KOI_sources] = koi_SN
+    output_table["Req. S/N"] = requestedSN
+
+    ordered_output = output_table[[
+        apogee_field_col, twomass_col, "Coords", hmag_col, 
+        r"$\mu_\alpha \cos \delta$", r"$\mu_\delta$", 
+        "Min. visits", "Req. S/N"]]
+    ordered_output.sort(apogee_field_col)
+
+    # Comments about the dataset.
+    ordered_output.meta["comments"] = [
+    "Coords are from the KIC.",
+    "H-band magnitudes are from 2MASS.",
+    "Proper motions are from UCAC-4."]
+
+    names = ["APOGEE field", "2MASS ID", "Coords", "H", "PM_RA", "PM_DE", 
+             "Visits", "Req. S/N"]
+    # Unfortunately, the LaTeX writer isn't able to handle longtable correctly.
+    # Therefore, I want to write the file to a StringIO object and replace the
+    # instances of tabular with those of longtable.
+    ordered_output.write(
+        str(outputpath), format="ascii.fixed_width", names=names)
+
+def KIC_to_APOGEE_2MASS_designation(kic_desig):
+    '''Function to convert KIC 2MASS designations to be APOGEE ones.
+
+    The KIC designations are in the form of 2MASS J##########, while the apogee
+    ones are 2M##########.'''
+    apo_desig = npstr.replace(kic_desig, "2MASS J", "2M")
+    return apo_desig
+
+def read_APOGEE_KOI_fields(koifields=paths.APOGEE_KOI_FIELDS):
+    '''Get a table which contains information on the APOGEE KOI fields.'''
+    colnames = ["NAME", "Lon", "Lat", "DESIGN", "NVISITS", "TYPE",
+                "HEMISPHERE"]
+    return Table.read(str(koifields), format="ascii.basic", comment="!",
+                      names=colnames, guess=False)
+
+def read_APOGEE_KASC_fields(kascfields=paths.APOGEE_KASC_FIELDS):
+    '''Get a table which contains information on the APOGEE KOI fields.'''
+    colnames = ["NAME", "Lon", "Lat", "DESIGN", "NVISITS", "TYPE",
+                "HEMISPHERE"]
+    kasc_table = Table.read(str(kascfields), format="ascii.basic", comment="!",
+                      names=colnames, guess=False)
+    return kasc_table
+
+def observable_on_plate(objcoords, fieldcoord, CENTER_EXCLUSION=1.5*u.arcmin,
+                        FOV=1.5*u.degree):
+    '''Returns whether an object is observable on an APOGEE plate.
+
+    The center coordinate of the plate should be given in platecoord while the
+    coordinate of a group of objects should be given as objcoords. The field of 
+    view [1] should be (7\pi) degrees [2]. Each plate also has a central 
+    exclusion region due to the center posts of 1.5 arcminutes [3].
+
+    [1] There are currently three sources for the field of view. The first is the
+    APOGEE web site, given in [2], with the description of the spectrograph
+    having a 2 degree field of view. there is also the APOGEE technical paper
+    by Majewski et al (2016; arXiv:1509.05420), which states that APO has a
+    field of view of 3 degrees. Lastly, there is the targeting page [3], which
+    states that the total field of view of an APOGEE plate is 7 square degrees.
+    We'll take this to be the canonical value.
+
+    [2] http://www.sdss.org/instruments/apogee_spectrograph/
+
+    [3] http://www.sdss.org/dr13/irspec/targets/
+
+    [4] https://trac.sdss.org/wiki/APOGEE2/PlateDesign/ExclusionRadius
+    '''
+    separations = fieldcoord.separation(objcoords)
+    observable = np.logical_and(separations < FOV, separations >
+                                CENTER_EXCLUSION)
+    return observable
+
+def APOGEE_plates(objectcoords, fieldIDs, fieldcoords):
+    '''Return the APOGEE plates which the objects can be observed on.
+
+    The object and plate coordinates should be in a SkyCoords object. The names
+    of the plates should also be supplied in plateIDs.
+
+    This function will return a string array with field names for objects
+    located within an APOGEE field, or blank values if not found within an
+    APOGEE field.
+    '''
+    object_fields = np.full_like(objectcoords, "", dtype=fieldIDs.dtype)
+    ufieldIDs, unique_field_indices = np.unique(fieldIDs, return_index=True)
+    # Find a relatively reasonable way to verify that unique fieldIDs
+    # correspond to unique fieldcoords, and no surprises will occur. This same
+    # treatment can't be done with unique_coord_indices because SkyCoords are
+    # not orderable.
+    # See https://github.com/numpy/numpy/issues/641
+    ufieldcoords = fieldcoords[unique_field_indices]
+    for i in range(len(ufieldIDs)):
+        observable_indices = observable_on_plate(objectcoords, ufieldcoords[i])
+        # If an object can be observed in multiple fields, I'd like to know.
+        assert(np.all(object_fields[observable_indices] == ""))
+        object_fields[observable_indices] = ufieldIDs[i]
+    return object_fields
+
+def APOGEE_plate_count(fieldIDs, field_array):
+    '''Count the number of objects observed in each field.
+
+    Find the number of objects which were found in each APOGEE field. This 
+    function uses the output of the APOGEE_plates function in this module to
+    count the number of objects in each field. The fields of interest should be 
+    provided in fieldIDs.
+
+    This function returns a dictionary mapping the fieldID to the number of
+    objects in that field.
+    '''
+    fieldcounts = {}
+    unique_fields = np.unique(fieldIDs)
+    for field in unique_fields:
+        field_indices = (field_array == field)
+        num_objects = np.count_nonzero(field_indices)
+        fieldcounts[field] = num_objects
+
+    return fieldcounts
+
 def extract_mjd(soup):
     '''Extracts the MJD value from a web page.
 
@@ -389,6 +943,81 @@ def extract_mjd(soup):
     mjd = int(soup.find(
         "span", style=re.compile("background-color:#CAF1D7")).string)
     return mjd
+
+def vrel_snr_plot(apodwarfs):
+    '''Plots vrelerr, SNR, and H relationship.
+
+    Makes a double-plot showing the relationship between relative velocity
+    error, signal-to-noise, and H-band magnitude. This function uses only
+    APOGEE dwarfs lying within the Kepler field.
+    '''
+    # Set up good, warn, and bad targets.
+    starflag = apodwarfs["starflag"]
+#   good_dwarfs = starflag >= 0
+    good_dwarfs = starflag & (2**4 + 2**9) != 0
+    # These are targets with one of the: BAD_PIXELS (0), VERY_BRIGHT_NEIGHBOR
+    # (3), and LOW_SNR (4) flags set.
+    # http://www.sdss.org/dr12/algorithms/bitmasks/#APOGEE_TARGET2
+    bad_dwarfs = starflag & (2**0 + 2**3 + 2**4) != 0
+    warn_dwarfs = np.logical_not(np.logical_or(good_dwarfs, bad_dwarfs))
+
+    Hband = apodwarfs["h"]
+    snr = np.ma.masked_equal(apodwarfs["snr"], -9999)
+    vel_err = np.ma.masked_equal(
+        np.ma.masked_equal(
+            apodwarfs["vrelerr"], 999999), -9999)
+
+    binned_results = scipy.stats.binned_statistic(
+        Hband[good_dwarfs], snr[good_dwarfs], "median", bins=19, range=(7,14))
+    binned_snr = binned_results[0]
+    binned_H_edges = binned_results[1]
+    binned_H_values = (binned_H_edges[:-1] + 
+                         (binned_H_edges[1]-binned_H_edges[0])/2)
+    
+    apogee_est_SNR = np.array([100, 45, 20, 10])
+    apogee_est_H = np.array([11.3, 12.2, 13.3, 14.2])
+
+    plt.subplot(2, 1, 1) 
+    plt.scatter(snr[good_dwarfs], Hband[good_dwarfs], marker='x', label="",
+                c='k')
+#   plt.plot(snr[warn_dwarfs], Hband[warn_dwarfs], 'gx', label="")
+#   plt.plot(snr[bad_dwarfs], Hband[bad_dwarfs], 'gx', label="Bad")
+    plt.plot(binned_snr, binned_H_values, 'r-', lw=3, label="Median")
+    plt.plot(apogee_est_SNR, apogee_est_H, 'r--', label="Wiki Est.")
+    plt.title("APOGEE dwarfs in Kepler field")
+    plt.ylabel("H")
+    plt.xlim(0, 100)
+    plt.ylim(14.3, 7)
+    plt.legend(loc="lower right")
+
+    binned_results = scipy.stats.binned_statistic(
+        snr[good_dwarfs], vel_err[good_dwarfs], "median", bins=19, range=(5,100))
+    binned_RV_err = binned_results[0] 
+    binned_RV_edges = binned_results[1]
+    binned_snr_values = (binned_RV_edges[:-1] + 
+                         (binned_RV_edges[1]-binned_RV_edges[0])/2)
+
+    plt.subplot(2, 1, 2) 
+    plt.scatter(snr[good_dwarfs], vel_err[good_dwarfs], marker='x',
+                c='k')
+#   plt.plot(snr[warn_dwarfs], vel_err[warn_dwarfs], 'gx')
+#   plt.plot(snr[bad_dwarfs], vel_err[bad_dwarfs], 'gx')
+    ax = plt.gca()
+    plt.ylabel("RV error (km/s)")
+    plt.xlabel("SNR (single visit)")
+    plt.xlim(0, 100)
+    ax.plot(binned_snr_values, binned_RV_err, 'r-', lw=3)
+    inax = inset_axes(ax, width="50%", height="50%", loc=1)
+    inax.scatter(snr[good_dwarfs], vel_err[good_dwarfs], marker='x',
+                 c='k')
+#   inax.plot(snr[warn_dwarfs], vel_err[warn_dwarfs], 'gx')
+#   inax.plot(snr[bad_dwarfs], vel_err[bad_dwarfs], 'gx')
+    inax.plot(binned_snr_values, binned_RV_err, 'r-', lw=3)
+    inax.set_ylim(0, 1.1)
+    inax.set_xlim(0, 100)
+
+    plt.figure()
+    plt.plot(apodwarfs[good_dwarfs]["mjd"], vel_err[good_dwarfs], "b*")
 
 def extract_vrel(soup):
     '''Extracts the radial velocity from a web page.
@@ -596,6 +1225,12 @@ def perform_vscatter_cut(fullsample, lowv=None, highv=None, vcol="VSCATTER"):
 
     return perform_cut(fullsample, vcol, lowv, highv)
 
+def perform_logg_cut(tbl, highlogg=None, lowlogg=None, loggcol="LogG"):
+    '''Perform a cut on log g for a table sample.
+
+    Used to restrict the range of log g for a sample.'''
+    return perform_cut(tbl, loggcol, lowlogg, highlogg)
+
 def read_pulsators(pulsatorfile=os.path.join(WORKPATH, "pulsators.kic")):
     '''Reads in a list of KIC IDs of known pulsators.'''
 
@@ -619,18 +1254,9 @@ def filter_pulsators(fulltable, quiet=False, KICcol="KEPLER_INT"):
     add_cut_metadata(filteredtable, "Pulsators removed")
     return filteredtable
 
-def write_UKIRT_file(catalogtable, outputpath):
-    '''Takes RA and DEC columns from catalog to make an upload file.'''
-    coords = SkyCoord(
-        ra=catalogtable["RA"], dec=catalogtable["DEC"], unit="deg")
-    coordTable = Table(
-        [coords.ra.degree, coords.dec.degree], names=("RA", "DEC"))
-    coordTable.write(outputpath, format="ascii.no_header")
-
-def read_UKIRT_file(resultfile):
-    '''Reads in a file from UKIRT.'''
-    results = Table.read(resultfile, format="ascii.commented_header")
-    return results
+#############################################################################
+# UKIRT info #
+#############################################################################
 
 def filter_good_UKIRT_observations(ukirt_table):
     '''Takes a table with UKIRT observations and only returns "good" entries.
@@ -691,7 +1317,74 @@ def find_UKIRT_contaminants(
 
     return magdiffs
 
-def select_tidally_synchronized_binaries(table):
+def find_UKIRT_contaminating_object(ukirt_result):
+    '''Return the row for the contaminating object from UKIRT result.
+
+    Given a UKIRT result, find the second-brightest object within the Kepler
+    PSF. This function will only contain the rows that fulfill the
+    brightest-contaminant criterion.'''
+
+    good_ukirt = filter_good_UKIRT_observations(ukirt_result)
+    ukirt_groups = good_ukirt.group_by("upload_ID")
+
+    main_contam_rows = []
+    # The apogee fiber is approximately 2 arcseconds wide, so the source should
+    # be in there. Ideally, this shouldn't do anything.
+    apogee_window = 2 * u.arcsec
+    # The optimal aperture size for Kepler photometry generally ranges from
+    # 10-50 pixels. Each pixel is about 4 arcseconds long.
+    kepler_window = np.sqrt(50) * 4 * u.arcsec
+    
+    for i, contam_list in enumerate(ukirt_groups.groups):
+        targetind = np.argmin(contam_list["distance"])
+        sortindices = np.argsort(contam_list["jAperMag3"])
+
+        # If the target is the brightest object, then pick the second brightest
+        # in the aperture, otherwise, pick the brightest.
+        if targetind == sortindices[0]:
+            contamindex = sortindices[1]
+        else:
+            contamindex = sortindices[0]
+        main_contam_rows.append(contam_list[contamindex])
+
+    contam_table = Table(rows=main_contam_rows, names=ukirt_result.colnames)
+    return contam_table
+
+# Maybe combine these two since you need the target object to find the
+# contaminating object correctly.
+
+def find_UKIRT_target_object(ukirt_result):
+    '''Return the row for the target from a UKIRT result.
+
+    Given a UKIRT result, find the object closest to the uploaded RA. This
+    function will only contain the rows that are closest to the uploaded
+    coordinate.'''
+    good_ukirt = filter_good_UKIRT_observations(ukirt_result)
+    ukirt_groups = good_ukirt.group_by("upload_ID")
+
+    main_target_rows = []
+    for target_list in ukirt_groups.groups:
+        target_row = target_list[np.argmin(target_list["distance"])]
+
+        main_target_rows.append(target_row)
+
+    target_table = Table(rows=main_target_rows, names=ukirt_result.colnames)
+    return target_table
+
+def select_brightest_targets(
+    tblgrp, num=2, magcol="jAperMag3"):
+    '''Selects the brightest targets in the groups in his table.
+
+    Selects the brightest objects in each table in each group. The number of
+    brightest objects to reserve is given in num, and the column which holds
+    the magnitudes are in magcol.'''
+    for grp in tblgrp:
+        pass
+
+
+def select_tidally_synchronized_binaries(
+    table, pcut=5, lowtemp=4850, hightemp=5600, lowperiod=1, teffcol="Teff",
+    pcol="Prot"):
     '''Cuts out the objects that are potentially TSBs.
 
     This function provides a standardized way to select a sample of Tidally
@@ -699,15 +1392,12 @@ def select_tidally_synchronized_binaries(table):
     function may evolve as TSB selection criteria improve; however, for a
     standard, transparent selection, this will do.
 
-    The current criteria are that TSBs have orbital periods of around 3 days,
+    The current criteria are that TSBs have orbital periods of around 5 days,
     and effective temperatures between 5700 and 4600 K.
     '''
-    period_cut = perform_period_cut(table, lowperiod=1, highperiod=5, 
-                                    periodcol="Prot")
-    try:
-        temp_cut = perform_teff_cut(period_cut, 4850, 5600, "TEFF_FIT")
-    except KeyError:
-        temp_cut = perform_teff_cut(period_cut, 4850, 5600, "Teff")
+    period_cut = perform_period_cut(table, lowperiod=lowperiod, highperiod=pcut, 
+                                    periodcol=pcol)
+    temp_cut = perform_teff_cut(period_cut, lowtemp, hightemp, teffcol)
 
     return temp_cut
 
@@ -807,21 +1497,25 @@ def radial_velocity_tides_contour(combined_mass, tidal_limit=5*u.day):
     contour plot will be made indicating the radial velocities corresponding to
     each pair of mass ratio and period.
     '''
-    periodrange = np.linspace(0.01, 15, 100)*u.day
+    periodrange = np.linspace(0.01, 10, 100)*u.day
     ratiorange = np.linspace(0.01, 1, 100)
 
     velocities = bc.calc_velocity_of_binary(
         combined_mass, periodrange, ratiorange[:,np.newaxis])
 
     plt.figure()
-    contourlevels = [1, 5, 10, 25, 50, 75, 100, 200]
+    contourlevels = [5, 10, 25, 50, 75, 100]
     CS = plt.contour(periodrange.to(u.day).value, ratiorange,
                      velocities.to(u.km/u.s).value, levels=contourlevels,
                      colors="k")
-    plt.clabel(CS, inline=1, fontsize=10)
+    plt.clabel(CS, inline=1, fontsize=13)
     plt.xlabel("Period (day)")
     plt.ylabel("Mass ratio")
     plt.title("Velocities for combined mass of {0}".format(combined_mass))
+
+###############################################################################
+# Eclipsing Binaries #
+###############################################################################
 
 def read_villanova_EBs(
     EBpath="/home/regulus/simonian/Binaries/Villanova_EB_v3.txt"):
@@ -829,6 +1523,23 @@ def read_villanova_EBs(
     ebcat = Table.read(EBpath, format="ascii.commented_header",
                        header_start=-1)
     return ebcat
+
+def read_Kirk_geometric_correction_spline(
+    splinepath="/home/regulus/simonian/Binaries/Kirk_geometric_correction_spline.csv"):
+    '''Read the spline that represents the geometric correction for EBs.
+
+    The correction was taken from Fig. 11 in Kirk et al (2016).'''
+    splinepoints = Table.read(
+        splinepath, format="ascii.csv", data_start=0, 
+        names=("period", "efficiency"))
+    periods = np.log10(splinepoints["period"])
+    corrections = splinepoints["efficiency"]
+    correction_interpolator = interp1d(periods, corrections)
+    return correction_interpolator
+
+def num_missing_binaries(logperiods, nbins, minlogper=-1, maxlogper=1.3):
+    '''Calculate the number of noneclipsing'''
+    pass
 
 ###############################################################################
 # KepVIM #
@@ -906,7 +1617,7 @@ def kepVIM_quarter_table(kepvimtable, kic_col="KIC"):
     For the sake of making things sane again, this table has one row for each
     KIC object, and columns for each quarter, indicating in which quarter the 
     KIC object had VIM observations.'''
-    quarter_table = Table([kepvimtable[kic_col]])
+    quarter_table = Table([np.unique(kepvimtable[kic_col])])
     colcount = np.zeros(len(quarter_table))
 
     for quarter in range(1, 18):
@@ -924,6 +1635,25 @@ def kepVIM_quarter_table(kepvimtable, kic_col="KIC"):
 
     quarter_table["Num_Q"] = colcount
     return quarter_table
+
+def kepVIM_blending_statistics(magdiffs, offsets, quarters):
+    '''Plots how contaminants affect various quarters of VIM.
+
+    Generates a plot that shows how the number of quarters that an object
+    experiences VIM is related to the magnitude and distance of the
+    contaminant. The magnitude difference will be shown on the y-axis, the
+    distance of the contaminant on the x-axis, and the color will reflect how
+    many quarters of VIM it has.
+    '''
+    colormap = cm.viridis
+    floatquarters = np.array(quarters, dtype=np.float)
+    plt.scatter(offsets, magdiffs, c=floatquarters, cmap=colormap, s=8,
+                edgecolors="face")
+    cbar = plt.colorbar()
+    cbar.set_label("Quarters")
+    plt.xlabel("Distance from source")
+    plt.ylabel("J_Target - J_Contam")
+
 
 ###############################################################################
 # ASPCAP #

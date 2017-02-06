@@ -32,3 +32,19 @@ def invert_y_axis(axes=None):
     if ylims[0] < ylims[1]:
         # Invert the axis
         axes.set_ylim(ylims[::-1])
+
+def three_panel_hrdiagram(teff, luminosity, BVcolor, Vmag, JKcolor, Kmag):
+    '''Makes a three-panel HR diagram.
+
+    The first panel should be a Teff-Luminosity diagram. This is purely
+    theoretical and should reflect what the isochrones as a whole are doing.
+
+    The second panel will be a B-V vs M_V diagram. This will describe how the
+    stars behave in the optical.
+
+    The last panel will be a J-Ks vs M_Ks diagram. This will describe how the
+    stars behave in the NIR.'''
+
+    plt.subplot(131)
+    plt.plot(teff, luminosity, line_style="-")
+    # TBD

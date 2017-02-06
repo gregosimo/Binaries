@@ -18,6 +18,7 @@ import matplotlib.pyplot as plt
 
 import path_config as paths
 import catalog
+import hrplots as hr
 
 DESP_PATH = "/home/regulus/simonian/DSep/"
 
@@ -548,6 +549,241 @@ def read_DSEP_isochrone(
 
     return age_table
 
+# Plotting without Interpolation #
+##################################
+
+def color_mag_age_evolution(ages, DSEP_lookup, metallicity=0.0, Y=1, afe=2, 
+                            lowT=3000, mag="V", color="B-V"):
+    '''Plots the evolution of the color-magnitude diagram.
+
+    This shows how given masses evolve with age on the color-magnitude diagram.
+    Points of a given mass will be connected.'''
+    ages = np.sort(ages)
+    firstiso = read_DSEP_isochrone(metallicity, ages[0], 
+                                   bands=DSEP_lookup[mag], Y=Y, afe=afe)
+    firstiso = restrict_interpolation_table(
+        firstiso, highT=6000, lowT=lowT, minlogG=4.1)
+    standard_masses = firstiso["M/Mo"]
+    bluecol, redcol = split_color(color)
+    firstmag = firstiso[mag]
+    firstcolor = firstiso[bluecol] - firstiso[redcol]
+    plt.plot(firstcolor, firstmag, marker="*", linestyle="None", ms=12,
+             label="{0:.1f} Gyr".format(ages[0]))
+    for i in range(1, len(ages), 1):
+        print("Age: {0:.1f}".format(ages[i]))
+        second_mag_interp = mass_to_band_DSEP_interpolator(
+            mag, age=ages[i], metallicity=metallicity, bands=DSEP_lookup[mag], 
+            Y=Y, afe=afe, lowT=lowT)
+        second_masses = standard_masses[np.where(np.logical_and(
+            standard_masses > np.amin(second_mag_interp.x), standard_masses
+            < np.amax(second_mag_interp.x)))]
+        secondmag = second_mag_interp(second_masses)
+        second_color_interp = mass_to_color_DSEP_interpolator(
+            color, DSEP_lookup, age=ages[i], Y=Y, afe=afe, lowT=lowT)
+        test_masses = standard_masses[np.where(np.logical_and(
+            standard_masses > np.amin(second_color_interp.x), standard_masses
+            < np.amax(second_color_interp.x)))]
+        assert(np.all(second_masses == test_masses))
+        secondcolor = second_color_interp(second_masses)
+
+
+        plt.plot(secondcolor, secondmag, marker="*", linestyle="None", ms=8,
+                 label="{0:.1f} Gyr".format(ages[i]))
+        first_ind = np.where(standard_masses >= second_masses[0])[0][0]
+        for j in range(len(second_masses)):
+            plt.plot(
+                [firstcolor[first_ind+j], secondcolor[j]], 
+                [firstmag[first_ind+j], secondmag[j]], 
+                linestyle="-", color="k", marker="None")
+            assert(standard_masses[first_ind+j] == second_masses[j])
+        standard_masses = second_masses
+        firstmag = secondmag
+        firstcolor = secondcolor
+
+    hr.invert_y_axis()
+    plt.xlabel(color)
+    plt.ylabel(mag)
+    plt.legend(loc="lower left")
+
+def color_mag_mass_ratio_transition(
+    massratios, DSEP_lookup, metallicity=0.0, age=4.0, Y=1, afe=2, lowT=3000, 
+    mag="V", color="B-V"):
+    '''Plot tracks of mass-ratio for a fixed primary mass in color-mag space.
+
+    Will demonstrate how a companion of a specified mass-ratio will be able to
+    affect the position in an HR diagram. The single-star track will
+    automatically be plotted, so q=0 does not need to be included in massratios
+    to demonstrate this.'''
+    massratios = np.sort(massratios)
+    single_iso = read_DSEP_isochrone(metallicity, age, bands=DSEP_lookup[mag], afe=afe)
+    single_iso = restrict_interpolation_table(
+        single_iso, highT=6000, lowT=3000, minlogG=4.1)
+    standard_masses = single_iso["M/Mo"]
+    prev_masses = standard_masses
+    bluecol, redcol = split_color(color)
+    prev_mag = single_iso[mag]
+    prev_color = single_iso[bluecol] - single_iso[redcol]
+    plt.plot(prev_color, prev_mag, marker="*", linestyle="None", ms=12,
+             label="q = {0:.2f}".format(0.0))
+    for i, q in enumerate(massratios):
+        secondary_masses = q * standard_masses
+        # This is because the interpolation will fail for secondaries with too
+        # low of a mass-ratio.
+        valid_secondaries = np.logical_and(
+            secondary_masses > np.amin(standard_masses), secondary_masses
+            < np.amax(standard_masses))
+        valid_mag = calculate_binary_star_mag_DSEP(
+            mag, standard_masses[valid_secondaries],
+            secondary_masses[valid_secondaries], metallicity, DSEP_lookup, 
+            age=age, Y=Y, afe=afe)
+        valid_color = calculate_binary_star_color_DSEP(
+            color, standard_masses[valid_secondaries],
+            secondary_masses[valid_secondaries], metallicity, DSEP_lookup, 
+            age=age, Y=Y, afe=afe)
+        next_mag = prev_mag.copy()
+        next_mag[valid_secondaries] = valid_mag
+        next_color = prev_color.copy()
+        next_color[valid_secondaries] = valid_color
+
+        plt.plot(next_color[valid_secondaries], next_mag[valid_secondaries], 
+                 marker="*", linestyle="None", ms=8, 
+                 label="q = {0:.2f}".format(q))
+        # This is to control that the first time through the loop, EVERY
+        # isochrone model will have a valid data point. However, once a
+        # companion is added, the number of valid models are strictly
+        # increasing. So the next models should have more points.
+        for j in range(len(next_color)):
+            plt.plot(
+                [prev_color[j], next_color[j]], 
+                [prev_mag[j], next_mag[j]], 
+                linestyle="-", color="k", marker="None")
+        prev_mag = next_mag
+        prev_color = next_color
+
+    hr.invert_y_axis()
+    plt.xlabel(color)
+    plt.ylabel(mag)
+    plt.legend(loc="lower left")
+
+def color_mag_metallicity_track(metallicities, DSEP_lookup, age=1.0, Y=1, afe=2, 
+                                lowT=3000, mag="V", color="B-V"):
+    '''Plots the effect of metallicity on the color-magnitude diagram
+
+    This shows how the position given masses on the HR diagram depend on
+    metallicity. Points of a given mass will be connected.'''
+    # We always want solar metallicity to be a part of the array.
+    if np.count_nonzero(metallicities == 0.0) == 0:
+        np.insert(metallicities, 0, 0.0)
+    metallicities = np.sort(metallicities)
+    print(metallicities)
+    firstiso = read_DSEP_isochrone(metallicities[0], age, 
+                                   bands=DSEP_lookup[mag], Y=Y, afe=afe)
+    firstiso = restrict_interpolation_table(
+        firstiso, highT=6000, lowT=lowT, minlogG=4.1)
+    standard_masses = firstiso["M/Mo"]
+    bluecol, redcol = split_color(color)
+    firstmag = firstiso[mag]
+    firstcolor = firstiso[bluecol] - firstiso[redcol]
+    print("{0}: {1}".format(color, firstcolor))
+    # Assumes at least one subsolar point.
+    plt.plot(firstcolor, firstmag, marker="*", linestyle="None", ms=8,
+             label="[Fe/H]={0:.1f}".format(metallicities[0]))
+    for i in range(1, len(metallicities), 1):
+        print("[Fe/H]: {0:.1f}".format(metallicities[i]))
+        second_mag_interp = mass_to_band_DSEP_interpolator(
+            mag, age=age, metallicity=metallicities[i], 
+            bands=DSEP_lookup[mag], Y=Y, afe=afe, lowT=lowT)
+        second_masses = standard_masses[np.where(np.logical_and(
+            standard_masses > np.amin(second_mag_interp.x), standard_masses
+            < np.amax(second_mag_interp.x)))]
+        secondmag = second_mag_interp(second_masses)
+        second_color_interp = mass_to_color_DSEP_interpolator(
+            color, DSEP_lookup, metallicity=metallicities[i], age=age, Y=Y, 
+            afe=afe, lowT=lowT)
+        test_masses = standard_masses[np.where(np.logical_and(
+            standard_masses > np.amin(second_color_interp.x), standard_masses
+            < np.amax(second_color_interp.x)))]
+        assert(np.all(second_masses == test_masses))
+        secondcolor = second_color_interp(second_masses)
+
+        if metallicities[i] == 0.0:
+            ms=12
+        else:
+            ms=8
+        print("{0}: {1}".format(color, secondcolor))
+        plt.plot(secondcolor, secondmag, marker="*", linestyle="None", ms=ms,
+                 label="[Fe/H]={0:.1f}".format(metallicities[i]))
+        first_ind = np.where(standard_masses >= second_masses[0])[0][0]
+        for j in range(len(second_masses)):
+            plt.plot(
+                [firstcolor[first_ind+j], secondcolor[j]], 
+                [firstmag[first_ind+j], secondmag[j]], 
+                linestyle="-", color="k", marker="None")
+            assert(standard_masses[first_ind+j] == second_masses[j])
+        standard_masses = second_masses
+        firstmag = secondmag
+        firstcolor = secondcolor
+
+    hr.invert_y_axis()
+    plt.xlabel(color)
+    plt.ylabel(mag)
+    plt.legend(loc="lower left")
+
+def color_mag_extinction(
+    reddenings, DSEP_lookup, metallicity=0.0, age=4.0, Y=1, afe=2, lowT=3000, 
+    mag="V", color="B-V"):
+    '''Plot tracks of mass-ratio for a fixed primary mass in color-mag space.
+
+    Will demonstrate how a companion of a specified mass-ratio will be able to
+    affect the position in an HR diagram. The single-star track will
+    automatically be plotted, so q=0 does not need to be included in massratios
+    to demonstrate this.'''
+    if np.count_nonzero(reddenings == 0.0) == 0:
+        np.insert(reddenings, 0, 0.0)
+    reddenings = np.sort(reddenings)
+    unextincted_iso = read_DSEP_isochrone(
+        metallicity, age, bands=DSEP_lookup[mag], afe=afe)
+    unextincted_iso = restrict_interpolation_table(
+        unextincted_iso, highT=6000, lowT=3000, minlogG=4.1)
+    standard_masses = unextincted_iso["M/Mo"]
+    prev_masses = standard_masses
+    bluecol, redcol = split_color(color)
+    prev_mag = unextincted_iso[mag]
+    prev_color = unextincted_iso[bluecol] - unextincted_iso[redcol]
+    plt.plot(prev_color, prev_mag, marker="*", linestyle="None", ms=12,
+             label="E(B-V) = {0:.2f}".format(reddenings[0]))
+    print(reddenings)
+    for i, EBV in enumerate(reddenings[1:]):
+        # This is because the interpolation will fail for secondaries with too
+        # low of a mass-ratio.
+        reddened_mag = calculate_single_star_magnitude_DSEP(
+            mag, standard_masses, metallicity, bands=DSEP_lookup[mag], age=age, Y=Y, 
+            afe=afe, redden_EBV=EBV)
+        reddened_color = calculate_single_star_color_DSEP(
+            color, standard_masses, metallicity, DSEP_lookup, age=age, Y=Y, 
+            afe=afe, redden_EBV=EBV)
+        next_mag = reddened_mag
+        next_color = reddened_color
+
+        plt.plot(next_color, next_mag, marker="*", linestyle="None", ms=8, 
+                 label="E(B-V) = {0:.2f}".format(EBV))
+        # This is to control that the first time through the loop, EVERY
+        # isochrone model will have a valid data point. However, once a
+        # companion is added, the number of valid models are strictly
+        # increasing. So the next models should have more points.
+        for j in range(len(next_color)):
+            plt.plot(
+                [prev_color[j], next_color[j]], 
+                [prev_mag[j], next_mag[j]], 
+                linestyle="-", color="k", marker="None")
+        prev_mag = next_mag
+        prev_color = next_color
+
+    hr.invert_y_axis()
+    plt.xlabel(color)
+    plt.ylabel(mag)
+    plt.legend(loc="lower left")
+
 # DSEP Interpolation Routines #
 ###############################
 
@@ -611,15 +847,10 @@ def restrict_interpolation_table(
         highT = np.log10(highT)
     tempcut = catalog.perform_teff_cut(
         isochrone, lowtemp=lowT, hightemp=highT, teffcol="LogTeff")
-    loggcut = perform_logg_cut(tempcut, lowlogg=minlogG)
+    loggcut = catalog.perform_logg_cut(tempcut, lowlogg=minlogG)
     restricted_table = loggcut
     return restricted_table
 
-def perform_logg_cut(tbl, highlogg=None, lowlogg=None, loggcol="LogG"):
-    '''Perform a cut on log g for a table sample.
-
-    Used to restrict the range of log g for a sample.'''
-    return catalog.perform_cut(tbl, loggcol, lowlogg, highlogg)
 
 # This is a list that I decided to use in order to persistently store
 # what the single-valued colors are when going from color to mass.
@@ -962,7 +1193,7 @@ def populate_double_valued_colors(
 
 
 def check_if_double_valued(
-    color, DSEP_lookup, age=1.5, metallicity=1.0, Y=1, afe=2, lowT=3000):
+    color, DSEP_lookup, age=1.5, metallicity=0.0, Y=1, afe=2, lowT=3000):
     '''Performs a primitive check to see if the color is double-valued.
 
     This function essentailly checks whether the DSEP models predict that the
@@ -1547,9 +1778,9 @@ def calculate_binary_star_mag_DSEP(
     Magnitudes are calculated directly from the DSEP isochrones.
     '''
     mag1 = calculate_single_star_magnitude_DSEP(
-        DSEP_lookup[mag], mass1, metallicity, age=age, Y=Y, afe=afe)
+        mag, mass1, metallicity, age=age, Y=Y, afe=afe, bands=DSEP_lookup[mag])
     mag2 = calculate_single_star_magnitude_DSEP(
-        DSEP_lookup[mag], mass2, metallicity, age=age, Y=Y, afe=afe)
+        mag, mass2, metallicity, age=age, Y=Y, afe=afe, bands=DSEP_lookup[mag])
 
     binary_mag = sum_binary_mag(mag1, mag2)
     extincted_binary = redden_mag(mag, binary_mag, redden_EBV)
@@ -2254,14 +2485,14 @@ def color_excess_plot_comparison(
 
 def color_color_isochrone_plot(
     ycolor, xcolor, DSEP_lookup, lowT=3000, age=1.0, metallicity=0.0, Y=1, 
-    afe=2, redden_EBV=0.0):
+    afe=2, redden_EBV=0.0, init_mass=0):
     '''Plots an isochrone line in a color-color space.
 
     Plot the DSEP isochrone projected in the ycolor vs xcolor space. It ranges
     from high_mass to low_mass.'''
     interpolator = color_to_color_DSEP_interpolator(
         xcolor, ycolor, DSEP_lookup, age=age, metallicity=metallicity, Y=Y,
-        afe=afe, redden_EBV=redden_EBV, lowT=lowT)
+        afe=afe, redden_EBV=redden_EBV, lowT=lowT, init_mass=init_mass)
 
     plot_isochrone(interpolator)
 
@@ -2343,7 +2574,7 @@ def plot_binary_loops(
         comb_xcolor = calculate_binary_star_color_DSEP(
             xcolor, prim, secondaries, metallicity, DSEP_lookup, age=age,
             redden_EBV=redden_EBV)
-        plt.plot(comb_xcolor, comb_ycolor, 'r-')
+        plt.plot(comb_xcolor, comb_ycolor, 'r-', linewidth=2)
 
 def plot_binary_loop_excess(
     ycolor, xcolor, DSEP_lookup, primary_mass, metallicity=0.0, age=1.0, Y=1,
@@ -2403,7 +2634,7 @@ def plot_mass_color(color, DSEP_lookup, metallicity=0.0, age=1.0):
     # be transferred here.
     pass
 
-def plot_isochrone(isochrone, npoints=1000):
+def plot_isochrone(isochrone, npoints=1000, label=""):
     '''Take an isochrone of some kind and plot it internally.
 
     This function essentially takes the bounds contained within the isochrone
@@ -2411,7 +2642,7 @@ def plot_isochrone(isochrone, npoints=1000):
     '''
     testpoints = np.linspace(isochrone.x[0], isochrone.x[-1], 1000)
     testvalues = isochrone(testpoints)
-    plt.plot(testpoints, testvalues, 'r-')
+    plt.plot(testpoints, testvalues, 'r-', linewidth=3, label=label)
 
 def test_isochrone(isochrone, npoints=1000):
     '''Plot actual isochrone points on top of interpolations.
@@ -2517,6 +2748,30 @@ def plot_DSEP_excesses():
             plt.title("{0:.1f} Msun Excess".format(2.0-0.5*i))
             plt.tight_layout()
 
+# This plot should be broken up. But I wanna make it fast.
+def triple_hr_comparison_plot(
+    optical_mag, optical_color, nir_mag, nir_color, DSEP_lookup,
+    ages=[1.0, 2.0, 5.0, 10.0], metallicity=0.0, Y=1, afe=2, lowT=3000):
+    for age in ages:
+        plt.subplot(131)
+        teff_lum = DSEP_interpolation(
+            "LogTeff", "LogL/Lo", age=age, metallicity=metallicity, Y=Y,
+            afe=afe, lowT=lowT)
+        plot_isochrone(teff_lum, label="{0:.2g} Gyr".format(age))
+        hr.invert_x_axis()
+        plt.subplot(132)
+        color_mag_optical = color_to_mag_DSEP_interpolator(
+            optical_color, optical_mag, DSEP_lookup, age=age,
+            metallicity=metallicity, Y=Y, afe=afe, lowT=lowT)
+        plot_isochrone(color_mag_optical, label="{0:.2g} Gyr".format(age))
+        hr.invert_y_axis()
+        plt.subplot(133)
+        color_mag_nir = color_to_mag_DSEP_interpolator(
+            nir_color, nir_mag, DSEP_lookup, age=age,
+            metallicity=metallicity, Y=Y, afe=afe, lowT=lowT)
+        plot_isochrone(color_mag_nir, label="{0:.2g} Gyr".format(age))
+        hr.invert_y_axis()
+
 ###############################################################################
 # Reddening Routines #
 ###############################################################################
@@ -2621,7 +2876,7 @@ def sum_binary_mag(mag1, mag2):
 
     This function takes two magnitude values in a given band and adds them in
     order to make the combined magnitude in that band.'''
-    summed_mag = mag1 - 2.5 * np.log10(1 + 10**(0.4 * (mag2 - mag1)))
+    summed_mag = mag1 - 2.5 * np.log10(1 + 10**(-0.4 * (mag2 - mag1)))
     return summed_mag
     
 if __name__ == "__main__":

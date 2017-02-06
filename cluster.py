@@ -440,7 +440,7 @@ class M67_Cluster(Cluster_Data):
         plt.ylabel(mag)
 
     def plot_color_color(self, ycolor, xcolor, fmt='r*', subset=[], label="",
-                         errors=False, lowT=4000):
+                         errors=False, lowT=4000, init_mass=0.0):
         '''Plot working data points in color-color space.'''
 
         if len(subset) > 0:
@@ -477,7 +477,7 @@ class M67_Cluster(Cluster_Data):
         plt.plot(xcolorvals, ycolorvals, fmt, label=label, ms=12)
         sed.color_color_isochrone_plot(
             ycolor, xcolor, self.DSEP_lookup, lowT=lowT, age=self.age, 
-            redden_EBV=self.EBV)
+            redden_EBV=self.EBV, init_mass=init_mass)
 
         ylimits = plt.ylim()
         if ylimits[0] < ylimits[1]:
@@ -647,16 +647,16 @@ class M67_Cluster(Cluster_Data):
         return self.tablesegment["FanID"][singles]
 
 
-    def plot_binary_prediction_success(self, ycolor, xcolor):
+    def plot_binary_prediction_success(self, ycolor, xcolor, lowT=4000):
         '''Plot the success at predicting binary objects in M67.
 
         Selects photometric binaries from the CMD, and then maps them onto the
         color-color diagram.'''
         fullset = set(self.tablesegment["FanID"])
         photometric_binaries = set(self.select_photometric_color_binaries(
-            ycolor, xcolor, siglimit=3))
+            ycolor, xcolor, siglimit=3, lowT=lowT))
         true_binaries = set(self.select_photometric_binaries(
-            "V-I", "V", siglimit=3))
+            "V-I", "V", siglimit=3, lowT=lowT))
 
         true_positives = list(
             true_binaries.intersection(photometric_binaries))
@@ -669,16 +669,16 @@ class M67_Cluster(Cluster_Data):
 
         self.plot_color_color(
             ycolor, xcolor, fmt='ro', subset=true_negatives, errors=True,
-            label="True Negative")
+            label="True Negative", lowT=lowT)
         self.plot_color_color(
             ycolor, xcolor, fmt='rx', subset=false_positives, errors=True,
-            label="False Positive")
+            label="False Positive", lowT=lowT)
         self.plot_color_color(
             ycolor, xcolor, fmt='bx', subset=false_negatives, errors=True,
-            label="False Negative")
+            label="False Negative", lowT=lowT)
         self.plot_color_color(
             ycolor, xcolor, fmt='bo', subset=true_positives, errors=True,
-            label="True Positive")
+            label="True Positive", lowT=lowT)
 
         num_true_neg = len(true_negatives)
         num_false_pos = len(false_positives)
