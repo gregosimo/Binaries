@@ -316,7 +316,6 @@ def read_dr14_allVisit(allvisitpath=paths.DR14_ALLVISIT_PATH):
     allvisit["APOGEE_ID"] = npstr.rstrip(allvisit["APOGEE_ID"])
     return allvisit
 
-<<<<<<< HEAD
 def read_dr14_allStar(allstarpath=paths.DR14_ALLSTAR_PATH):
     '''Reads the allStar file for DR14.
     
@@ -328,10 +327,6 @@ def read_dr14_allStar(allstarpath=paths.DR14_ALLSTAR_PATH):
     '''
     allStar = Table.read(str(allstarpath), format="fits")
     return allStar
-=======
-#def read_dr14_allSky(allskypath=paths.DS14_ALLSKY_PATH):
-#    '''Reads the allSky file for DR14.'''
->>>>>>> fe055cece3c0be05d7fbd92a5c91d650ceb88250
 
 def read_Rafa_rotation(rottable=paths.RAFA_SAVITA_PERIODS):
     '''Reads in the rotation periods as determined by Rafa's pipeline.
