@@ -47,4 +47,5 @@ THESIS_PATH = HEAD_DIR / "Thesis"
 PROPOSAL_PATH = THESIS_PATH / "Proposals"
 APOGEE_ANCILLARY_TARGETS_TABLE = PROPOSAL_PATH / "ancillary_targets.txt"
 
-DS14_ALLVISIT_PATH = HEAD_DIR / "allVisit-l31c.1.fits"
+DR14_ALLVISIT_PATH = HEAD_DIR / "allVisit-l31c.1.fits"
+DR14_ALLSTAR_PATH = HEAD_DIR / "allStar-l31c.1.fits"

@@ -286,8 +286,11 @@ def join_by_2MASS_key(tbl1, tbl2, tm1, tm2, join_type="inner",
         raise ValueError("Don't recognize 2MASS key: " + tbl2[tm2][0])
 
     if tbl1_type == tbl2_type:
-        new_table = au.join_by_id(tbl1, tbl2, tm1, tm2)
+        new_table = au.join_by_id(tbl1, tbl2, tm1, tm2, join_type=join_type, 
+                                  idproc=npstr.strip)
+        print("Types the same")
     else:
+        print("Types different")
         def transform(oldcol):
             if tbl1_type == "KIC" and tbl2_type == "APOGEE":
                 npstr.replace(oldcol, apogee_prefix, kic_prefix)
@@ -297,13 +300,14 @@ def join_by_2MASS_key(tbl1, tbl2, tm1, tm2, join_type="inner",
         tbl2_newcol = npstr.replace(tbl2_oldcol, apogee_prefix, kic_prefix)
         del(tbl2[tm2])
         tbl2[tm2] = tbl2_newcol
-        new_table = au.join_by_id(tbl1, tbl2, tm1, tm2, join_type=join_type)
+        new_table = au.join_by_id(tbl1, tbl2, tm1, tm2, join_type=join_type,
+                                  idproc=npstr.strip)
         del(table2[tm2])
         tbl2[tm2] = tbl2_oldcol
 
     return new_table
 
-def read_dr14_allVisit(allvisitpath=paths.DS14_ALLVISIT_PATH):
+def read_dr14_allVisit(allvisitpath=paths.DR14_ALLVISIT_PATH):
     '''Read the DR14 allVisit file.
 
     This function reads the l31c.1 version of the allVisit file.'''
@@ -312,8 +316,17 @@ def read_dr14_allVisit(allvisitpath=paths.DS14_ALLVISIT_PATH):
     allvisit["APOGEE_ID"] = npstr.rstrip(allvisit["APOGEE_ID"])
     return allvisit
 
-def read_dr14_allSky(allskypath=paths.DS14_ALLSKY_PATH):
-    '''Reads the allSky file for DR14.'''
+def read_dr14_allStar(allstarpath=paths.DR14_ALLSTAR_PATH):
+    '''Reads the allStar file for DR14.
+    
+    Reads in the allStar table for DR14. This only reads in the Summary data
+    table, which should contain everything necessary for the APOGEE pipeline.
+
+    WARNING: This table is extremely large an will take several hours to fit
+    into memory.
+    '''
+    allStar = Table.read(str(allstarpath), format="fits")
+    return allStar
 
 def read_Rafa_rotation(rottable=paths.RAFA_SAVITA_PERIODS):
     '''Reads in the rotation periods as determined by Rafa's pipeline.
@@ -347,6 +360,17 @@ def select_samples_for_Rafa(
     giantcut = perform_logg_cut(tempcut, lowlogg=3.5, loggcol=loggcol)
     rafacat = giantcut
     return rafacat
+
+def select_joinable_apogee_columns(
+    apotable, exclude_cols=[
+        "STABLERV_CHI2", "STABLERV_RCHI2", "CHI2_THRESHOLD",
+        "STABLERV_CHI2_PROB", "PARAM", "FPARAM", "PARAM_COV", "FPARAM_COV",
+        "PARAMFLAG", "FELEM", "FELEM_ERR", "X_H", "X_H_ERR", "X_M", "X_M_ERR",
+        "ELEM_CHI2", "ELEMFLAG", "VISIT_PK", "ALL_VISIT_PK", "FPARAM_CLASS",
+        "CHI2_CLASS"]):
+    new_cols = [x for x in apotable.colnames if x not in exclude_cols]
+    shrunk_table = apotable[new_cols]
+    return shrunk_table
 
 def fix_table_coordinates_units(tbl, ra_col, dec_col):
     '''Fixes the units for coordinates in the table. 
