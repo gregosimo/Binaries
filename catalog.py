@@ -312,8 +312,8 @@ def read_dr14_allVisit(allvisitpath=paths.DS14_ALLVISIT_PATH):
     allvisit["APOGEE_ID"] = npstr.rstrip(allvisit["APOGEE_ID"])
     return allvisit
 
-def read_dr14_allSky(allskypath=paths.DS14_ALLSKY_PATH):
-    '''Reads the allSky file for DR14.'''
+#def read_dr14_allSky(allskypath=paths.DS14_ALLSKY_PATH):
+#    '''Reads the allSky file for DR14.'''
 
 def read_Rafa_rotation(rottable=paths.RAFA_SAVITA_PERIODS):
     '''Reads in the rotation periods as determined by Rafa's pipeline.
@@ -1517,12 +1517,23 @@ def radial_velocity_tides_contour(combined_mass, tidal_limit=5*u.day):
 # Eclipsing Binaries #
 ###############################################################################
 
-def read_villanova_EBs(
-    EBpath="/home/regulus/simonian/Binaries/Villanova_EB_v3.txt"):
+def read_villanova_EBs(EBpath=paths.EB_PATH):
     '''Reads in the Villanova Keler EB catalog.'''
     ebcat = Table.read(EBpath, format="ascii.commented_header",
                        header_start=-1)
     return ebcat
+
+def remove_Kepler_EBs(maincat, ebcat=None, mainkiccol="KIC"):
+    '''Filters out Kepler Eclipsing Binaries.
+
+    Removes the KIC values corresponding to the eclipsing binaries in the
+    version of the EB catalog given in paths.EB_PATH.
+    '''
+    if not ebcat:
+        ebcat = read_villanova_EBs()
+    filtered_maincat = au.filter_column_from_subtable(
+            maincat, mainkiccol, ebcat["KIC"])
+    return filtered_maincat
 
 def read_Kirk_geometric_correction_spline(
     splinepath="/home/regulus/simonian/Binaries/Kirk_geometric_correction_spline.csv"):

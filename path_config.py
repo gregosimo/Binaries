@@ -1,7 +1,7 @@
 from pathlib import Path
 
 HOME_DIR = Path.home()
-HEAD_DIR = HOME_DIR / "Binaries"
+HEAD_DIR = HOME_DIR / "SCIENCE" / "Binaries"
 
 CASAGRANDE_TABLE_PATH = HEAD_DIR
 CASAGRANDE_TABLE_4 = CASAGRANDE_TABLE_PATH / "Casagrande_10_Table_4.txt" 
@@ -42,6 +42,7 @@ APOGEE_KASC_FIELDS = HEAD_DIR / "apogee_apokasc_fields.txt"
 APOGEE_DWARF_PATH = HEAD_DIR / "apogee_kepler_dwarfs_rv.csv"
 UCAC_TIDSYNC_PATH = HEAD_DIR / "UCAC_4_McQuillan_Tidsync.tsv"
 UCAC_TIDSYNC_RAFA_PATH = HEAD_DIR / "UCAC_4_Rafa_Tidsync.tsv"
+EB_PATH = HEAD_DIR / "Villanova_EB_v3.txt"
 
 THESIS_PATH = HEAD_DIR / "Thesis"
 PROPOSAL_PATH = THESIS_PATH / "Proposals"
