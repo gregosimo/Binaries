@@ -47,7 +47,7 @@ def download_combined_apogee_spectrum(apogee_id, location_id, dest=""):
                   str(location_id))
     download_apogee_product(fullurl, dest, filename)
 
-def download_combined_aspcap_spectra(apogee_ids, location_ids):
+def download_aspcap_apogee_spectra(apogee_ids, location_ids):
     '''Download multiple combined spectra.
 
     Downloads multiple combined spectra into the $SDSS_LOCAL_SAS_MIRROR tree
@@ -114,12 +114,33 @@ def combined_spectrum_SAS_path(
 
     The necessary information to construct a SAS directory is the location_id.
     If a filename is also desired for the path, then it will also be included
-    with the addition of apogee_id. The other quantities are inferred from the 
+    if apogee_id is also specified. The other quantities are inferred from the 
     module; however, they can be overridden if need be.'''
-    dirpath = (SAS_PATH / APRED_VERS / APSTAR_VERS / ASPCAP_VERS / 
-                RESULTS_VERS / str(location_id))
+    dirpath = (basepath / apred_vers / apstar_vers / telescope / 
+               str(location_id))
     if apogee_id:
         filename = combined_spectrum_filename(apogee_id, apred_vers=apred_vers)
+        fullpath = dirpath / filename
+    else:
+        fullpath = dirpath
+
+    return fullpath
+
+def aspcap_spectrum_SAS_path(
+    location_id, apogee_id="", basepath=SAS_PATH, apred_vers=APRED_VERS,
+    apstar_vers=APSTAR_VERS, aspcap_vers=ASPCAP_VERS,
+    results_vers=RESULTS_VERS):
+    '''Construct the file path for an aspcap spectrum on the SAS.
+
+    The necessary information to construct a SAS directory is the location_id.
+    If a filename is also desired for the path, then it will also be included
+    if apogee_id is also specified. The other quantities are inferred from the
+    module; however, they can be overridden if need be.'''
+    dirpath = (basepath / apred_vers / apstar_vers / aspcap_vers / 
+                results_vers / str(location_id))
+
+    if apogee_id:
+        filename = aspcap_spectrum_filename(apogee_id, apred_vers=apred_vers)
         fullpath = dirpath / filename
     else:
         fullpath = dirpath
