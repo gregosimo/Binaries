@@ -26,6 +26,7 @@ def download_combined_apogee_spectra(apogee_ids, location_ids):
     based on lists of apogee_ids and location_ids. The two lists should be of
     equal length. The download follows the rules of
     download_combined_apogee_spectrum.'''
+    assert(len(apogee_ids) == len(location_ids))
     for (apo, loc) in zip(apogee_ids, location_ids):
         download_combined_apogee_spectrum(apo, loc)
 
@@ -86,11 +87,10 @@ def download_apogee_product(url, destination, filename):
     destination.mkdir(parents=True, exist_ok=True)
     fullpath = destination / filename
     if not fullpath.is_file():
-        print("Fullpath not file")
         r = requests.get(url)
-        outfile = open(str(destination / filename), 'wb')
-        outfile.write(r.content)
-        outfile.close()
+        r.raise_for_status()
+        with open(str(destination / filename), 'wb') as outfile:
+            outfile.write(r.content)
 
 ###############################################################################
 # Navigate the SAS archive #
