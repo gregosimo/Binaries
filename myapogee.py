@@ -6,7 +6,8 @@ import requests
 DR14_URL = "https://sas.sdss.org/infrared/spectrum/view/"
 DR14_VISITS = urllib.parse.urljoin(DR14_URL, "visits")
 DR14_DATA = urllib.parse.urljoin(DR14_URL, "data/")
-SAS_PATH = os.environ["SDSS_LOCAL_SAS_MIRROR"]
+SAS_PATH = (Path(os.environ["SDSS_LOCAL_SAS_MIRROR"]) / "dr14" / "apogee" / 
+            "spectra" / "redux")
 APRED_VERS = "r8"
 APSTAR_VERS = "stars"
 ASPCAP_VERS = "l31c"
