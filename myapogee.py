@@ -2,6 +2,7 @@ import urllib
 import os
 from pathlib import Path
 
+from astropy.io import fits
 import requests
 
 DR14_URL = "https://sas.sdss.org/infrared/spectrum/view/"
@@ -147,6 +148,13 @@ def aspcap_spectrum_SAS_path(
 
     return fullpath
 
+def combined_spectrum_filename(apogee_id, apred_vers=APRED_VERS):
+    '''Output the standard filename for an APOGEE combined spectrum.
+
+    The filename has the format "apStar-(apred_vers)-(apogee_id).fits".'''
+    filename = "apStar-{0}-{1}.fits".format(apred_vers, apogee_id)
+    return filename
+
 ###############################################################################
 # Routines to read in APOGEE spectra #
 ###############################################################################
@@ -159,4 +167,15 @@ def read_combined_apogee_spectrum(apogee_id, location_id, path=""):
     $SDSS_LOCAL_SAS_MIRROR. If path is a path to a directory, then this
     function will read the file "apStar-(APRED)-(apogee_id).fits" in that
     directory. If it is a path to a file, then it will read that file.'''
+    if not path:
+        path = combined_spectrum_SAS_path(location_id, apogee_id)
+    else:
+        if not path.is_file():
+            filename = combined_spectrum_filename(apogee_id)
+            path = path / filename
+
+    hdulist = fits.open(str(path))
+    spec_hdu = hdulist[1].data[1,:]
+    hdulist.close()
+    return spec_hdu
 
