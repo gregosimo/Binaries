@@ -1,5 +1,6 @@
 import urllib
 import os
+from pathlib import Path
 
 import requests
 
@@ -14,6 +15,19 @@ ASPCAP_VERS = "l31c"
 RESULTS_VERS = "l31c.1"
 TELESCOPE = "apo25m"
 
+###############################################################################
+# Routines to download APOGEE spectra #
+###############################################################################
+
+def download_combined_apogee_spectra(apogee_ids, location_ids):
+    '''Download multiple combined spectra.
+
+    Downloads multiple combined spectra into the $SDSS_LOCAL_SAS_MIRROR tree
+    based on lists of apogee_ids and location_ids. The two lists should be of
+    equal length. The download follows the rules of
+    download_combined_apogee_spectrum.'''
+    for (apo, loc) in zip(apogee_ids, location_ids):
+        download_combined_apogee_spectrum(apo, loc)
 
 def download_combined_apogee_spectrum(apogee_id, location_id, dest=""):
     '''Download the combined APOGEE spectrum for a target object.
@@ -37,12 +51,12 @@ def download_aspcap_apogee_spectrum(apogee_id, location_id, dest=""):
 
     Given an apogee_id and location_id, download the aspcap spectrum for an
     object. Note that if dlbase is not specified, then the file will be
-    downloaded into the SDSS trr given by
+    downloaded into the $SDSS_LOCAL_SAS_MIRROR given by
     SAS_PATH/APRED_VERS/APSTAR_VERS/ASPCAP_VERS/RESULTS_VERS/LOCATION_ID/'''
     fullurl = construct_apogee_spectrum_url("aspcap", "fits", apogee_id,
             location_id)
     filename = "aspcapStar-{0}-{1}-{2}.fits".format(APRED_VERS,
-            RESULTS_VER, apogee_id)
+            RESULTS_VERS, apogee_id)
     if not dest:
         dest = (SAS_PATH / APRED_VERS / APSTAR_VERS / ASPCAP_VERS /
                 RESULTS_VERS / str(location_id))
@@ -57,7 +71,7 @@ def construct_apogee_spectrum_url(stars, file_format,
     file_format can be either "fits" or "csv". Lastly, the apogee_id and
     location_id of the target are needed. This is enough to locate the spectrum
     in the SAS.'''
-    fullurl = urllib.parse.url(
+    fullurl = urllib.parse.urljoin(
             baseurl, 
             "stars={0}/format={1}/apogee_id={2}/location_id={3:d}".format(
                 stars, file_format, apogee_id, location_id))
@@ -69,7 +83,48 @@ def download_apogee_product(url, destination, filename):
 
     The url should be the full url where the file is. It does not allow for any
     post requests.'''
-    r = requests.get(url)
-    outfile = open(str(destination / filename))
-    outfile.write(r.content)
-    outfile.close()
+    destination.mkdir(parents=True, exist_ok=True)
+    fullpath = destination / filename
+    if not fullpath.is_file():
+        print("Fullpath not file")
+        r = requests.get(url)
+        outfile = open(str(destination / filename), 'wb')
+        outfile.write(r.content)
+        outfile.close()
+
+###############################################################################
+# Navigate the SAS archive #
+###############################################################################
+
+def combined_spectrum_SAS_path(
+    location_id, apogee_id="", basepath=SAS_PATH, apred_vers=APRED_VERS,
+    apstar_vers=APSTAR_VERS, telescope=TELESCOPE):
+    '''Construct the file path for a combined spectrum on the SAS.
+
+    The necessary information to construct a SAS directory is the location_id.
+    If a filename is also desired for the path, then it will also be included
+    with the addition of apogee_id. The other quantities are inferred from the 
+    module; however, they can be overridden if need be.'''
+    dirpath = (SAS_PATH / APRED_VERS / APSTAR_VERS / ASPCAP_VERS / 
+                RESULTS_VERS / str(location_id))
+    if apogee_id:
+        filename = combined_spectrum_filename(apogee_id, apred_vers=apred_vers)
+        fullpath = dirpath / filename
+    else:
+        fullpath = dirpath
+
+    return fullpath
+
+###############################################################################
+# Routines to read in APOGEE spectra #
+###############################################################################
+
+def read_combined_apogee_spectrum(apogee_id, location_id, path=""):
+    '''Read a combined APOGEE spectrum from the file system.
+
+    The APOGEE_ID and LOCATION_ID are necessary to do this. Without a path
+    specified, the function will look in the SDSS tree at
+    $SDSS_LOCAL_SAS_MIRROR. If path is a path to a directory, then this
+    function will read the file "apStar-(APRED)-(apogee_id).fits" in that
+    directory. If it is a path to a file, then it will read that file.'''
+
