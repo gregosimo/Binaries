@@ -47,6 +47,17 @@ def download_combined_apogee_spectrum(apogee_id, location_id, dest=""):
                   str(location_id))
     download_apogee_product(fullurl, dest, filename)
 
+def download_combined_aspcap_spectra(apogee_ids, location_ids):
+    '''Download multiple combined spectra.
+
+    Downloads multiple combined spectra into the $SDSS_LOCAL_SAS_MIRROR tree
+    based on lists of apogee_ids and location_ids. The two lists should be of
+    equal length. The download follows the rules of
+    download_combined_apogee_spectrum.'''
+    assert(len(apogee_ids) == len(location_ids))
+    for (apo, loc) in zip(apogee_ids, location_ids):
+        download_aspcap_apogee_spectrum(apo, loc)
+
 def download_aspcap_apogee_spectrum(apogee_id, location_id, dest=""):
     '''Download the ASPCAP spectrum for a target object.
 
