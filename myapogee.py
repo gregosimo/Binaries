@@ -191,23 +191,29 @@ class APOGEEStar:
         self._header = hdulist[0].header
         nvisits = self._header["NVISITS"]
         specdata = hdulist[1].data
+        specheader = hdulist[1].header
         errdata = hdulist[2].data
+        errheader = hdulist[2].header
         maskdata = hdulist[3].data
+        maskheader = hdulist[3].header
 
         # For 1 visit, all spectra point to one spectrum.
         if nvisits == 1:
-            main_spectrum = APOGEESpectrum(specdata, errdata, maskdata)
+            main_spectrum = APOGEESpectrum(
+                specdata, errdata, maskdata, specheader, errheader, maskheader)
             self._pixspectrum = main_spectrum
             self._globspectrum = main_spectrum
             self._visitspectra = [main_spectrum]
         elif nvisits > 1:
             self._pixspectrum = APOGEESpectrum(
-                specdata[0,:], errdata[0,:], maskdata[0,:])
+                specdata[0,:], errdata[0,:], maskdata[0,:], specheader,
+                errheader, maskheader)
             self._globspectrum = APOGEESpectrum(
-                specdata[1,:], errdata[1,:], maskdata[1,:])
+                specdata[1,:], errdata[1,:], maskdata[1,:], specheader,
+                errheader, maskheader)
             self._visitspectra = [APOGEESpectrum(
-                specdata[i,:], errdata[i,:], maskdata[i,:]) 
-                                   for i in range(2, 2+nvisits)]
+                specdata[i,:], errdata[i,:], maskdata[i,:], specheader,
+                errheader, maskheader) for i in range(2, 2+nvisits)]
         else:
             raise ValueError("Invalid value of NVISITS: {0}.".format(nvisits))
 
@@ -216,34 +222,91 @@ class APOGEEStar:
         self._rvtable = hdulist[9].data
         hdulist.close()
 
-        @property
-        def spectrum(self):
-            '''Get the preferred spectrum for the star.
-            
-            This will either be the pixel-weighted spectrum or the globally
-            weighted spectrum depending on what is set as "preferred".'''
-            return self.pixspectrum
+    @property
+    def spectrum(self):
+        '''Get the preferred spectrum for the star.
+        
+        This will either be the pixel-weighted spectrum or the globally
+        weighted spectrum depending on what is set as "preferred".'''
+        return self.pixspectrum
 
-        @property
-        def pixel_spectrum(self):
-            '''Get the pixel-weighted spectrum.'''
-            return self._pixspectrum
+    @property
+    def pixel_spectrum(self):
+        '''Get the pixel-weighted spectrum.'''
+        return self._pixspectrum
 
-        @property
-        def global_spectrum(self):
-            '''Get the globally-weighted spectrum.'''
-            return self._globspectrum
-        @property
-        def visit_mjds(self):
-            '''Get the MJDs of the observations.'''
-            return self._rvtable["MJD"]
+    @property
+    def global_spectrum(self):
+        '''Get the globally-weighted spectrum.'''
+        return self._globspectrum
 
-        def visit_spectrum(self, mjd):
-            '''Get the visit spectrum at the given mjd.'''
-            index = np.nonzero(self.visit_mjds == mjd)
-            assert(len(index[0]) <= 1)
-            spec = self._visitspectra[index[0][0]]
-            return spec
+    @property
+    def visit_mjds(self):
+        '''Get the MJDs of the observations.'''
+        return self._rvtable["MJD"]
+
+    @property
+    def rvs(self):
+        '''Get the radial velocities of the system.'''
+        return self._rvtable["VHELIO"]
+
+    @property
+    def rv_errors(self):
+        '''Get the radial velocity uncertainties of the system.'''
+        return self._rvtable["VHELIO"]
+
+    @property
+    def twomass_id(self):
+        '''Get the 2MASS ID of the object.'''
+        return self._header["OBJID"]
+
+    def visit_spectrum(self, mjd):
+        '''Get the visit spectrum at the given mjd.'''
+        index = np.nonzero(self.visit_mjds == mjd)
+        assert(len(index[0]) <= 1)
+        spec = self._visitspectra[index[0][0]]
+        return spec
+
+    def plot_rv(self):
+        '''Plot the APOGEE RV timeseries of this system.
+        
+        This will only plot when an object has been visited multiple times.
+        Otherwise, it will print the single RV measurement.'''
+        rvs = self.rvs
+        if len(rvs) == 1:
+            print("The RV of this system is {0:2f} km/s".format(rvs[0]))
+        elif len(rvs) > 1:
+            plt.errorbar(self.mjds, rvs, self.rv_errors, 'bo')
+            plt.xlabel("MJD")
+            plt.ylabel("RV (km/s)")
+            plt.title("{0} RV curve".format(self.twomass_id))
+        else:
+            raise ValueError("{0} has no observations.".format(
+                self.twomass_id)) 
+
+class APOGEESpectrum(Spectrum):
+    '''Class which holds an APOGEE spectrum.
+
+    This class is optimized to hold spectra which come from APOGEE. In
+    particular, they will not need to be given a wavelength array because it
+    should be uniform.'''
+    def __init__(self, fluxes, uncertainties, mask, fluxheader, uncheader,
+                 maskheader):
+        '''Create an APOGEE spectrum. 
+
+        To instantiate a spectrum, you will need the actual flux values for
+        each of the pixels as well as the fits header that comes with them.'''
+        self._fluxes = fluxes
+        self._uncertainties = uncertainties
+        self._mask = mask
+        self._fluxheader = fluxheader
+        self._uncheader = uncheader
+        self._maskheader = maskheader
+
+        self._wavelengths = 10**(np.arange(
+            fluxheader["CRVAL1"], 
+            fluxheader["CRVAL1"] + fluxheader["CDELT1"] * len(fluxes),
+            fluxheader["CDELT1"]))/1e4
 
 
 def read_combined_apogee_data(
