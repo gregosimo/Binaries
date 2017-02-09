@@ -155,27 +155,90 @@ def combined_spectrum_filename(apogee_id, apred_vers=APRED_VERS):
     filename = "apStar-{0}-{1}.fits".format(apred_vers, apogee_id)
     return filename
 
+def aspcap_spectrum_filename(apogee_id, apred_vers=APRED_VERS,
+                             results_vers=RESULTS_VERS):
+    '''Output the standard filename for an APOGEE ASPCAP spectrum.
+
+    The filename has the format
+    "aspcapStar-(apred_vers)-(results_vers)-(apogee_id).fits".'''
+    filename = "aspcapStar-{0}-{1}-{2}.fits".format(apred_vers,
+            results_vers, apogee_id)
+    return filename
 ###############################################################################
 # Routines to read in APOGEE spectra #
 ###############################################################################
 
-def read_combined_apogee_spectrum(apogee_id, location_id, path=""):
-    '''Read a combined APOGEE spectrum from the file system.
+class APOGEEStar:
+    '''A class representing a single apStar dataset.
+
+    This function essentially contains all the information in the
+    apStar-(apred_vers)-(apogee_id).fits file. Methods to access and manipulate
+    the data will be provided as needed.'''
+    def __init__(
+        self, location_id, apogee_id, saspath=SAS_PATH, apred_vers=APRED_VERS,
+        apstar_vers=APSTAR_VERS, telescope=TELESCOPE):
+        '''Load in the apStar entry for this apogee_id.
+
+        The two main quantities needed to uniquely identify the target in the
+        SAS tree are the location_id and apogee_id. The other quantities will
+        be drawn from the global variables in this module. They can be
+        overridden if necessary.
+        '''
+        hdulist = read_combined_apogee_data(
+            location_id, apogee_id, basepath=saspath, apred_vers=apred_vers,
+            apstar_vers=apstar_vers, telescope=telescope)
+        # This is a FITS "header" which behaves like a dict.
+        self._header = hdulist[0].header
+        nvisits = self._header["NVISITS"]
+        specdata = hdulist[1].data
+        errdata = hdulist[2].data
+        maskdata = hdulist[3].data
+
+        # For 1 visit, all spectra point to one spectrum.
+        if nvisits == 1:
+            main_spectrum = APOGEESpectrum(specdata, errdata, maskdata)
+            self._pixspectrum = main_spectrum
+            self._globspectrum = main_spectrum
+            self._visitspectra = [main_spectrum]
+        elif nvisits > 1:
+            self._pixspectrum = APOGEESpectrum(
+                specdata[0,:], errdata[0,:], maskdata[0,:])
+            self._globspectrum = APOGEESpectrum(
+                specdata[1,:], errdata[1,:], maskdata[1,:])
+            self._visitspectrum = [APOGEESpectrum(
+                specdata[i,:], errdata[i,:], maskdata[i,:]) 
+                                   for i in range(2, 2+nvisits)]
+        else:
+            raise ValueError("Invalid value of NVISITS: {0}.".format(nvisits))
+
+        # I'll fetch the other data if it's necessary. I don't think sky
+        # spectra are particularly important at this time.
+        self._rvtable = hdulist[9].data
+        hdulist.close()
+
+
+def read_combined_apogee_data(
+    apogee_id, location_id, path="", sasbase=SAS_PATH, apred_vers=APRED_VERS,
+    apstar_vers=APSTAR_VERS, telescope=TELESCOPE):
+    '''Read a combined APOGEE data file from the file system.
 
     The APOGEE_ID and LOCATION_ID are necessary to do this. Without a path
     specified, the function will look in the SDSS tree at
     $SDSS_LOCAL_SAS_MIRROR. If path is a path to a directory, then this
     function will read the file "apStar-(APRED)-(apogee_id).fits" in that
-    directory. If it is a path to a file, then it will read that file.'''
+    directory. If it is a path to a file, then it will read that file.
+    
+    This will return an astropy HDUList. Note that the hdulist should be CLOSED
+    when it is no longer needed.'''
     if not path:
-        path = combined_spectrum_SAS_path(location_id, apogee_id)
+        path = combined_spectrum_SAS_path(
+            location_id, apogee_id, basepath=sasbase, apred_vers=apred_vers,
+            apstar_vers=apstar_vers, telescope=telescope)
     else:
         if not path.is_file():
             filename = combined_spectrum_filename(apogee_id)
             path = path / filename
 
     hdulist = fits.open(str(path))
-    spec_hdu = hdulist[1].data[1,:]
-    hdulist.close()
-    return spec_hdu
+    return hdulist
 
