@@ -336,7 +336,14 @@ def read_Rafa_rotation(rottable=paths.RAFA_SAVITA_PERIODS):
     rotation periods according to Rafa's pipeline.'''
     rafa = Table.read(
         str(rottable), format="ascii.no_header", names=["KIC", "Prot"])
-    return rafa
+    # The file Rafa gave me had a bunch of giants in it. So I'm going to
+    # manually limit the catalog to the same one 
+    kic_catalog = read_KIC_DR25_catalog()
+    rafa_kic = join_by_id(rafa, kic_catalog, "KIC", "kepid")
+    tempcut = perform_teff_cut(rafa_kic, lowtemp=0, hightemp=5500,
+                               teffcol="teff")
+    giantcut = perform_logg_cut(tempcut, lowlogg=3.5, loggcol="logg")
+    return giantcut
             
 ###############################################################################
 # Catalog Curation
@@ -689,7 +696,7 @@ def velocity_evolution(variable, nonvariable):
         for obj in samp:
             obj_id = obj["2MASS_ID"]
             obj_loc_id = obj["LOC_ID"]
-            visit_table = get_APOGEE_visit_info(obj_id, obj_loc_id)
+            eisit_table = get_APOGEE_visit_info(obj_id, obj_loc_id)
             visit_dates = visit_table["MJD"]
             visit_velocities = visit_table["V_LSR"]
             
@@ -1142,6 +1149,64 @@ def rotation_radial_velocity_variation(
     plt.xlabel("v sin i (km/s)")
     plt.ylabel("Prot (day)")
     plt.title("Multiepoch with rotation")
+    plt.legend(loc="upper right")
+
+def period_velocity_apogee(
+    periods, vsinis, apogee_flags):
+    '''Plot the relationship between period & vsini for rapid rotators.
+
+    This will put the rapid rotators which have been observed in APOGEE on a
+    plot relating period and vsini.'''
+    bad_indices = apogee_flags & 2**23 != 0
+    # The 2**14 is a flag called VSINI_WARN. It does not trigger the STAR_BAD
+    # or STAR_WARN flags.
+    warn_indices = np.logical_and(apogee_flags & (2**7+2**14) != 0,
+                                  np.logical_not(bad_indices))
+    good_indices = np.logical_not(np.logical_or(bad_indices, warn_indices))
+
+    plt.scatter(periods[good_indices], vsinis[good_indices], s=50, c="g",
+                marker="o", label="good")
+    plt.scatter(periods[warn_indices], vsinis[warn_indices], s=15, c="m",
+                marker="s", label="warn")
+    plt.scatter(periods[bad_indices], vsinis[bad_indices], s=15, c="r",
+                marker="D", label="bad")
+    plt.plot([1, 5], [51, 10], 'k-', label="Rsun")
+    plt.plot([1, 5], [51/2.0, 10/2.0], 'k--', label="Rsun (min)")
+    plt.plot([1, 5], [51*0.66, 10*0.66], 'b-', label="0.66 Rsun")
+    plt.plot([1, 5], [51*0.66/2.0, 10*0.66/2.0], 'b--', label="0.66 Rsun (min)")
+
+    plt.xlabel("Period (day)")
+    plt.ylabel("vsini (km/s)")
+    plt.ylim(0, 80)
+    plt.legend(loc="upper right")
+
+def teff_velocity_apogee(
+    teffs, vsinis, apogee_flags):
+    '''Plot the relationship between period & vsini for rapid rotators.
+
+    This will put the rapid rotators whic hhave been observed in APOGEE on a
+    plot relating teff and vsini. We'll see if the slowly-rotating objects are
+    cool. If so, it's possible they are significantly smaller.
+    '''
+    bad_indices = apogee_flags & 2**23 != 0
+    # The 2**14 is a flag called VSINI_WARN. It does not trigger the STAR_BAD
+    # or STAR_WARN flags.
+    warn_indices = np.logical_and(apogee_flags & (2**7+2**14) != 0,
+                                  np.logical_not(bad_indices))
+    good_indices = np.logical_not(np.logical_or(bad_indices, warn_indices))
+
+    plt.scatter(teffs[good_indices], vsinis[good_indices], s=50, c="g",
+                marker="o", label="good")
+    plt.scatter(teffs[warn_indices], vsinis[warn_indices], s=15, c="m",
+                marker="s", label="warn")
+    plt.scatter(teffs[bad_indices], vsinis[bad_indices], s=15, c="r",
+                marker="D", label="bad")
+    hr.invert_x_axis()
+
+    plt.xlabel("Teff (K)")
+    plt.ylabel("vsini (km/s)")
+    plt.ylim(0, 80)
+    plt.xlim(5700, 4000)
     plt.legend(loc="upper right")
 
 def HR_standout_plot(
