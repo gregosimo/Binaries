@@ -205,7 +205,7 @@ class APOGEEStar:
                 specdata[0,:], errdata[0,:], maskdata[0,:])
             self._globspectrum = APOGEESpectrum(
                 specdata[1,:], errdata[1,:], maskdata[1,:])
-            self._visitspectrum = [APOGEESpectrum(
+            self._visitspectra = [APOGEESpectrum(
                 specdata[i,:], errdata[i,:], maskdata[i,:]) 
                                    for i in range(2, 2+nvisits)]
         else:
@@ -215,6 +215,35 @@ class APOGEEStar:
         # spectra are particularly important at this time.
         self._rvtable = hdulist[9].data
         hdulist.close()
+
+        @property
+        def spectrum(self):
+            '''Get the preferred spectrum for the star.
+            
+            This will either be the pixel-weighted spectrum or the globally
+            weighted spectrum depending on what is set as "preferred".'''
+            return self.pixspectrum
+
+        @property
+        def pixel_spectrum(self):
+            '''Get the pixel-weighted spectrum.'''
+            return self._pixspectrum
+
+        @property
+        def global_spectrum(self):
+            '''Get the globally-weighted spectrum.'''
+            return self._globspectrum
+        @property
+        def visit_mjds(self):
+            '''Get the MJDs of the observations.'''
+            return self._rvtable["MJD"]
+
+        def visit_spectrum(self, mjd):
+            '''Get the visit spectrum at the given mjd.'''
+            index = np.nonzero(self.visit_mjds == mjd)
+            assert(len(index[0]) <= 1)
+            spec = self._visitspectra[index[0][0]]
+            return spec
 
 
 def read_combined_apogee_data(
