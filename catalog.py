@@ -74,6 +74,11 @@ def read_McQuillan_catalog(
         mcquillancat = au.join_by_id(mcquillancat, hubercat, "KIC", "KIC")
     return mcquillancat
 
+def read_original_KIC_catalog(filepath=paths.ORIG_KIC):
+    '''Read in the original KIC catalog.'''
+    kic = Table.read(str(filepath), format="ascii.basic", delimiter="|")
+    return kic
+
 def read_Huber_KIC_catalog(huberpath=paths.HUBER_CATALOG):
     '''Read the HUBER KIC parameters.'''
     hubercat = Table.read(str(huberpath), format="ascii.cds")
@@ -339,7 +344,7 @@ def read_Rafa_rotation(rottable=paths.RAFA_SAVITA_PERIODS):
     # The file Rafa gave me had a bunch of giants in it. So I'm going to
     # manually limit the catalog to the same one 
     kic_catalog = read_KIC_DR25_catalog()
-    rafa_kic = join_by_id(rafa, kic_catalog, "KIC", "kepid")
+    rafa_kic = au.join_by_id(rafa, kic_catalog, "KIC", "kepid")
     tempcut = perform_teff_cut(rafa_kic, lowtemp=0, hightemp=5500,
                                teffcol="teff")
     giantcut = perform_logg_cut(tempcut, lowlogg=3.5, loggcol="logg")
@@ -536,6 +541,34 @@ def write_UKIRT_file(
         [coords.ra.degree, coords.dec.degree], names=("RA", "DEC"))
     write_columns_for_input(coordTable, output_filename, UKIRT_LIMIT,
                             "ascii.no_header")
+
+def write_CasJob_file(
+    catalog, outputfile, outputpath=paths.HEAD_DIR, writefmt="ascii.csv"):
+    '''Write a table that can be submitted to CasJobs.'''
+    if writefmt not in ["ascii.csv", "ascii.votable"]:
+        raise ValueError("CasJobs only supports CSV and VOTable formats.")
+    fullfile = outputpath / outputfile
+    catalog.meta["comments"] = []
+    catalog.write(str(fullfile), format=writefmt)
+    # This is the size in kb
+    filesize = fullfile.stat().st_size / 2**10
+    if ((writefmt == "ascii.csv" and filesize > 256000) or
+        (writefmt == "ascii.votable" and filesize > 1048576)):
+        raise ValueError("Catalog too big to write.")
+
+def write_McQuillan_Observed_KICs_to_CasJobs(
+    kiccat, outputfile="mcquillan_observed.txt", outputpath=paths.HEAD_DIR,
+    writefmt="ascii.csv", kiccol="kepid"):
+    '''Write the targets which have been observed in Q3-Q14.
+
+    For a catalog from the KIC Stellar Parameter database, this will look
+    through the observations and determine which subset of the catalog has been
+    observed at least once between Q3 and Q14, as specified by McQuillan et al
+    (2014).'''
+    observed_targets = kiccat[np.logical_not(npstr.startswith(
+        kiccat["st_quarters"], "000000000000", start=2))]
+    write_CasJob_file(observed_targets[[kiccol]], outputfile, outputpath, 
+                      writefmt)
 
 def create_joined_APOKASC_McQuillan_catalog(
         apocat=None, mcquillancat=None, apofile=APOKASC_PATH,
