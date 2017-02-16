@@ -1645,16 +1645,6 @@ def read_villanova_EBs(EBpath=paths.EB_PATH):
                        header_start=-1)
     return ebcat
 
-def read_mcquillan_villanova_EBs(EBpath=paths.EB_PATH):
-    '''Reads in the Villanova Kepler EB catalog as of McQuillan's sample.
-
-    Since the EB catalog used by McQuillan had 2611 entries, and it seems like
-    the Villanova catalog inputs new objects at the end, it should be possible
-    to reconstruct the catalog from the original size, even without timestamp
-    information.'''
-    ebcat = Table.read(EBpath, format="ascii.commented_header",
-                       header_start=-1, data_end=2611-1)
-    return ebcat
 
 def remove_Kepler_EBs(maincat, ebcat=None, mainkiccol="KIC"):
     '''Filters out Kepler Eclipsing Binaries.
@@ -1684,6 +1674,15 @@ def read_Kirk_geometric_correction_spline(
 def num_missing_binaries(logperiods, nbins, minlogper=-1, maxlogper=1.3):
     '''Calculate the number of noneclipsing'''
     pass
+
+###############################################################################
+# KOIs #
+###############################################################################
+
+def read_KOI_list_Mcquillan(koipath=paths.KOI_PATH):
+    '''Read the list of KOIs as of Feb 16, 2017.'''
+    kois = Table.read(koipath, format="ascii.csv", data_start=1, data_end=4800, comment="#")
+    return kois
 
 ###############################################################################
 # KepVIM #
