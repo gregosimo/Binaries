@@ -1645,6 +1645,17 @@ def read_villanova_EBs(EBpath=paths.EB_PATH):
                        header_start=-1)
     return ebcat
 
+def read_mcquillan_villanova_EBs(EBpath=paths.EB_PATH):
+    '''Reads in the Villanova Kepler EB catalog as of McQuillan's sample.
+
+    Since the EB catalog used by McQuillan had 2611 entries, and it seems like
+    the Villanova catalog inputs new objects at the end, it should be possible
+    to reconstruct the catalog from the original size, even without timestamp
+    information.'''
+    ebcat = Table.read(EBpath, format="ascii.commented_header",
+                       header_start=-1, data_end=2611-1)
+    return ebcat
+
 def remove_Kepler_EBs(maincat, ebcat=None, mainkiccol="KIC"):
     '''Filters out Kepler Eclipsing Binaries.
 
