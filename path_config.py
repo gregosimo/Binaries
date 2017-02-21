@@ -45,6 +45,7 @@ APOGEE_DWARF_PATH = HEAD_DIR / "apogee_kepler_dwarfs_rv.csv"
 UCAC_TIDSYNC_PATH = HEAD_DIR / "UCAC_4_McQuillan_Tidsync.tsv"
 UCAC_TIDSYNC_RAFA_PATH = HEAD_DIR / "UCAC_4_Rafa_Tidsync.tsv"
 EB_PATH = HEAD_DIR / "Villanova_EB_v3.txt"
+SYNC_EB_PATH = HEAD_DIR / "sync_ebs_moredetails.csv"
 KOI_PATH = HEAD_DIR / "koi.csv"
 
 THESIS_PATH = HEAD_DIR / "Thesis"

@@ -570,6 +570,14 @@ def write_McQuillan_Observed_KICs_to_CasJobs(
     write_CasJob_file(observed_targets[[kiccol]], outputfile, outputpath, 
                       writefmt)
 
+def write_Villanova_EB_upload_list(
+    kiccat, outputfile="villanova_upload.txt", outputpath=paths.HEAD_DIR,
+    writefmt="ascii.no_header", kiccol="KIC"):
+    '''Write KIC numbers to be uploaded to the Villanova EB catalog.'''
+    output = outputpath / outputfile
+    kic_targets = kiccat[[kiccol]]
+    kic_targets.write(str(output), format=writefmt, comment=False)
+
 def create_joined_APOKASC_McQuillan_catalog(
         apocat=None, mcquillancat=None, apofile=APOKASC_PATH,
     mcquillanfile=MCQUILLAN_PATH):
@@ -1568,6 +1576,22 @@ def progress_plot():
     hr.logg_teff_plot(no_pulsators["TEFF_FIT"], no_pulsators["LOGG_FIT"],
                       style="bD", ms=6, label="Candidates")
 
+def EBs_missed_by_Rafa(rafa_ebs, missed_ebs, xcol, ycol, xlabel="", ylabel=""):
+    '''Compares the objects which were found by Rafa's code to those missed.
+
+    This function will plot two columns which are in both rafa_ebs and
+    missed_ebs against each other.'''
+    plt.plot(rafa_ebs[xcol], rafa_ebs[ycol], 'ko', label="Detected")
+    plt.plot(missed_ebs[xcol], missed_ebs[ycol], 'gx', label="Missed")
+    if xlabel:
+        plt.xlabel(xlabel)
+    else:
+        plt.xlabel(xcol)
+    if ylabel:
+        plt.ylabel(ylabel)
+    else:
+        plt.ylabel(ycol)
+
 def EB_plot(eb_periods, eb_vs, eb_flags):
     """Plots the eclipsing binary period vs velocity.
 
@@ -1645,6 +1669,31 @@ def read_villanova_EBs(EBpath=paths.EB_PATH):
                        header_start=-1)
     return ebcat
 
+def read_synchronized_EB_details(syncpath=paths.SYNC_EB_PATH):
+    '''Reads in the Villanova fit parameters for the synchronized EB Catalog.
+
+    Synchronized in this context represents orbital periods between 1-5
+    days.'''
+    ebcat = Table.read(str(syncpath), format="ascii.commented_header",
+                       comment="#", header_start=-1)
+    del(ebcat["col16"])
+    # There are false aliases in this catalog (leading to duplicate entries).
+    # You can find the duplicate entries by doing:
+    # [item for item, count in Counter(ebcat["KIC"]).items() if count > 1]
+    # I checked the duplicate entries and these ones are the ones that are
+    # incorrect.
+    dupkics = [4247791, 8167938, 3832716]
+    badperiods = [4.0497388, 2.5657024, 2.1701093]
+    for kic, period in zip(dupkics, badperiods):
+        ebcat.remove_rows(np.argwhere(np.logical_and(
+            ebcat["KIC"] == kic, ebcat["period"] == period)).flatten())
+    # These objects seem to have multiple periodicities. May be a
+    # blended double-eclipsing binary.
+    ebcat.remove_rows(np.argwhere(ebcat["KIC"] == 10091110).flatten())
+    ebcat.remove_rows(np.argwhere(ebcat["KIC"] == 4150611).flatten())
+    # Weird... this has a transit-like thing and a very sharp feature.
+    ebcat.remove_rows(np.argwhere(ebcat["KIC"] == 7622486).flatten())
+    return ebcat
 
 def remove_Kepler_EBs(maincat, ebcat=None, mainkiccol="KIC"):
     '''Filters out Kepler Eclipsing Binaries.
