@@ -307,7 +307,7 @@ def join_by_2MASS_key(tbl1, tbl2, tm1, tm2, join_type="inner",
         tbl2[tm2] = tbl2_newcol
         new_table = au.join_by_id(tbl1, tbl2, tm1, tm2, join_type=join_type,
                                   idproc=npstr.strip)
-        del(table2[tm2])
+        del(tbl2[tm2])
         tbl2[tm2] = tbl2_oldcol
 
     return new_table
@@ -1782,9 +1782,29 @@ def num_missing_binaries(periods):
     num_inferred_missing = np.sum(inferred_missing)
     return num_inferred_missing
 
-def correct_for_rotation_modulation(total_binaries):
-    '''Calculate number of objects which should be calculated
-1-sqrt(3)/2
+def EB_histogram_to_rotation_histogram(binvalues, bins):
+    '''Convert EB histogram to one of expected rotatational modulation.
+
+    The bin values should be the number of EBs in each bin. The bins should be
+    the edges of each bin. This should basically take arguments of plt.hist().
+    '''
+    midbins = (bins[:-1] + bins[1:]) / 2
+    logmidbins = np.log10(midbins)
+    geofrac_spline = read_Kirk_geometric_correction_spline()
+    efficiencies = geofrac_spline(logmidbins)
+    missing_fraction = 1.0 / efficiencies - 1
+    missing_histogram = binvalues * missing_fraction
+    print(missing_fraction)
+    rotation_fraction = rotation_modulation_fraction()
+    rotation_histogram = rotation_fraction * missing_histogram
+    return rotation_histogram
+
+def rotation_modulation_fraction():
+    '''Calculate the fraction of binaries showing rotational modulation.
+
+    This function assumes that the binaries are randomly distributed.'''
+    fract = np.sqrt(3)/2
+    return fract
 
 def num_rotating_binaries_from_EBs(periods):
     '''Calculate an expected number of rotating binaries from EBs.
@@ -1800,6 +1820,32 @@ def num_rotating_binaries_from_EBs(periods):
     total_bins = num_missing_binaries(periods)
     correction = correct_for_rotation(total_bins)
     return correction
+
+def expected_rotation_fraction_hist(ebperiods, obsperiods, nbins=20,
+                                    binrange=(1, 5)):
+    '''Compare the EB periods with expected and observed period distribution.
+
+    This function will show the eb distribution, the expected rotation
+    modulation distribution based on the EB distribution, and the observed
+    rotation modulation distribution for easy comparison.
+    '''
+    eb_values, eb_binedges = np.histogram(ebperiods, bins=nbins,
+                                          range=binrange)
+    eb_errors = np.sqrt(eb_values)
+    rotvalues = EB_histogram_to_rotation_histogram(eb_values, eb_binedges)
+    rot_errors = eb_errors * rotvalues / eb_values
+    bin_starts = eb_binedges[:-1]
+    nobs = plt.hist(obsperiods, bins=eb_binedges, label="Observed Rotation")
+    plt.bar(bin_starts, rotvalues, label="Predicted Rotation",
+            width=bin_starts[1] - bin_starts[0], yerr=rot_errors)
+    plt.step(eb_binedges, np.concatenate([eb_values, [0]]), label="Eclipsing Binaries", where="post")
+    print("Starts")
+    print(bin_starts)
+    print("Values")
+    print(nobs[0])
+    plt.xlabel("Period (day)")
+    plt.ylabel("Number")
+    plt.xlim(binrange)
     
 
 ###############################################################################
