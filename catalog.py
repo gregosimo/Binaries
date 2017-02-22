@@ -1764,9 +1764,42 @@ def read_Kirk_geometric_correction_spline(
     correction_interpolator = interp1d(periods, corrections)
     return correction_interpolator
 
-def num_missing_binaries(logperiods, nbins, minper=1, maxper=5, 
-                         rotcorrect=True):
-    '''Calculate the number of noneclipsing'''
+def num_missing_binaries(periods):
+    '''Infer the number of noneclipsing binaries from eclipsing ones.
+    
+    Given a distribution of orbital periods of a sample of stars, this function
+    uses the geometric correction to infer the number of binaries which should
+    also exist in the sample.
+    '''
+    logperiods = np.log10(periods)
+    # This should take the log of periods as input, and the efficiency of
+    # detection based on the corrections.
+    geofrac_spline = read_Kirk_geometric_correction_spline()
+    efficiencies = geofrac_spline(logperiods)
+    # These should be the number of non-eclipsing binaries for each eclipsing
+    # binary.
+    inferred_missing = 1.0 / efficiencies - 1
+    num_inferred_missing = np.sum(inferred_missing)
+    return num_inferred_missing
+
+def correct_for_rotation_modulation(total_binaries):
+    '''Calculate number of objects which should be calculated
+1-sqrt(3)/2
+
+def num_rotating_binaries_from_EBs(periods):
+    '''Calculate an expected number of rotating binaries from EBs.
+
+    This function calculates the number of expected rotating binaries from a
+    set of eclipsing binaries. This differs from num_missing_binaries in that
+    it incorporates a correction factor for the fact that only stars with high
+    enough inclination will have observed rotation modulation.
+
+    Note that this function will not work in the extremely short-period regime
+    where all objects that should exchibit rotational modulation should also
+    exhibit eclipses..'''
+    total_bins = num_missing_binaries(periods)
+    correction = correct_for_rotation(total_bins)
+    return correction
     
 
 ###############################################################################
