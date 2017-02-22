@@ -1592,6 +1592,50 @@ def EBs_missed_by_Rafa(rafa_ebs, missed_ebs, xcol, ycol, xlabel="", ylabel=""):
     else:
         plt.ylabel(ycol)
 
+def missed_EBs_logg_teff(rafa_ebs, missed_ebs, loggcol="logg", teffcol="teff"):
+    '''Plot the missed EBs in an HR diagram.'''
+    EBs_missed_by_Rafa(rafa_ebs, missed_ebs, teffcol, loggcol, "teff", "log g")
+    hr.invert_x_axis()
+    hr.invert_y_axis()
+    plt.legend(loc="upper right")
+
+def missed_EBs_period_depth(rafa_ebs, missed_ebs, periodcol="period",
+                            depthcol="pdepth"):
+    '''Plot the missed EBs with period vs. eclipse depth.'''
+    EBs_missed_by_Rafa(rafa_ebs, missed_ebs, periodcol, depthcol, 
+                       "Period (day)", "Primary Eclipse Depth")
+
+def missed_EBs_teff_depth(rafa_ebs, missed_ebs, teffcol="teff", 
+                          depthcol="pdepth"):
+    '''Plot the missed EBs with Teff vs. eclipse depth.'''
+    EBs_missed_by_Rafa(rafa_ebs, missed_ebs, teffcol, depthcol, 
+                       "Teff (K)", "Primary Eclipse Depth")
+    hr.invert_x_axis()
+
+def missed_EBs_period_width(rafa_ebs, missed_ebs, periodcol="period",
+                            widthcol="pwidth"):
+    '''Plot the missed EBs with period vs. eclipse width.'''
+    EBs_missed_by_Rafa(rafa_ebs, missed_ebs, periodcol, widthcol, 
+                       "Period (day)", "Primary Eclipse Width")
+
+def missed_EBs_teff_width(rafa_ebs, missed_ebs, teffcol="teff",
+                          widthcol="pwidth"):
+    '''Plot the missed EBs with Teff vs. eclipse width.'''
+    EBs_missed_by_Rafa(rafa_ebs, missed_ebs, teffcol, widthcol, 
+                       "Period (day)", "Primary Eclipse Width")
+    hr.invert_x_axis()
+
+def missed_EBs_compare_histogram(rafa_ebs, missed_ebs, histcol, binrange,
+                                 bins=50, xlabel=""):
+    '''Create a histogram of missed vs detected EBs.'''
+    plt.hist(rafa_ebs[histcol], range=binrange, bins=bins)
+    plt.hist(missed_ebs[histcol], range=binrange, bins=bins)
+    if xlabel:
+        plt.xlabel(xlabel)
+    else:
+        plt.xlabel(histcol)
+    plt.ylabel("Number")
+
 def EB_plot(eb_periods, eb_vs, eb_flags):
     """Plots the eclipsing binary period vs velocity.
 
@@ -1720,9 +1764,10 @@ def read_Kirk_geometric_correction_spline(
     correction_interpolator = interp1d(periods, corrections)
     return correction_interpolator
 
-def num_missing_binaries(logperiods, nbins, minlogper=-1, maxlogper=1.3):
+def num_missing_binaries(logperiods, nbins, minper=1, maxper=5, 
+                         rotcorrect=True):
     '''Calculate the number of noneclipsing'''
-    pass
+    
 
 ###############################################################################
 # KOIs #
