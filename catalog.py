@@ -16,6 +16,7 @@ from mpl_toolkits.axes_grid1.inset_locator import inset_axes
 import astropy.units as u
 from astropy.table import Table, join, vstack, unique, Column
 from astropy.coordinates import SkyCoord
+from astropy.io import fits
 from bs4 import BeautifulSoup
 import requests
 # from apogee.tools import bitmask
@@ -24,6 +25,7 @@ import astropy_util as au
 import hrplots as hr
 import binarycalcs as bc
 import path_config as paths
+import sed
 
 WORKPATH = "/home/regulus/simonian/Binaries"
 
@@ -298,40 +300,76 @@ def join_by_2MASS_key(tbl1, tbl2, tm1, tm2, join_type="inner",
         print("Types different")
         def transform(oldcol):
             if tbl1_type == "KIC" and tbl2_type == "APOGEE":
-                npstr.replace(oldcol, apogee_prefix, kic_prefix)
+                newcol = npstr.replace(oldcol, apogee_prefix, kic_prefix)
             elif tbl1_type == "APOGEE" and tbl2_type == "KIC":
-                npstr.replace(oldcol, kic_prefix, apogee_prefix)
+                newcol = npstr.replace(oldcol, kic_prefix, apogee_prefix)
+            return newcol
         tbl2_oldcol = tbl2[tm2]
-        tbl2_newcol = npstr.replace(tbl2_oldcol, apogee_prefix, kic_prefix)
+        tbl2_newcol = transform(tbl2_oldcol)
         del(tbl2[tm2])
-        tbl2[tm2] = tbl2_newcol
-        new_table = au.join_by_id(tbl1, tbl2, tm1, tm2, join_type=join_type,
-                                  idproc=npstr.strip)
-        del(tbl2[tm2])
-        tbl2[tm2] = tbl2_oldcol
+        try:
+            tbl2[tm2] = tbl2_newcol
+            new_table = au.join_by_id(tbl1, tbl2, tm1, tm2, join_type=join_type,
+                                      idproc=npstr.strip)
+        finally:
+            del(tbl2[tm2])
+            tbl2[tm2] = tbl2_oldcol
+            
 
     return new_table
 
-def read_dr14_allVisit(allvisitpath=paths.DR14_ALLVISIT_PATH):
+def read_dr14_allVisit(allvisitpath=paths.DR14_ALLVISIT_PATH, kepleropt=True):
     '''Read the DR14 allVisit file.
 
-    This function reads the l31c.1 version of the allVisit file.'''
+    This function reads the l31c.1 version of the allVisit file. If the
+    Kepleropt keyword is given, then only the objects in the RA range of Keler
+    will be read, which should greatly reduce the memory requirements. Only the
+    summary data table will be read, which should contain everthing necessary
+    for the APOGEE pipeline.
+    
+    WARNING: If kepleropt is disabled, then the extremely large table may cause
+    python to crash if it can't fit in memory.'''
 
-    allvisit = Table.read(str(allvisitpath), format="fits")
-    allvisit["APOGEE_ID"] = npstr.rstrip(allvisit["APOGEE_ID"])
+    if kepleropt:
+        allvisit_hdus = fits.open(str(allvisitpath), memmap=True)
+        allvisit_indices = allvisit_hdus[2]
+        index_start = allvisit_indices.data[279]
+        index_end = allvisit_indices.data[302]
+        # This will only have targets in the Kepler RA range.
+        allvisit_kepler = allvisit_hdus[1].data[index_start:index_end]
+        allvisit_hdus.close()
+        # Convert from recarray to Table
+        allvisit = Table(allvisit_kepler)
+    else:
+        allvisit = Table.read(str(allvisitpath), format="fits")
+        allvisit["APOGEE_ID"] = npstr.rstrip(allvisit["APOGEE_ID"])
+
     return allvisit
 
-def read_dr14_allStar(allstarpath=paths.DR14_ALLSTAR_PATH):
+def read_dr14_allStar(allstarpath=paths.DR14_ALLSTAR_PATH, kepleropt=True):
     '''Reads the allStar file for DR14.
     
-    Reads in the allStar table for DR14. This only reads in the Summary data
-    table, which should contain everything necessary for the APOGEE pipeline.
+    Reads in the allStar table for DR14. If the Kepleropt keyword is given,
+    then only the objects in the RA range of Kepler will be read, which should
+    greatly reduce the memory requirements. Only the Summary data table will be
+    read in, which should contain everything necessary for the APOGEE pipeline.
 
-    WARNING: This table is extremely large an will take several hours to fit
-    into memory.
+    WARNING: If kepleropt is disabled, then extremely large table will take 
+    several hours to fit into memory.
     '''
-    allStar = Table.read(str(allstarpath), format="fits")
-    return allStar
+    if kepleropt:
+        allstar_hdus = fits.open(str(allstarpath), memmap=True)
+        allstar_indices = allstar_hdus[2]
+        index_start = allstar_indices.data[279]
+        index_end = allstar_indices.data[302]
+        # This will only have targets in the Kepler RA range.
+        allstar_kepler = allstar_hdus[1].data[index_start:index_end]
+        allstar_hdus.close()
+        # Convert from recarray to Table
+        allstar = Table(allstar_kepler)
+    else:
+        allstar = Table.read(str(allstarpath), format="fits")
+    return allstar
 
 def read_Rafa_rotation(rottable=paths.RAFA_SAVITA_PERIODS):
     '''Reads in the rotation periods as determined by Rafa's pipeline.
@@ -1218,8 +1256,9 @@ def period_velocity_apogee(
 
     plt.xlabel("Period (day)")
     plt.ylabel("vsini (km/s)")
-    plt.ylim(0, 80)
-    plt.legend(loc="upper right")
+    plt.ylim(0, 100)
+    plt.xlim(1, 5)
+#   plt.legend(loc="upper right")
 
 def teff_velocity_apogee(
     teffs, vsinis, apogee_flags):
@@ -1249,6 +1288,130 @@ def teff_velocity_apogee(
     plt.ylim(0, 80)
     plt.xlim(5700, 4000)
     plt.legend(loc="upper right")
+
+def teff_radius_apogee(
+    teffs, vsinis, periods, apogee_flags):
+    '''Plots the inferred radius vs teff for rapid rotators.
+
+    The inferred radius will basically be vsini * P. Typical bounds on sini
+    will also be displayed for clarity. If cool objects have a large radius,
+    then this may be indicative of subgiant contamination.'''
+    bad_indices = apogee_flags & 2**23 != 0
+    # The 2**14 is a flag called VSINI_WARN. It does not trigger the STAR_BAD
+    # or STAR_WARN flags.
+    warn_indices = np.logical_and(apogee_flags & (2**7+2**14) != 0,
+                                  np.logical_not(bad_indices))
+    good_indices = np.logical_not(np.logical_or(bad_indices, warn_indices))
+
+    conv = 24*60*60*1e5/6.96e10/2/np.pi
+
+    plt.scatter(
+        teffs[good_indices], vsinis[good_indices]*periods[good_indices]*conv, 
+        s=50, c="g", marker="o", label="good")
+    plt.scatter(
+        teffs[warn_indices], vsinis[warn_indices]*periods[warn_indices]*conv,
+        s=15, c="m", marker="s", label="warn")
+    plt.scatter(
+        teffs[bad_indices], vsinis[bad_indices]*periods[bad_indices]*conv, 
+        s=15, c="r", marker="D", label="bad")
+    hr.invert_x_axis()
+
+    # Use the isochrones to determine the radius as a function of Teff.
+    isochrone = sed.read_DSEP_isochrone(0.0, 2)
+    isoteff = isochrone[np.where(np.logical_and(
+        isochrone["LogTeff"] > np.log10(4000), 
+        isochrone["EEP"] < 73))]
+    teffs = 10**isoteff["LogTeff"]
+    radii = 10**(isoteff["LogL/Lo"] / 2 - 
+                 2 * (isoteff["LogTeff"] - np.log10(5777)))
+
+    plt.plot(teffs, radii, 'k-', label="DSEP")
+    plt.plot(teffs, radii*0.5, 'k--', label="Min.")
+
+    plt.xlim(6600, 4000)
+    plt.ylim(0, 5)
+    plt.xlabel("Teff (K)")
+    plt.ylabel("vsini * P (Rsun)")
+
+def rotation_subgiant_test(
+    vsini, period, teff, logg, metallicity, alpha, apogee_flags, age=2.0):
+    '''Test the subgiant status using displacement in radius.
+
+    This will see if the subgiants with large radius displacments also have
+    lower logg, which correspond to the rotational modulation and period
+    matching the atmosphere.
+    '''
+    bad_indices = apogee_flags & 2**23 != 0
+    # As far as I can tell, ALL of the STAR_BAD flagged objects have no Teff
+    # value. And all of the STAR_WARN and better objects have a guess at TEFF,
+    # [Fe/H], [alpha/M], and [M/H]. But it will be good to double-check with
+    # asserts.
+    notbad_indices = np.logical_not(bad_indices)
+    notbad_flags = apogee_flags[notbad_indices]
+    notbad_vsini = vsini[notbad_indices]
+    notbad_period = period[notbad_indices]
+    notbad_teff = teff[notbad_indices]
+    notbad_metallicities = metallicity[notbad_indices]
+    notbad_loggs = logg[notbad_indices]
+    notbad_alphas = alpha[notbad_indices]
+
+    assert(np.all(notbad_teff > 0))
+    assert(np.all(notbad_vsini > 0))
+    assert(np.all(notbad_logg > 0))
+    assert(np.all(notbad_metallicities != -9999.0))
+    assert(np.all(np.abs(notbad_alpha) <= 10.0))
+
+    # The 2**14 is a flag called VSINI_WARN. It does not trigger the STAR_BAD
+    # or STAR_WARN flags.
+    warn_indices = notbad_flags & (2**7+2**14) != 0,
+    good_indices = np.logical_not(warn_indices)
+
+    conv = 24*60*60*1e5/6.96e10/2/np.pi
+
+    # This is the radius estimated by rotation.
+    rotation_radius = nobad_vsini * notbad_period * conv
+    average_rotation_radius = 0.75 * rotation_radius
+    rotation_radius_range = 0.25 * rotation_radius
+
+    # These are the alpha/Fe bins that will be fed into DSEP.
+    alpha_binedges = np.arange(-0.1, 0.9, 0.2)
+    # a/Fe < -0.1 corresponds to 1, and a/Fe > 0.7 corresponds to 6.
+    alpha_bins = np.digitize(notbad_alphas, alpha_binedges)+1
+    # DSEP should crash or something if the metallicity and alpha enhancement
+    # are not compatible. In particular, high alpha enhancements are only
+    # available for low metallicity stars. I want to ensure that this will be
+    # the case before running into weird DSEP bugs.
+    assert(np.all(np.logical_or(alpha_bins < 4, np.logical_and(
+        alpha_bins >= 4, notbad_metallicities <= 0.0))))
+
+    # This may be complicated, so I wanna take it slow.
+    model_radii = np.zeros(len(average_rotation_radius))
+    minteff = np.min(notbad_teff)
+    rounded_metallicities = np.around(notbad_metallicities, 2)
+    for i in range(len(notbad_metallicities)):
+        interp = sed.teff_to_radius_DSEP_interpolator(
+            age=age, metallicity=rounded_metallicities[i], afe=alpha_bins[i],
+            lowT=minteff)
+        model_radii[i] = interp(notbad_teff[i])
+
+    radius_displacement = average_rotation_radius - model_radii
+    good_displacement = radius_displacement[good_indices]
+    good_displacement_range = rotation_radius_range[good_indices]
+    good_logg = notbad_loggs[good_indices]
+    warn_displacement = radius_displacement[warn_indices]
+    warn_displacement_range = rotation_radius_range[warn_indices]
+    warn_logg = notbad_loggs[warn_indices]
+
+    plt.errorbar(good_logg, good_displacement, good_displacment_range, s=50,
+                 c="g", marker="o", label="Good")
+    plt.errorbar(warn_logg, warn_displacement, warn_displacment_range, s=15,
+                 c="m", marker="s", label="Warn")
+    plt.xlabel("Log g")
+    plt.ylabel("Rotation radius - Main Sequence radius")
+    plt.xlim(2.9, 5.0)
+    plt.title("Displacment from Main Sequence")
+
+
 
 def HR_standout_plot(
     fullsample, rv_nonvar, rv_var, Teff_colname="TEFF_FIT",
@@ -1360,6 +1523,29 @@ def perform_logg_cut(tbl, highlogg=None, lowlogg=None, loggcol="LogG"):
 
     Used to restrict the range of log g for a sample.'''
     return perform_cut(tbl, loggcol, lowlogg, highlogg)
+
+def perform_Ciardi_logg_cut(tbl, loggcol="logg", teffcol="teff"):
+    '''Perform a cut on log g as advocated by Ciardi et al (2011).
+
+    This is a proposed delineation between dwarfs and giants for Kepler
+    targets. The cut is as follows:
+                3.5                   if Teff >= 6000
+    log(g) >= { 4.0                   if Teff <= 4250      }
+                5.2 - (2.8e-4 * Teff) if 4250 < Teff < 6000
+
+    This cut was used in McQuillan to select dwarfs.'''
+    teff = tbl[teffcol]
+    logg = tbl[loggcol]
+    ciardi_indices = np.where(np.logical_or(np.logical_or(
+        np.logical_and(teff >= 6000, logg >= 3.5), 
+        np.logical_and(teff <= 4250, logg >= 4.0)),
+        np.logical_and(
+            np.logical_and(teff < 6000, teff > 4250),
+            logg >= 5.2 - 2.8e-4 * teff)))
+    cutstring = "Ciardi et al (2011) logg cut."
+    cuttable = tbl[ciardi_indices]
+    add_cut_metadata(cuttable, cutstring)
+    return cuttable
 
 def read_pulsators(pulsatorfile=os.path.join(WORKPATH, "pulsators.kic")):
     '''Reads in a list of KIC IDs of known pulsators.'''
@@ -1628,8 +1814,8 @@ def missed_EBs_teff_width(rafa_ebs, missed_ebs, teffcol="teff",
 def missed_EBs_compare_histogram(rafa_ebs, missed_ebs, histcol, binrange,
                                  bins=50, xlabel=""):
     '''Create a histogram of missed vs detected EBs.'''
-    plt.hist(rafa_ebs[histcol], range=binrange, bins=bins)
-    plt.hist(missed_ebs[histcol], range=binrange, bins=bins)
+    plt.hist(rafa_ebs[histcol], range=binrange, bins=bins, label="Missing")
+    plt.hist(missed_ebs[histcol], range=binrange, bins=bins, label="Observed")
     if xlabel:
         plt.xlabel(xlabel)
     else:

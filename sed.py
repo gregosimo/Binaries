@@ -1693,6 +1693,28 @@ def mass_to_teff_DSEP_interpolator(
 
     return exponentify_interpolator(interpolator)
 
+def teff_to_radius_DSEP_interpolator(
+    age=1.5, metallicity=0.0, bands=1, Y=1, afe=2, lowT=3000):
+    '''Create an interpolator from effective temperature to radius.
+
+    Unfortunately, radius is an inferred quantity and can't be inferred from
+    columns. This function is supposed to help construct interpolators to do
+    this.
+    
+    Note that this interpolator takes in logTeff and return logRadius'''
+    star_table = restrict_interpolation_table(read_DSEP_isochrone(
+        metallicity, age, bands=bands, Y=Y, afe=afe), lowT=lowT)
+    loglum = star_table["LogL/Lo"]
+    logteff = star_table["LogTeff"]
+    logradius= 0.5 * loglum - 2 * (logteff - np.log10(5777))
+
+    interpolator = interp1d(logteff, logradius, kind="linear",
+                            bounds_error=bound_error)
+    teff_to_radius = out_of_bounds_wrapper(
+        interpolator, "LogTeff", max(logteff), min(logteff))
+
+    return teff_to_radius
+
 # Directly calculate fluxes and colors from mass #
 
 def calculate_single_star_magnitude_DSEP(
