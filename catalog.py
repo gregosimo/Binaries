@@ -36,6 +36,8 @@ SDSS3_URL = "http://data.sdss3.org"
 
 NUM_KEPLER_QUARTERS = 17
 
+APOGEE_NULL = -9999.0
+
 ###############################################################################
 # Reading catalogs #
 ###############################################################################
@@ -255,6 +257,15 @@ def read_UCAC4_Rafa_Tidsync(
     del(UCAC_table["_1"])
     UCAC_table.add_column(kic_ints, index=0)
     return UCAC_table
+
+def read_TGAS_McQuillan_APOGEE_overlap_tidsync(
+    path=paths.TGAS_MCQUILLAN_APOGEE_TIDSYNC_PATH):
+    '''Read the TGAS information for McQuillan/APOGEE targets.
+
+    Reads in the information from TGAS which is available for the sample of
+    targets which overlap between McQuillan and APOGEE.'''
+    tgas_table = Table.read(str(path), format="fits")
+    return tgas_table
 
 def join_by_2MASS_key(tbl1, tbl2, tm1, tm2, join_type="inner",
                       skip_missing=True):
@@ -527,6 +538,20 @@ def write_columns_for_input(outputtable, filename, maxlen, table_format,
         outputsegment.write(str(outputpath / outputfile), format=table_format,
                             include_names=output_columns)
 
+def write_KIC_Vizier_upload_list(kics, outputfile, outputpath=paths.HEAD_DIR):
+    '''Write a file to be uploaded to Vizier. 
+
+    This will make a list of KIC identifiers which should be resolved by
+    Vizier.'''
+    kicstr = kics.astype(np.str)
+    kic_column = npstr.add("KIC ", kicstr)
+    kic_table = Table([kic_column], names=["KIC"])
+    # I don't know the input limit yet.
+    write_columns_for_input(
+        kic_table, outputfile, 99999, "ascii.no_header", output_columns=["KIC"], 
+        outputpath=outputpath)
+    kic_table.write(str(outputpath / outputfile), format="ascii.no_header")
+
 def write_MAST_files(outputtable, kiccol="KIC", outputpath=paths.HEAD_DIR,
                      output_filename="Kepler_MAST.txt"):
     '''Writes KICs so that they are able to be read by the MAST target form.
@@ -761,6 +786,108 @@ def rapid_fraction_multiple_limits(
             maxper=bound, teffcol=teffcol, periodcol=periodcol, label=perlabel)
     plt.title("Rapid Rotator Fraction up to {0} day".format(maxper))
     plt.legend(loc="upper center")
+
+###############################################################################
+# APOGEE Figures #
+###############################################################################
+
+ASPCAP_STAR_BAD = 2**23
+ASPCAP_STAR_WARN = 2**7
+ASPCAP_VSINI_WARN = 2**14
+
+def plot_by_ASPCAP_quality(x, y, aspcapflags, **kwargs):
+    '''Distinguish between ASPCAP quality for plotting quantities.
+
+    The arguments for this function are the x value, yvalue, and the aspcap
+    flags necessary to determine which points are good, warn, and bad. 
+
+    By default, a target is marked bad if the STAR_BAD flag is enabled, is
+    marked warn if the STAR_WARN flag or VSINI_WARN flag is enabled. These
+    can be overridden by passing arguments warn_flags and bad_flags. The "flag"
+    should be an integer in the form of 2**digit, where the digit specified in
+    the SDSS DR13 bitmask page. For convenience, some commonly-used flags are 
+    included in this module prepended by ASPCAP. To specify multiple flags, the 
+    flags have to be added. For example, to specify both the STAR_WARN and 
+    VSINI_WARN flags, you would specify 
+    warn_flags=ASPCAP_STAR_WARN+ASPCAP_VSINI_WARN. 
+    '''
+    # Customization of the bad and warn flags
+    bad_flags = kwargs.pop("bad_flags", ASPCAP_STAR_BAD)
+    warn_flags = kwargs.pop("warn_flags", ASPCAP_STAR_WARN + ASPCAP_VSINI_WARN)
+
+    # Find which indices correspond to good, warn, and bad entries.
+    bad_indices = aspcapflags & bad_flags != 0
+    # The 2**14 is a flag called VSINI_WARN. It does not trigger the STAR_BAD
+    # or STAR_WARN flags.
+    warn_indices = np.logical_and(aspcapflags & warn_flags != 0,
+                                 np.logical_not(bad_indices))
+    good_indices = np.logical_not(warn_indices)
+
+    # Dealing with errors.
+    yerr = kwargs.pop("yerr", None)
+    xerr = kwargs.pop("xerr", None)
+
+    if np.any(good_indices):
+        good_x = x[good_indices]
+        good_y = y[good_indices]
+        if yerr is not None:
+            try:
+                good_yerr = yerr[good_indices]
+            except TypeError:
+                good_yerr = None
+            try:
+                good_xerr = xerr[good_indices]
+            except TypeError:
+                good_xerr = None
+        else:
+            good_yerr=None
+            good_xerr=None
+        good_kwargs = dict(
+            kwargs, yerr=good_yerr, xerr=good_xerr, ms=7, c="g", marker="o", 
+            label="Good", ls="")
+        plt.errorbar(good_x, good_y, **good_kwargs)
+
+    if np.any(warn_indices):
+        warn_x = x[warn_indices]
+        warn_y = y[warn_indices]
+        if yerr is not None:
+            try:
+                warn_yerr = yerr[warn_indices]
+            except TypeError:
+                warn_yerr = None
+            try:
+                warn_xerr = xerr[warn_indices]
+            except TypeError:
+                warn_xerr = None
+        else:
+            warn_yerr=None
+            warn_xerr=None
+        warn_kwargs = dict(
+            kwargs, yerr=warn_yerr, xerr=warn_xerr, ms=4, c="m", marker="s", 
+            label="Warn", ls="")
+        plt.errorbar(warn_x, warn_y, **warn_kwargs)
+
+    if np.any(bad_indices):
+        bad_x = x[bad_indices]
+        bad_y = y[bad_indices]
+        if yerr is not None:
+            try:
+                bad_yerr = yerr[bad_indices]
+            except TypeError:
+                bad_yerr = None
+            try:
+                bad_xerr = xerr[bad_indices]
+            except TypeError:
+                bad_xerr = None
+        else:
+            bad_yerr=None
+            bad_xerr=None
+        bad_kwargs = dict(
+            kwargs, yerr=bad_yerr, xerr=bad_xerr, ms=15, c="r", marker="D", 
+            label="Bad", ls="")
+        bad_kwargs["yerr"] = bad_yerr
+        bad_kwargs["xerr"] = bad_xerr
+        plt.errorbar(bad_x, bad_y, **bad_kwargs)
 
 def velocity_evolution(variable, nonvariable):
     '''Automatically generate the velocity evolution of potential binaries.
@@ -1333,6 +1460,20 @@ def teff_radius_apogee(
     plt.xlabel("Teff (K)")
     plt.ylabel("vsini * P (Rsun)")
 
+def rotation_teff_test(
+    vsini, period, teff, metallicity, alpha, apogee_flags, age=2.0):
+    '''Test the subgiant status using displacement in radius.
+
+    This will see if the subgiants with large radius displacments also have
+    lower logg, which correspond to the rotational modulation and period
+    matching the atmosphere.
+    '''
+    compare_rotation_DSEP_radius_ratio(
+        vsini, period, teff, metallicity, alpha, apogee_flags, teff, 
+        (6600, 4000))
+    plt.xlabel("Teff (K)")
+    plt.title("MS Displacement")
+
 def rotation_subgiant_test(
     vsini, period, teff, logg, metallicity, alpha, apogee_flags, age=2.0):
     '''Test the subgiant status using displacement in radius.
@@ -1341,76 +1482,136 @@ def rotation_subgiant_test(
     lower logg, which correspond to the rotational modulation and period
     matching the atmosphere.
     '''
-    bad_indices = apogee_flags & 2**23 != 0
-    # As far as I can tell, ALL of the STAR_BAD flagged objects have no Teff
-    # value. And all of the STAR_WARN and better objects have a guess at TEFF,
-    # [Fe/H], [alpha/M], and [M/H]. But it will be good to double-check with
-    # asserts.
-    notbad_indices = np.logical_not(bad_indices)
-    notbad_flags = apogee_flags[notbad_indices]
-    notbad_vsini = vsini[notbad_indices]
-    notbad_period = period[notbad_indices]
-    notbad_teff = teff[notbad_indices]
-    notbad_metallicities = metallicity[notbad_indices]
-    notbad_loggs = logg[notbad_indices]
-    notbad_alphas = alpha[notbad_indices]
+    compare_rotation_DSEP_radius_ratio(
+        vsini, period, teff, metallicity, alpha, apogee_flags, logg, (2.9, 5.0))
+    plt.xlabel("log (g)")
+    plt.title("MS Displacement")
 
-    assert(np.all(notbad_teff > 0))
-    assert(np.all(notbad_vsini > 0))
-    assert(np.all(notbad_logg > 0))
-    assert(np.all(notbad_metallicities != -9999.0))
-    assert(np.all(np.abs(notbad_alpha) <= 10.0))
+def rotation_period_test(
+    vsini, period, teff, metallicity, alpha, apogee_flags, age=2.0):
+    '''Test the subgiant status using displacement in radius.
 
-    # The 2**14 is a flag called VSINI_WARN. It does not trigger the STAR_BAD
-    # or STAR_WARN flags.
-    warn_indices = notbad_flags & (2**7+2**14) != 0,
-    good_indices = np.logical_not(warn_indices)
+    This will see if the subgiants with large radius displacments also have
+    lower logg, which correspond to the rotational modulation and period
+    matching the atmosphere.
+    '''
+    compare_rotation_DSEP_radius_ratio(
+        vsini, period, teff, metallicity, alpha, apogee_flags, period, (1, 5))
+    plt.xlabel("Period (day)")
+    plt.title("MS Displacement")
 
-    conv = 24*60*60*1e5/6.96e10/2/np.pi
+def compare_rotation_DSEP_radius_ratio(
+    vsini, period, teff, metallicity, alpha, apogee_flags, xvalue, xlimits):
+    '''Plot the dependence of rotation radius ratio to another value.
+
+    The rotation radius requires vsini and period, while the main-sequence
+    radius from DSEP requires Teff, log(g), metallicity, and alpha abundance.
+    The rotation radius will have an uncertainty of 0.25 vsini * period. 
+
+    The ratio of radii will be plotted against xvalue. The points with "good"
+    APOGEE flags will be plotted as large green circles while those with "warn"
+    will be lotted as magenta squares. Generally bad points will not have valid
+    Teff values and won't be visible, but if they are, they will be red
+    circles. A radius ratio of 1 is marked on the figure.'''
+
+    usable_indices = au.multi_logical_and(
+        vsini != APOGEE_NULL, teff != APOGEE_NULL, xvalue != APOGEE_NULL,
+        metallicity != APOGEE_NULL, alpha != APOGEE_NULL)
+    usable_flags = apogee_flags[usable_indices]
+    usable_vsini = vsini[usable_indices]
+    usable_period = period[usable_indices]
+    usable_teff = teff[usable_indices]
+    usable_metallicities = metallicity[usable_indices]
+    usable_xvalues = xvalue[usable_indices]
+    usable_alphas = alpha[usable_indices]
+
+    assert(np.all(np.abs(usable_alphas) <= 2.0))
 
     # This is the radius estimated by rotation.
-    rotation_radius = nobad_vsini * notbad_period * conv
-    average_rotation_radius = 0.75 * rotation_radius
-    rotation_radius_range = 0.25 * rotation_radius
+    max_rotation_radius = rotation_radius(usable_vsini, usable_period)
+    average_rotation_radius = 0.75 * max_rotation_radius
+    rotation_radius_range = 0.25 * max_rotation_radius
 
     # These are the alpha/Fe bins that will be fed into DSEP.
     alpha_binedges = np.arange(-0.1, 0.9, 0.2)
     # a/Fe < -0.1 corresponds to 1, and a/Fe > 0.7 corresponds to 6.
-    alpha_bins = np.digitize(notbad_alphas, alpha_binedges)+1
+    alpha_bins = np.digitize(usable_alphas, alpha_binedges)+1
     # DSEP should crash or something if the metallicity and alpha enhancement
     # are not compatible. In particular, high alpha enhancements are only
     # available for low metallicity stars. I want to ensure that this will be
     # the case before running into weird DSEP bugs.
     assert(np.all(np.logical_or(alpha_bins < 4, np.logical_and(
-        alpha_bins >= 4, notbad_metallicities <= 0.0))))
+        alpha_bins >= 4, usable_metallicities <= 0.0))))
 
+    model_radii = DSEP_dwarf_radii(
+        usable_teff, usable_metallicities, usable_alphas)
+
+    radius_displacement_fraction = (average_rotation_radius / model_radii)
+    displacement_range = rotation_radius_range / model_radii
+
+    plot_by_ASPCAP_quality(
+        usable_xvalues, radius_displacement_fraction, usable_flags,
+        yerr=displacement_range)
+    
+
+    plt.plot(list(xlimits), [1, 1], 'k-')
+    plt.ylabel("Rotation radius / MS radius")
+    plt.xlim(xlimits[0], xlimits[1])
+
+
+def rotation_radius(vsini, prot, vsini_mask=APOGEE_NULL):
+    '''Calculate the maximum radius of a star with rotation period and vsini.
+
+    This function will essentially calculate VSINI * Prot. It's assumed that
+    vsini is given in km/s and prot is given in days. For targets which do not
+    have a vsini value, this will recognize the APOGEE mask and propagate
+    it to the output.
+    '''
+    masked_vsini = np.ma.masked_equal(vsini, -9999.0)
+    conv = 24*60*60*1e5/6.96e10/2/np.pi
+
+    # This is the radius estimated by rotation.
+    rotation_radius = masked_vsini * prot* conv
+
+    filled_radii = rotation_radius.filled(-9999.0)
+
+    return filled_radii
+
+def DSEP_dwarf_radii(teffs, metallicities, alphas, age=2.0, lowTeff=3000,
+                     highTeff=7000):
+    '''Calculate MS radii predicted from DSEP.
+    
+    Using an isochrone of a given age, calculate the radius of a star given an
+    effective temperature, metallicity, and alpha abundance.'''
     # This may be complicated, so I wanna take it slow.
-    model_radii = np.zeros(len(average_rotation_radius))
-    minteff = np.min(notbad_teff)
-    rounded_metallicities = np.around(notbad_metallicities, 2)
-    for i in range(len(notbad_metallicities)):
-        interp = sed.teff_to_radius_DSEP_interpolator(
-            age=age, metallicity=rounded_metallicities[i], afe=alpha_bins[i],
-            lowT=minteff)
-        model_radii[i] = interp(notbad_teff[i])
+    masked_teffs = np.ma.masked_equal(teffs, APOGEE_NULL)
+    masked_metallicities = np.ma.masked_equal(metallicities, APOGEE_NULL)
+    masked_alphas = np.ma.masked_equal(alphas, APOGEE_NULL)
+    radius_mask = au.multi_logical_or(
+        masked_teffs.mask, masked_metallicities.mask, masked_alphas.mask)
+    model_radii = np.ma.zeros(len(masked_teffs))
+    model_radii.mask = radius_mask
 
-    radius_displacement = average_rotation_radius - model_radii
-    good_displacement = radius_displacement[good_indices]
-    good_displacement_range = rotation_radius_range[good_indices]
-    good_logg = notbad_loggs[good_indices]
-    warn_displacement = radius_displacement[warn_indices]
-    warn_displacement_range = rotation_radius_range[warn_indices]
-    warn_logg = notbad_loggs[warn_indices]
+    # These are the alpha/Fe bins that will be fed into DSEP.
+    alpha_binedges = np.arange(-0.1, 0.9, 0.2)
+    # a/Fe < -0.1 corresponds to 1, and a/Fe > 0.7 corresponds to 6.
+    alpha_bins = np.digitize(masked_alphas, alpha_binedges)+1
+    # DSEP should crash or something if the metallicity and alpha enhancement
+    # are not compatible. In particular, high alpha enhancements are only
+    # available for low metallicity stars. I want to ensure that this will be
+    # the case before running into weird DSEP bugs.
+    assert(np.all(np.logical_or(alpha_bins < 4, np.logical_and(
+        alpha_bins >= 4, masked_metallicities <= 0.0))))
 
-    plt.errorbar(good_logg, good_displacement, good_displacment_range, s=50,
-                 c="g", marker="o", label="Good")
-    plt.errorbar(warn_logg, warn_displacement, warn_displacment_range, s=15,
-                 c="m", marker="s", label="Warn")
-    plt.xlabel("Log g")
-    plt.ylabel("Rotation radius - Main Sequence radius")
-    plt.xlim(2.9, 5.0)
-    plt.title("Displacment from Main Sequence")
+    rounded_metallicities = np.around(masked_metallicities, 2)
+    for i in range(len(model_radii)):
+        if not model_radii.mask[i]:
+            interp = sed.teff_to_radius_DSEP_interpolator(
+                age=age, metallicity=rounded_metallicities[i], afe=alpha_bins[i],
+                lowT=lowTeff, highT=highTeff)
+            model_radii[i] = 10**interp(np.log10(masked_teffs[i]))
 
+    return model_radii
 
 
 def HR_standout_plot(
@@ -1432,6 +1633,57 @@ def HR_standout_plot(
     plt.xlabel("Teff (K)")
     plt.ylabel("log g (cm/s^2)")
     plt.legend(loc="upper left")
+
+def compare_Rafa_McQuillan_tidsync_params(
+    rafa_logg, rafa_teff, mcq_logg, mcq_teff):
+    '''Plot the HR diagram for both Rafa's and McQuillan's loggs.'''
+    plt.subplot(1, 2, 1)
+    hr.logg_teff_plot(rafa_teff, rafa_logg, 'r.')
+    plt.title("Rafa rapid rotators")
+    plt.xlim(7000, 3200)
+    plt.ylim(5.15, 3.5)
+    plt.subplot(1, 2, 2)
+    hr.logg_teff_plot(mcq_teff, mcq_logg, 'g.')
+    plt.ylabel("")
+    plt.title("McQuillan rapid rotators")
+    plt.xlim(7000, 3200)
+    plt.ylim(5.15, 3.5)
+
+def compare_Rafa_McQuillan_tidsync_params_to_APOGEE(
+    rafa_logg, rafa_teff, rafa_apo_logg, rafa_apo_teff, rafa_flags, mcq_logg, 
+    mcq_teff, mcq_apo_logg, mcq_apo_teff, mcq_flags):
+    '''Compare the Teff and log(g) for APOGEE targets.'''
+    rafa_logg_diff = rafa_logg - rafa_apo_logg
+    mcq_logg_diff = mcq_logg - mcq_apo_logg
+    rafa_teff_diff = rafa_teff - rafa_apo_teff
+    mcq_teff_diff = mcq_teff - mcq_apo_teff
+
+    plt.subplot(2, 2, 1)
+    plot_by_ASPCAP_quality(rafa_apo_teff, rafa_logg_diff, rafa_flags)
+    plt.ylabel("Log(g) diff (KIC - APOGEE)")
+    plt.xlim(7000, 3200)
+    plt.ylim(-1.0, 3.0)
+    plt.title("Rafa APOGEE observations")
+    plt.subplot(2, 2, 2)
+    plot_by_ASPCAP_quality(mcq_apo_teff, mcq_logg_diff, mcq_flags)
+    plt.ylabel("Log(g) diff (KIC - APOGEE)")
+    plt.xlim(7000, 3200)
+    plt.ylim(-1.0, 3.0)
+    plt.title("McQuillan APOGEE Observations")
+    plt.subplot(2, 2, 3)
+    plot_by_ASPCAP_quality(rafa_apo_teff, rafa_teff_diff, rafa_flags)
+    plt.ylabel("Teff diff (K) (KIC - APOGEE)")
+    plt.xlim(7000, 3200)
+    plt.ylim(-1000, 1000)
+    plt.xlabel("Teff (K) (APOGEE)")
+    plt.subplot(2, 2, 4)
+    plot_by_ASPCAP_quality(mcq_apo_teff, mcq_teff_diff, mcq_flags)
+    plt.ylabel("Teff diff (K) (KIC - APOGEE)")
+    plt.xlabel("Teff (K) (APOGEE)")
+    plt.xlim(7000, 3200)
+    plt.ylim(-1000, 1000)
+    
+    
 
 def perform_cut(fullsample, col_label, lowval=None, highval=None,
                 invert_inequality=False):

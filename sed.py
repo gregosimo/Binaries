@@ -1694,7 +1694,8 @@ def mass_to_teff_DSEP_interpolator(
     return exponentify_interpolator(interpolator)
 
 def teff_to_radius_DSEP_interpolator(
-    age=1.5, metallicity=0.0, bands=1, Y=1, afe=2, lowT=3000):
+    age=1.5, metallicity=0.0, bands=1, Y=1, afe=2, lowT=3000, highT=6000,
+    bound_error=True):
     '''Create an interpolator from effective temperature to radius.
 
     Unfortunately, radius is an inferred quantity and can't be inferred from
@@ -1702,8 +1703,9 @@ def teff_to_radius_DSEP_interpolator(
     this.
     
     Note that this interpolator takes in logTeff and return logRadius'''
-    star_table = restrict_interpolation_table(read_DSEP_isochrone(
-        metallicity, age, bands=bands, Y=Y, afe=afe), lowT=lowT)
+    star_table = restrict_interpolation_table(
+        read_DSEP_isochrone(metallicity, age, bands=bands, Y=Y, afe=afe), 
+        lowT=lowT, highT=highT)
     loglum = star_table["LogL/Lo"]
     logteff = star_table["LogTeff"]
     logradius= 0.5 * loglum - 2 * (logteff - np.log10(5777))

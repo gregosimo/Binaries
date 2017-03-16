@@ -47,6 +47,8 @@ UCAC_TIDSYNC_RAFA_PATH = HEAD_DIR / "UCAC_4_Rafa_Tidsync.tsv"
 EB_PATH = HEAD_DIR / "Villanova_EB_v3.txt"
 SYNC_EB_PATH = HEAD_DIR / "sync_ebs_moredetails.csv"
 KOI_PATH = HEAD_DIR / "koi.csv"
+TGAS_MCQUILLAN_APOGEE_TIDSYNC_PATH = (
+    HEAD_DIR / "TGAS_McQuillan_APOGEE_tidsync.fits")
 
 THESIS_PATH = HEAD_DIR / "Thesis"
 PROPOSAL_PATH = THESIS_PATH / "Proposals"
