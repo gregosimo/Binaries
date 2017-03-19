@@ -27,11 +27,6 @@ import binarycalcs as bc
 import path_config as paths
 import sed
 
-WORKPATH = "/home/regulus/simonian/Binaries"
-
-APOKASC_PATH = os.path.join(WORKPATH, "APOKASC_cat_v3.3.5.fits")
-MCQUILLAN_PATH = os.path.join(WORKPATH, "McQuillan.fit")
-
 SDSS3_URL = "http://data.sdss3.org"
 
 NUM_KEPLER_QUARTERS = 17
@@ -43,7 +38,7 @@ APOGEE_NULL = -9999.0
 ###############################################################################
 
 def read_APOKASC_catalog(
-    filepath=APOKASC_PATH, exclude_single_epoch=False, filter_BAD=False, 
+    filepath=paths.APOKASC_PATH, exclude_single_epoch=False, filter_BAD=False, 
     filter_WARN=False):
     '''Reads in the APOKASC catalog.
 
@@ -643,7 +638,7 @@ def write_Villanova_EB_upload_list(
 
 def create_joined_APOKASC_McQuillan_catalog(
         apocat=None, mcquillancat=None, apofile=APOKASC_PATH,
-    mcquillanfile=MCQUILLAN_PATH):
+    mcquillanfile=paths.MCQUILLAN_CATALOG):
     '''Creates a joint APOKASC/McQuillan catalog.
 
     All Kepler objects which are measured in both the McQuillan sample as well
@@ -1799,7 +1794,7 @@ def perform_Ciardi_logg_cut(tbl, loggcol="logg", teffcol="teff"):
     add_cut_metadata(cuttable, cutstring)
     return cuttable
 
-def read_pulsators(pulsatorfile=os.path.join(WORKPATH, "pulsators.kic")):
+def read_pulsators(pulsatorfile=paths.KIC_PULSATORS):
     '''Reads in a list of KIC IDs of known pulsators.'''
 
     pulsatortable = Table.read(
@@ -1838,7 +1833,7 @@ def filter_good_UKIRT_observations(ukirt_table):
     return ukirt_table[good_indices]
 
 def find_UKIRT_contaminants(
-    bintable, ukirt_file=os.path.join(WORKPATH, "ukirt_results.csv.gz")):
+    bintable, ukirt_file=paths.UKIRT_RESULTS):
     '''Magnitude differences between stars and brightest contaminants
 
     This function takes a list from WFCAM, or if ukirt_file is None, will
