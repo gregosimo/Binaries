@@ -790,6 +790,33 @@ ASPCAP_STAR_BAD = 2**23
 ASPCAP_STAR_WARN = 2**7
 ASPCAP_VSINI_WARN = 2**14
 
+def apogee_select_quality(apotable, quality=("good", "bad", "warn"), 
+                          aspcapcol="ASPCAPFLAG"):
+    '''Select the entries in apotable of the given quality.
+    
+    If aspcapcol is given, then the objects with the given qualities for
+    aspcapcol will be selected.'''
+    
+    bad_flags = ASPCAP_STAR_BAD
+    warn_flags = ASPCAP_STAR_WARN + ASPCAP_VSINI_WARN
+
+    aspcapflags = apotable[aspcapcol]
+    bad_indices = aspcapflags & bad_flags != 0
+    warn_indices = np.logical_and(aspcapflags & warn_flags != 0,
+                                  np.logical_not(bad_indices))
+    good_indices = np.logical_not(np.logical_or(warn_indices, bad_indices))
+
+    indices = np.zeros(len(apotable), dtype=np.bool)
+    if "good" in quality:
+        indices = np.logical_or(indices, good_indices)
+    if "warn" in quality:
+        indices = np.logical_or(indices, warn_indices)
+    if "bad" in quality:
+        indices = np.logical_or(indices, bad_indices)
+
+    return apotable[indices]
+
+
 def plot_by_ASPCAP_quality(x, y, aspcapflags, **kwargs):
     '''Distinguish between ASPCAP quality for plotting quantities.
 
