@@ -65,7 +65,7 @@ def read_EHK_catalog(filepath=str(paths.EHK_PATH)):
     return cat
 
 def read_McQuillan_catalog(
-    filepath=MCQUILLAN_PATH, Huber_KIC=True, huberpath=paths.HUBER_CATALOG):
+    filepath=paths.MCQUILLAN_CATALOG, Huber_KIC=True, huberpath=paths.HUBER_CATALOG):
     '''Reads in the McQuillan catalog.
 
     The catalog shoul be located at filepath.
