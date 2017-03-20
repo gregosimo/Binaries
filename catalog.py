@@ -1523,12 +1523,10 @@ def rotation_period_test(
     plt.title("MS Displacement")
 
 def compare_rotation_DSEP_radius_ratio(
-    vsini, period, teff, metallicity, alpha, apogee_flags, xvalue, xlimits):
+    vsini, period, radii, apogee_flags, xvalue, xlimits):
     '''Plot the dependence of rotation radius ratio to another value.
 
-    The rotation radius requires vsini and period, while the main-sequence
-    radius from DSEP requires Teff, log(g), metallicity, and alpha abundance.
-    The rotation radius will have an uncertainty of 0.25 vsini * period. 
+    The rotation radius requires vsini, the radius and period.
 
     The ratio of radii will be plotted against xvalue. The points with "good"
     APOGEE flags will be plotted as large green circles while those with "warn"
@@ -1542,34 +1540,17 @@ def compare_rotation_DSEP_radius_ratio(
     usable_flags = apogee_flags[usable_indices]
     usable_vsini = vsini[usable_indices]
     usable_period = period[usable_indices]
-    usable_teff = teff[usable_indices]
-    usable_metallicities = metallicity[usable_indices]
     usable_xvalues = xvalue[usable_indices]
-    usable_alphas = alpha[usable_indices]
+    usable_radii = radii[usable_indices]
 
-    assert(np.all(np.abs(usable_alphas) <= 2.0))
 
     # This is the radius estimated by rotation.
     max_rotation_radius = rotation_radius(usable_vsini, usable_period)
     average_rotation_radius = 0.75 * max_rotation_radius
     rotation_radius_range = 0.25 * max_rotation_radius
 
-    # These are the alpha/Fe bins that will be fed into DSEP.
-    alpha_binedges = np.arange(-0.1, 0.9, 0.2)
-    # a/Fe < -0.1 corresponds to 1, and a/Fe > 0.7 corresponds to 6.
-    alpha_bins = np.digitize(usable_alphas, alpha_binedges)+1
-    # DSEP should crash or something if the metallicity and alpha enhancement
-    # are not compatible. In particular, high alpha enhancements are only
-    # available for low metallicity stars. I want to ensure that this will be
-    # the case before running into weird DSEP bugs.
-    assert(np.all(np.logical_or(alpha_bins < 4, np.logical_and(
-        alpha_bins >= 4, usable_metallicities <= 0.0))))
-
-    model_radii = DSEP_dwarf_radii(
-        usable_teff, usable_metallicities, usable_alphas)
-
-    radius_displacement_fraction = (average_rotation_radius / model_radii)
-    displacement_range = rotation_radius_range / model_radii
+    radius_displacement_fraction = (average_rotation_radius / radii)
+    displacement_range = rotation_radius_range / radii
 
     plot_by_ASPCAP_quality(
         usable_xvalues, radius_displacement_fraction, usable_flags,
@@ -1580,6 +1561,29 @@ def compare_rotation_DSEP_radius_ratio(
     plt.ylabel("Rotation radius / MS radius")
     plt.xlim(xlimits[0], xlimits[1])
 
+def compare_rapid_rotator_period_vsini(vsini, period, radii, rapid_indices):
+    '''Compare the expected period from vsini to the photometric period.
+
+    This plots the actual photometric period against the period expected for
+    the given vsini at the star's predicted DSEP radius. It will also plot the
+    objects which are not expected to be rapid rotators.
+    '''
+    slow_rotators = au.get_complement_indices(rapid_indices, len(vsini))
+
+    max_vsini_period = 2 * np.pi * radii / vsini
+    representative_vsini_period = 0.75 * max_vsini_period
+    vsini_period_range = 0.5 * max_vsini_period
+
+    period_ratio = period / representative_vsini_period
+    period_ratio_disp = vsini_period_range / representative_vsini_period
+
+    plt.errorbar(period[rapid_indices], period_ratio[rapid_indices],
+                 period_ratio_disp[rapid_indices], c='k', marker=".", ls="")
+    plt.errorbar(period[slow_rotators], period_ratio[slow_rotators],
+                 period_ratio_disp[slow_rotators], c="r", marker="o", ls="")
+    plt.xlabel("Period (day)")
+    plt.ylabel("Period / Vsini period")
+    plt.ylim(0, 500)
 
 def rotation_radius(vsini, prot, vsini_mask=APOGEE_NULL):
     '''Calculate the maximum radius of a star with rotation period and vsini.
@@ -1704,8 +1708,43 @@ def compare_Rafa_McQuillan_tidsync_params_to_APOGEE(
     plt.xlabel("Teff (K) (APOGEE)")
     plt.xlim(7000, 3200)
     plt.ylim(-1000, 1000)
+
+def rapid_rotator_vsini_indices(vsinis, radii, lowperiod=0, highperiod=np.inf):
+    '''Get indices with vsinis corresponding to photometric period range.
+
+    Given a set of vsinis and radii, select those which ought to show a
+    photometric period between lowperiod and highperiod. The radii should be
+    given in terms of solar radii.'''
+    # Convert solar radii / day to km/s
+    solRad_per_day_to_km_per_s = 7e10 / 1e5 / 24 / 60 / 60
+    highvel = 2 * np.pi * np.array(radii) / lowperiod * solRad_per_day_to_km_per_s
+    lowvel = np.pi * radii / highperiod * solRad_per_day_to_km_per_s
+    indices = np.where(np.logical_and(vsinis < highvel, vsinis > lowvel))
+
+    return indices
     
-    
+def plot_rapid_rotation_vsini(vsinis, radii, teffs, lowperiod=1, 
+        highperiod=5):
+    '''Select out the rapid rotators based on vsinis.
+
+    This will select out those objects with vsinis that can be a part of a
+    rapidly-rotating population, which is defined to be in the given period
+    range. The conversion between vsini and teff will be done via the dwarf
+    Teff-R relation using DSEP isochrones at the given age.
+    '''
+    rapid_rotators = rapid_rotator_vsini_indices(
+        vsinis, radii, lowperiod=lowperiod, highperiod=highperiod)
+    non_rapid = au.get_complement_indices(rapid_rotators, len(vsinis))
+
+    plt.plot(teffs[non_rapid], vsinis[non_rapid], 'k.', label="Non-rapid")
+    plt.plot(teffs[rapid_rotators], vsinis[rapid_rotators], 'ro', 
+        label="Rapid Rotators")
+    hr.invert_x_axis()
+    plt.xlabel("Teff (K)")
+    plt.ylabel("V sin i (km/s)")
+    plt.ylim(0, 80)
+    plt.xlim(7000, 3200)
+
 
 def perform_cut(fullsample, col_label, lowval=None, highval=None,
                 invert_inequality=False):
