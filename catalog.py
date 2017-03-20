@@ -1561,29 +1561,45 @@ def compare_rotation_DSEP_radius_ratio(
     plt.ylabel("Rotation radius / MS radius")
     plt.xlim(xlimits[0], xlimits[1])
 
-def compare_rapid_rotator_period_vsini(vsini, period, radii, rapid_indices):
+def compare_rapid_rotator_period_vsini(
+        vsini, period, radii, teff, xvalues, rapidperiod=5, xlim=()):
     '''Compare the expected period from vsini to the photometric period.
 
     This plots the actual photometric period against the period expected for
-    the given vsini at the star's predicted DSEP radius. It will also plot the
-    objects which are not expected to be rapid rotators.
+    the given vsini at the star's predicted DSEP radius. Radii are expected to
+    be given in solar radii. 
+    
+    It will also plot the objects which are not expected to be rapid rotators.
     '''
-    slow_rotators = au.get_complement_indices(rapid_indices, len(vsini))
+    definite_rapid_rotators = definite_rapid_rotator_vsini_indices(
+        vsini, radii, highperiod=rapidperiod)
+    possible_rapid_rotators = possible_rapid_rotator_vsini_indices(
+        vsini, radii, highperiod=rapidperiod)
+    non_rapid = np.logical_not(np.logical_or(definite_rapid_rotators,
+                                             possible_rapid_rotators))
 
-    max_vsini_period = 2 * np.pi * radii / vsini
+    km_per_sec_to_solRad_per_day = 1e5 / 7e10 *60*60*24
+    max_vsini_period = 2 * np.pi * radii / (vsini  *
+                                            km_per_sec_to_solRad_per_day)
     representative_vsini_period = 0.75 * max_vsini_period
     vsini_period_range = 0.5 * max_vsini_period
 
-    period_ratio = period / representative_vsini_period
-    period_ratio_disp = vsini_period_range / representative_vsini_period
+    period_ratio = representative_vsini_period / period
+    period_ratio_disp = vsini_period_range / period
 
-    plt.errorbar(period[rapid_indices], period_ratio[rapid_indices],
-                 period_ratio_disp[rapid_indices], c='k', marker=".", ls="")
-    plt.errorbar(period[slow_rotators], period_ratio[slow_rotators],
-                 period_ratio_disp[slow_rotators], c="r", marker="o", ls="")
-    plt.xlabel("Period (day)")
-    plt.ylabel("Period / Vsini period")
-    plt.ylim(0, 500)
+    plt.errorbar(xvalues[non_rapid], period_ratio[non_rapid],
+                 period_ratio_disp[non_rapid], c="k", marker=".", ls="",
+                 label="Slow vsini rotators")
+    plt.errorbar(
+        xvalues[possible_rapid_rotators], period_ratio[possible_rapid_rotators], 
+        period_ratio_disp[possible_rapid_rotators], c='b', marker="o", ls="",
+        label="Possible rapid vsini rotators")
+    plt.errorbar(
+        xvalues[definite_rapid_rotators], period_ratio[definite_rapid_rotators], 
+        period_ratio_disp[definite_rapid_rotators], c='r', marker="o", ls="",
+        label="Definite rapid vsini rotators")
+    plt.ylabel("Vsini Period / Photometric Period")
+    plt.yscale("log")
 
 def rotation_radius(vsini, prot, vsini_mask=APOGEE_NULL):
     '''Calculate the maximum radius of a star with rotation period and vsini.
@@ -1722,9 +1738,36 @@ def rapid_rotator_vsini_indices(vsinis, radii, lowperiod=0, highperiod=np.inf):
     indices = np.where(np.logical_and(vsinis < highvel, vsinis > lowvel))
 
     return indices
+
+def definite_rapid_rotator_vsini_indices(vsinis, radii, highperiod=np.inf):
+    '''Get indices of vsinis definitely corresponding to short periods.
+
+    Given a set of vsinis and radii, select those which definitely ought to 
+    show a photometric period less than highperiod. That's because vsini >
+    vcrit, which is the circular velocity of a spot on the surface of a star
+    rotating at highperiod.'''
+    solRad_per_day_to_km_per_s = 7e10 / 1e5 / 24 / 60 / 60
+    lowvel = (2 * np.pi * np.array(radii) / highperiod * 
+               solRad_per_day_to_km_per_s)
+    indices = vsinis >= lowvel
+    return indices
+
+def possible_rapid_rotator_vsini_indices(vsinis, radii, highperiod=np.inf):
+    '''Get indicies of vsinis possibly corresponding to short periods.
+
+    Select those vsinis where if the sin i is unfavorable, then the object could
+    possibly be a rapid rotator. Otherwise, it's likely a slow rotator with a
+    favorable inclination.'''
+    solRad_per_day_to_km_per_s = 7e10 / 1e5 / 24 / 60 / 60
+    highvel = (2 * np.pi * np.array(radii) / highperiod * 
+               solRad_per_day_to_km_per_s)
+    lowvel = (np.pi * np.array(radii) / highperiod * 
+              solRad_per_day_to_km_per_s)
+    indices = np.logical_and(vsinis > lowvel, vsinis <= highvel)
+    return indices
+
     
-def plot_rapid_rotation_vsini(vsinis, radii, teffs, lowperiod=1, 
-        highperiod=5):
+def plot_rapid_rotation_vsini(vsinis, radii, teffs, highperiod=5):
     '''Select out the rapid rotators based on vsinis.
 
     This will select out those objects with vsinis that can be a part of a
@@ -1732,13 +1775,18 @@ def plot_rapid_rotation_vsini(vsinis, radii, teffs, lowperiod=1,
     range. The conversion between vsini and teff will be done via the dwarf
     Teff-R relation using DSEP isochrones at the given age.
     '''
-    rapid_rotators = rapid_rotator_vsini_indices(
-        vsinis, radii, lowperiod=lowperiod, highperiod=highperiod)
-    non_rapid = au.get_complement_indices(rapid_rotators, len(vsinis))
+    definite_rapid_rotators = definite_rapid_rotator_vsini_indices(
+        vsinis, radii, highperiod=highperiod)
+    possible_rapid_rotators = possible_rapid_rotator_vsini_indices(
+        vsinis, radii, highperiod=highperiod)
+    non_rapid = np.logical_not(np.logical_or(definite_rapid_rotators,
+                                             possible_rapid_rotators))
 
     plt.plot(teffs[non_rapid], vsinis[non_rapid], 'k.', label="Non-rapid")
-    plt.plot(teffs[rapid_rotators], vsinis[rapid_rotators], 'ro', 
-        label="Rapid Rotators")
+    plt.plot(teffs[possible_rapid_rotators], vsinis[possible_rapid_rotators], 
+             'bo', label="Possible Rapid Rotators")
+    plt.plot(teffs[definite_rapid_rotators], vsinis[definite_rapid_rotators], 'ro', 
+        label="Definite Rapid Rotators")
     hr.invert_x_axis()
     plt.xlabel("Teff (K)")
     plt.ylabel("V sin i (km/s)")
