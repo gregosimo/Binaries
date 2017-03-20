@@ -1545,9 +1545,9 @@ def compare_rotation_DSEP_radius_ratio(
 
 
     # This is the radius estimated by rotation.
-    max_rotation_radius = rotation_radius(usable_vsini, usable_period)
-    average_rotation_radius = 0.75 * max_rotation_radius
-    rotation_radius_range = 0.25 * max_rotation_radius
+    min_rotation_radius = rotation_radius(usable_vsini, usable_period)
+    average_rotation_radius = 1.5 * max_rotation_radius
+    rotation_radius_range = 1 * max_rotation_radius
 
     radius_displacement_fraction = (average_rotation_radius / radii)
     displacement_range = rotation_radius_range / radii
