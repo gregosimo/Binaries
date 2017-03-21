@@ -27,11 +27,6 @@ import binarycalcs as bc
 import path_config as paths
 import sed
 
-WORKPATH = "/home/regulus/simonian/Binaries"
-
-APOKASC_PATH = os.path.join(WORKPATH, "APOKASC_cat_v3.3.5.fits")
-MCQUILLAN_PATH = os.path.join(WORKPATH, "McQuillan.fit")
-
 SDSS3_URL = "http://data.sdss3.org"
 
 NUM_KEPLER_QUARTERS = 17
@@ -43,7 +38,7 @@ APOGEE_NULL = -9999.0
 ###############################################################################
 
 def read_APOKASC_catalog(
-    filepath=APOKASC_PATH, exclude_single_epoch=False, filter_BAD=False, 
+    filepath=paths.APOKASC_PATH, exclude_single_epoch=False, filter_BAD=False, 
     filter_WARN=False):
     '''Reads in the APOKASC catalog.
 
@@ -65,7 +60,7 @@ def read_EHK_catalog(filepath=str(paths.EHK_PATH)):
     return cat
 
 def read_McQuillan_catalog(
-    filepath=MCQUILLAN_PATH, Huber_KIC=True, huberpath=paths.HUBER_CATALOG):
+    filepath=paths.MCQUILLAN_CATALOG, Huber_KIC=True, huberpath=paths.HUBER_CATALOG):
     '''Reads in the McQuillan catalog.
 
     The catalog shoul be located at filepath.
@@ -643,7 +638,7 @@ def write_Villanova_EB_upload_list(
 
 def create_joined_APOKASC_McQuillan_catalog(
         apocat=None, mcquillancat=None, apofile=APOKASC_PATH,
-    mcquillanfile=MCQUILLAN_PATH):
+    mcquillanfile=paths.MCQUILLAN_CATALOG):
     '''Creates a joint APOKASC/McQuillan catalog.
 
     All Kepler objects which are measured in both the McQuillan sample as well
@@ -1528,12 +1523,10 @@ def rotation_period_test(
     plt.title("MS Displacement")
 
 def compare_rotation_DSEP_radius_ratio(
-    vsini, period, teff, metallicity, alpha, apogee_flags, xvalue, xlimits):
+    vsini, period, radii, apogee_flags, xvalue, xlimits):
     '''Plot the dependence of rotation radius ratio to another value.
 
-    The rotation radius requires vsini and period, while the main-sequence
-    radius from DSEP requires Teff, log(g), metallicity, and alpha abundance.
-    The rotation radius will have an uncertainty of 0.25 vsini * period. 
+    The rotation radius requires vsini, the radius and period.
 
     The ratio of radii will be plotted against xvalue. The points with "good"
     APOGEE flags will be plotted as large green circles while those with "warn"
@@ -1547,34 +1540,17 @@ def compare_rotation_DSEP_radius_ratio(
     usable_flags = apogee_flags[usable_indices]
     usable_vsini = vsini[usable_indices]
     usable_period = period[usable_indices]
-    usable_teff = teff[usable_indices]
-    usable_metallicities = metallicity[usable_indices]
     usable_xvalues = xvalue[usable_indices]
-    usable_alphas = alpha[usable_indices]
+    usable_radii = radii[usable_indices]
 
-    assert(np.all(np.abs(usable_alphas) <= 2.0))
 
     # This is the radius estimated by rotation.
-    max_rotation_radius = rotation_radius(usable_vsini, usable_period)
-    average_rotation_radius = 0.75 * max_rotation_radius
-    rotation_radius_range = 0.25 * max_rotation_radius
+    min_rotation_radius = rotation_radius(usable_vsini, usable_period)
+    average_rotation_radius = 1.5 * max_rotation_radius
+    rotation_radius_range = 1 * max_rotation_radius
 
-    # These are the alpha/Fe bins that will be fed into DSEP.
-    alpha_binedges = np.arange(-0.1, 0.9, 0.2)
-    # a/Fe < -0.1 corresponds to 1, and a/Fe > 0.7 corresponds to 6.
-    alpha_bins = np.digitize(usable_alphas, alpha_binedges)+1
-    # DSEP should crash or something if the metallicity and alpha enhancement
-    # are not compatible. In particular, high alpha enhancements are only
-    # available for low metallicity stars. I want to ensure that this will be
-    # the case before running into weird DSEP bugs.
-    assert(np.all(np.logical_or(alpha_bins < 4, np.logical_and(
-        alpha_bins >= 4, usable_metallicities <= 0.0))))
-
-    model_radii = DSEP_dwarf_radii(
-        usable_teff, usable_metallicities, usable_alphas)
-
-    radius_displacement_fraction = (average_rotation_radius / model_radii)
-    displacement_range = rotation_radius_range / model_radii
+    radius_displacement_fraction = (average_rotation_radius / radii)
+    displacement_range = rotation_radius_range / radii
 
     plot_by_ASPCAP_quality(
         usable_xvalues, radius_displacement_fraction, usable_flags,
@@ -1585,6 +1561,45 @@ def compare_rotation_DSEP_radius_ratio(
     plt.ylabel("Rotation radius / MS radius")
     plt.xlim(xlimits[0], xlimits[1])
 
+def compare_rapid_rotator_period_vsini(
+        vsini, period, radii, teff, xvalues, rapidperiod=5, xlim=()):
+    '''Compare the expected period from vsini to the photometric period.
+
+    This plots the actual photometric period against the period expected for
+    the given vsini at the star's predicted DSEP radius. Radii are expected to
+    be given in solar radii. 
+    
+    It will also plot the objects which are not expected to be rapid rotators.
+    '''
+    definite_rapid_rotators = definite_rapid_rotator_vsini_indices(
+        vsini, radii, highperiod=rapidperiod)
+    possible_rapid_rotators = possible_rapid_rotator_vsini_indices(
+        vsini, radii, highperiod=rapidperiod)
+    non_rapid = np.logical_not(np.logical_or(definite_rapid_rotators,
+                                             possible_rapid_rotators))
+
+    km_per_sec_to_solRad_per_day = 1e5 / 7e10 *60*60*24
+    max_vsini_period = 2 * np.pi * radii / (vsini  *
+                                            km_per_sec_to_solRad_per_day)
+    representative_vsini_period = 0.75 * max_vsini_period
+    vsini_period_range = 0.5 * max_vsini_period
+
+    period_ratio = representative_vsini_period / period
+    period_ratio_disp = vsini_period_range / period
+
+    plt.errorbar(xvalues[non_rapid], period_ratio[non_rapid],
+                 period_ratio_disp[non_rapid], c="k", marker=".", ls="",
+                 label="Slow vsini rotators")
+    plt.errorbar(
+        xvalues[possible_rapid_rotators], period_ratio[possible_rapid_rotators], 
+        period_ratio_disp[possible_rapid_rotators], c='b', marker="o", ls="",
+        label="Possible rapid vsini rotators")
+    plt.errorbar(
+        xvalues[definite_rapid_rotators], period_ratio[definite_rapid_rotators], 
+        period_ratio_disp[definite_rapid_rotators], c='r', marker="o", ls="",
+        label="Definite rapid vsini rotators")
+    plt.ylabel("Vsini Period / Photometric Period")
+    plt.yscale("log")
 
 def rotation_radius(vsini, prot, vsini_mask=APOGEE_NULL):
     '''Calculate the maximum radius of a star with rotation period and vsini.
@@ -1709,8 +1724,75 @@ def compare_Rafa_McQuillan_tidsync_params_to_APOGEE(
     plt.xlabel("Teff (K) (APOGEE)")
     plt.xlim(7000, 3200)
     plt.ylim(-1000, 1000)
+
+def rapid_rotator_vsini_indices(vsinis, radii, lowperiod=0, highperiod=np.inf):
+    '''Get indices with vsinis corresponding to photometric period range.
+
+    Given a set of vsinis and radii, select those which ought to show a
+    photometric period between lowperiod and highperiod. The radii should be
+    given in terms of solar radii.'''
+    # Convert solar radii / day to km/s
+    solRad_per_day_to_km_per_s = 7e10 / 1e5 / 24 / 60 / 60
+    highvel = 2 * np.pi * np.array(radii) / lowperiod * solRad_per_day_to_km_per_s
+    lowvel = np.pi * radii / highperiod * solRad_per_day_to_km_per_s
+    indices = np.where(np.logical_and(vsinis < highvel, vsinis > lowvel))
+
+    return indices
+
+def definite_rapid_rotator_vsini_indices(vsinis, radii, highperiod=np.inf):
+    '''Get indices of vsinis definitely corresponding to short periods.
+
+    Given a set of vsinis and radii, select those which definitely ought to 
+    show a photometric period less than highperiod. That's because vsini >
+    vcrit, which is the circular velocity of a spot on the surface of a star
+    rotating at highperiod.'''
+    solRad_per_day_to_km_per_s = 7e10 / 1e5 / 24 / 60 / 60
+    lowvel = (2 * np.pi * np.array(radii) / highperiod * 
+               solRad_per_day_to_km_per_s)
+    indices = vsinis >= lowvel
+    return indices
+
+def possible_rapid_rotator_vsini_indices(vsinis, radii, highperiod=np.inf):
+    '''Get indicies of vsinis possibly corresponding to short periods.
+
+    Select those vsinis where if the sin i is unfavorable, then the object could
+    possibly be a rapid rotator. Otherwise, it's likely a slow rotator with a
+    favorable inclination.'''
+    solRad_per_day_to_km_per_s = 7e10 / 1e5 / 24 / 60 / 60
+    highvel = (2 * np.pi * np.array(radii) / highperiod * 
+               solRad_per_day_to_km_per_s)
+    lowvel = (np.pi * np.array(radii) / highperiod * 
+              solRad_per_day_to_km_per_s)
+    indices = np.logical_and(vsinis > lowvel, vsinis <= highvel)
+    return indices
+
     
-    
+def plot_rapid_rotation_vsini(vsinis, radii, teffs, highperiod=5):
+    '''Select out the rapid rotators based on vsinis.
+
+    This will select out those objects with vsinis that can be a part of a
+    rapidly-rotating population, which is defined to be in the given period
+    range. The conversion between vsini and teff will be done via the dwarf
+    Teff-R relation using DSEP isochrones at the given age.
+    '''
+    definite_rapid_rotators = definite_rapid_rotator_vsini_indices(
+        vsinis, radii, highperiod=highperiod)
+    possible_rapid_rotators = possible_rapid_rotator_vsini_indices(
+        vsinis, radii, highperiod=highperiod)
+    non_rapid = np.logical_not(np.logical_or(definite_rapid_rotators,
+                                             possible_rapid_rotators))
+
+    plt.plot(teffs[non_rapid], vsinis[non_rapid], 'k.', label="Non-rapid")
+    plt.plot(teffs[possible_rapid_rotators], vsinis[possible_rapid_rotators], 
+             'bo', label="Possible Rapid Rotators")
+    plt.plot(teffs[definite_rapid_rotators], vsinis[definite_rapid_rotators], 'ro', 
+        label="Definite Rapid Rotators")
+    hr.invert_x_axis()
+    plt.xlabel("Teff (K)")
+    plt.ylabel("V sin i (km/s)")
+    plt.ylim(0, 80)
+    plt.xlim(7000, 3200)
+
 
 def perform_cut(fullsample, col_label, lowval=None, highval=None,
                 invert_inequality=False):
@@ -1826,7 +1908,7 @@ def perform_Ciardi_logg_cut(tbl, loggcol="logg", teffcol="teff"):
     add_cut_metadata(cuttable, cutstring)
     return cuttable
 
-def read_pulsators(pulsatorfile=os.path.join(WORKPATH, "pulsators.kic")):
+def read_pulsators(pulsatorfile=paths.KIC_PULSATORS):
     '''Reads in a list of KIC IDs of known pulsators.'''
 
     pulsatortable = Table.read(
@@ -1865,7 +1947,7 @@ def filter_good_UKIRT_observations(ukirt_table):
     return ukirt_table[good_indices]
 
 def find_UKIRT_contaminants(
-    bintable, ukirt_file=os.path.join(WORKPATH, "ukirt_results.csv.gz")):
+    bintable, ukirt_file=paths.UKIRT_RESULTS):
     '''Magnitude differences between stars and brightest contaminants
 
     This function takes a list from WFCAM, or if ukirt_file is None, will
