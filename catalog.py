@@ -26,6 +26,7 @@ import hrplots as hr
 import binarycalcs as bc
 import path_config as paths
 import sed
+import browse_APOGEE_spectra as browse
 
 SDSS3_URL = "http://data.sdss3.org"
 
@@ -149,14 +150,18 @@ def read_split_file(filepath, table_format):
     '''
     try:
         inputtable = Table.read(str(filepath), format=table_format)
-    except FileNotFoundError:
+    except FileNotFoundError as f:
         inputfiles = find_split_files(filepath)
         table_pieces = []
         for inputfile in inputfiles:
             table_piece = Table.read(inputfile, format=table_format)
             table_pieces.append(table_piece)
-        inputtable = vstack(table_pieces)
-
+        try:
+            inputtable = vstack(table_pieces)
+        # This means that inputfiles was empty.
+        except TypeError:
+            raise f
+        
     return inputtable
 
 def find_split_files(filepath):
@@ -789,6 +794,7 @@ def rapid_fraction_multiple_limits(
 ASPCAP_STAR_BAD = 2**23
 ASPCAP_STAR_WARN = 2**7
 ASPCAP_VSINI_WARN = 2**14
+NO_ASPCAP_RESULT = 2**31
 
 def apogee_select_quality(apotable, quality=("good", "bad", "warn"), 
                           aspcapcol="ASPCAPFLAG"):
@@ -797,7 +803,7 @@ def apogee_select_quality(apotable, quality=("good", "bad", "warn"),
     If aspcapcol is given, then the objects with the given qualities for
     aspcapcol will be selected.'''
     
-    bad_flags = ASPCAP_STAR_BAD
+    bad_flags = ASPCAP_STAR_BAD + NO_ASPCAP_RESULT
     warn_flags = ASPCAP_STAR_WARN + ASPCAP_VSINI_WARN
 
     aspcapflags = apotable[aspcapcol]
@@ -1365,6 +1371,30 @@ def McQuillan_plot(sample, Teff_colname="Teff", Prot_colname="Prot", color="c",
     plt.xlabel("Teff (K)")
     plt.ylabel("Prot (day)")
 
+def plot_APOGEE_KIC_teff_DSEP_KIC_radius(
+    apogee_teff, kic_teff, dsep_radius, kic_radius, apogee_logg):
+    '''Plot the radius of objects with respect to teff.'''
+    giant_indices = apogee_logg < 3.5
+    f, ((ax1, ax2), (ax3, ax4)) = plt.subplots(
+        2, 2, sharex='all', sharey='all')
+    ax1.plot(apogee_teff, dsep_radius, 'r*')
+    ax1.plot(apogee_teff[giant_indices], dsep_radius[giant_indices], 'bo',
+             label="APOGEE giants")
+    ax2.plot(kic_teff, dsep_radius, 'r*')
+    ax2.plot(kic_teff[giant_indices], dsep_radius[giant_indices], 'bo')
+    ax3.plot(apogee_teff, kic_radius, 'r*')
+    ax3.plot(apogee_teff[giant_indices], kic_radius[giant_indices], 'bo')
+    ax4.plot(kic_teff, kic_radius, 'r*')
+    ax4.plot(kic_teff[giant_indices], kic_radius[giant_indices], 'bo')
+    ax1.set_xlim((7000, 3500))
+    ax3.set_xlabel("APOGEE Teff (K)")
+    ax4.set_xlabel("KIC Teff (K)")
+    ax1.set_ylabel("DSEP radius (Rsun)")
+    ax3.set_ylabel("KIC radius (Rsun)")
+    ax1.legend()
+
+    f.suptitle("APOGEE-McQuillan Good Fits")
+
 
 def rotation_radial_velocity_variation(
     rv_nonvar, rv_var, vsini_colname="VSINI", Prot_colname="Prot"):
@@ -1562,7 +1592,8 @@ def compare_rotation_DSEP_radius_ratio(
     plt.xlim(xlimits[0], xlimits[1])
 
 def compare_rapid_rotator_period_vsini(
-        vsini, period, radii, teff, xvalues, rapidperiod=5, xlim=()):
+        vsini, period, radii, teff, xvalues, rapidperiod=5, apogee_ids=None, 
+        xlim=()):
     '''Compare the expected period from vsini to the photometric period.
 
     This plots the actual photometric period against the period expected for
@@ -1570,7 +1601,32 @@ def compare_rapid_rotator_period_vsini(
     be given in solar radii. 
     
     It will also plot the objects which are not expected to be rapid rotators.
+
+    A list of apogee_ids will separate the double-lined spectroscopic binaries
+    to the non double-lined spectroscopic binaries.
     '''
+    if apogee_ids is not None:
+        DLSB_indices = mark_DLSB_indices(apogee_ids)
+        valid_indices = au.get_complement_indices(
+            DLSB_indices, len(apogee_ids))
+
+        DLSB_vsini = vsini[DLSB_indices]
+        DLSB_period = period[DLSB_indices]
+        DLSB_radii = radii[DLSB_indices]
+        DLSB_teff = teff[DLSB_indices]
+        DLSB_xvalues = xvalues[DLSB_indices]
+        vsini = vsini[valid_indices]
+        period = period[valid_indices]
+        radii = radii[valid_indices]
+        teff = teff[valid_indices]
+        xvalues = xvalues[valid_indices]
+
+        DLSB_representative_vsini_period = representative_norm * (
+            2 * np.pi * DLSB_radii / (
+                DLSB_vsini * km_per_sec_to_solRad_per_day))
+        DLSB_period_ratio = DLSB_representative_vsini_period / DLSB_period
+        plt.plot(DLSB_xvalues, DLSB_period_ratio, 'mo', label="DLSBs")
+
     definite_rapid_rotators = definite_rapid_rotator_vsini_indices(
         vsini, radii, highperiod=rapidperiod)
     possible_rapid_rotators = possible_rapid_rotator_vsini_indices(
@@ -1578,28 +1634,88 @@ def compare_rapid_rotator_period_vsini(
     non_rapid = np.logical_not(np.logical_or(definite_rapid_rotators,
                                              possible_rapid_rotators))
 
-    km_per_sec_to_solRad_per_day = 1e5 / 7e10 *60*60*24
-    max_vsini_period = 2 * np.pi * radii / (vsini  *
-                                            km_per_sec_to_solRad_per_day)
-    representative_vsini_period = 0.75 * max_vsini_period
-    vsini_period_range = 0.5 * max_vsini_period
+    max_vsini_period, rep_vsini_period, min_vsini_period = vsini_to_period(
+        vsini, radii)
 
-    period_ratio = representative_vsini_period / period
-    period_ratio_disp = vsini_period_range / period
+    max_period_ratio = max_vsini_period / period
+    period_ratio = rep_vsini_period / period
+    min_period_ratio = min_vsini_period / period
 
-    plt.errorbar(xvalues[non_rapid], period_ratio[non_rapid],
-                 period_ratio_disp[non_rapid], c="k", marker=".", ls="",
-                 label="Slow vsini rotators")
+    plt.errorbar(
+        xvalues[non_rapid], period_ratio[non_rapid], 
+        yerr=(max_period_ratio[non_rapid], 
+              min_period_ratio[non_rapid]), 
+        c="k", marker=".", ls="", label="Slow vsini rotators")
     plt.errorbar(
         xvalues[possible_rapid_rotators], period_ratio[possible_rapid_rotators], 
-        period_ratio_disp[possible_rapid_rotators], c='b', marker="o", ls="",
-        label="Possible rapid vsini rotators")
+        yerr=(max_period_ratio[possible_rapid_rotators], 
+              min_period_ratio[possible_rapid_rotators]), 
+        c='b', marker="o", ls="", label="Possible rapid vsini rotators")
     plt.errorbar(
         xvalues[definite_rapid_rotators], period_ratio[definite_rapid_rotators], 
-        period_ratio_disp[definite_rapid_rotators], c='r', marker="o", ls="",
-        label="Definite rapid vsini rotators")
+        yerr=(max_period_ratio[definite_rapid_rotators], 
+              min_period_ratio[definite_rapid_rotators]),  
+        c='r', marker="o", ls="", label="Definite rapid vsini rotators")
     plt.ylabel("Vsini Period / Photometric Period")
     plt.yscale("log")
+
+def rapid_rotation_vsini_comparison_histogram(
+        vsini, period, radii, xvalues, rapidperiod=5, xlim=None, nbins=10):
+    '''Make a histogram of how concordant vsinis and periods are distributed.
+
+    Creates a histogram which marks the percentage of consistent vsinis and
+    periods over the xvalues distribution.'''
+    assert(len(period) == len(xvalues))
+
+    high_period, rep_period, low_period = vsini_to_period(vsini, radii)
+
+    high_period_ratio = high_period / period
+    rep_period_ratio = rep_period / period
+    low_period_ratio = low_period / period
+
+    consistent_indices = np.where(np.logical_and(high_period_ratio > 1,
+                                                 low_period_ratio <= 1))
+    consistent_hist, bins = np.histogram(xvalues[consistent_indices], 
+                                         bins=nbins, range=xlim)
+    full_hist, bins = np.histogram(xvalues, bins=bins)
+
+    frac = np.nan_to_num(consistent_hist / full_hist)
+    plt.step(bins[:-1], frac, where="post")
+    plt.ylabel("Fraction of consistent rapid rotators")
+    plt.xlim(xlim)
+
+def vsini_to_period(vsini, radii):
+    '''Converts vsinis to predicted periods using radii.
+    
+    Returns a 3-tuple containing the high-limit to the period, the 
+    representative period, and the low-limit to the period.'''
+    km_per_sec_to_solRad_per_day = 1e5 / 7e10 *60*60*24
+    representative_norm = np.sin(np.pi/4)
+
+    max_vsini_period = 2 * np.pi * radii / (vsini  *
+                                            km_per_sec_to_solRad_per_day)
+    representative_vsini_period = representative_norm * max_vsini_period
+    vsini_period_range = 0.5 * max_vsini_period
+
+    return max_vsini_period, representative_vsini_period, vsini_period_range
+
+def period_to_velocities(period, radii):
+    '''Convert periods to predicted velocities.
+
+    Return the quantity 2 * pi * radii / period, but in units of km/s if period
+    and radii are given in days and solar radii.'''
+    solRad_per_day_to_km_per_sec = 7e10 / (1e5 * 60 * 60 * 24)
+    velocity = 2 * np.pi * radii / period
+
+    return velocity
+
+def plot_velocity_vsini(period, radius, vsini):
+    '''Plot the expected velocities and the measured vsini.
+
+    Plot the velocity expected from the radius and period of objects, along
+    with the measured vsini.'''
+    max_vel = period_to_velocities(period, radius)
+
 
 def rotation_radius(vsini, prot, vsini_mask=APOGEE_NULL):
     '''Calculate the maximum radius of a star with rotation period and vsini.
@@ -1785,14 +1901,34 @@ def possible_rapid_rotator_vsini_indices(vsinis, radii, highperiod=np.inf):
     return indices
 
     
-def plot_rapid_rotation_vsini(vsinis, radii, teffs, highperiod=5):
+def plot_rapid_rotation_vsini(
+    vsinis, radii, teffs, highperiod=5, apogee_ids=None):
     '''Select out the rapid rotators based on vsinis.
 
     This will select out those objects with vsinis that can be a part of a
     rapidly-rotating population, which is defined to be in the given period
-    range. The conversion between vsini and teff will be done via the dwarf
-    Teff-R relation using DSEP isochrones at the given age.
+    range. The conversion between vsini and teff will be done using the radii
+    given.
+
+    If a list of apogee IDs is given, then the objects which are flagged as
+    double-lined spectroscopic binaries will be marked separately on the
+    figure.
     '''
+    if apogee_ids is not None:
+        DLSB_indices = mark_DLSB_indices(apogee_ids)
+        valid_indices = au.get_complement_indices(
+            DLSB_indices, len(apogee_ids))
+
+        DLSB_vsinis = vsinis[DLSB_indices]
+        DLSB_radii = radii[DLSB_indices]
+        DLSB_teffs = teffs[DLSB_indices]
+        vsinis = vsinis[valid_indices]
+        radii = radii[valid_indices]
+        teffs = teffs[valid_indices]
+
+        plt.plot(DLSB_teffs, DLSB_vsinis, 'mo', label="DLSBs")
+
+    print(vsinis)
     definite_rapid_rotators = definite_rapid_rotator_vsini_indices(
         vsinis, radii, highperiod=highperiod)
     possible_rapid_rotators = possible_rapid_rotator_vsini_indices(
@@ -2012,7 +2148,7 @@ def find_UKIRT_contaminants(
 
     return magdiffs
 
-def find_UKIRT_contaminating_object(ukirt_result):
+def find_UKIRT_brightest_contaminating_object(ukirt_result):
     '''Return the row for the contaminating object from UKIRT result.
 
     Given a UKIRT result, find the second-brightest object within the Kepler
@@ -2023,9 +2159,6 @@ def find_UKIRT_contaminating_object(ukirt_result):
     ukirt_groups = good_ukirt.group_by("upload_ID")
 
     main_contam_rows = []
-    # The apogee fiber is approximately 2 arcseconds wide, so the source should
-    # be in there. Ideally, this shouldn't do anything.
-    apogee_window = 2 * u.arcsec
     # The optimal aperture size for Kepler photometry generally ranges from
     # 10-50 pixels. Each pixel is about 4 arcseconds long.
     kepler_window = np.sqrt(50) * 4 * u.arcsec
@@ -2037,7 +2170,12 @@ def find_UKIRT_contaminating_object(ukirt_result):
         # If the target is the brightest object, then pick the second brightest
         # in the aperture, otherwise, pick the brightest.
         if targetind == sortindices[0]:
-            contamindex = sortindices[1]
+            try:
+                contamindex = sortindices[1]
+            except IndexError:
+                print("No object found on index {0}".format(
+                    contam_list["upload_ID"]))
+                contamindex = sortindices[0]
         else:
             contamindex = sortindices[0]
         main_contam_rows.append(contam_list[contamindex])
@@ -2045,8 +2183,52 @@ def find_UKIRT_contaminating_object(ukirt_result):
     contam_table = Table(rows=main_contam_rows, names=ukirt_result.colnames)
     return contam_table
 
-# Maybe combine these two since you need the target object to find the
-# contaminating object correctly.
+def find_UKIRT_nearest_contaminating_object(ukirt_result):
+    '''Return a table containing the nearest contaminating objects from UKIRT.
+
+    Given a query result from UKIRT, select the rows corresponding to the
+    closest contaminating object to each target.'''
+    good_ukirt = filter_good_UKIRT_observations(ukirt_result)
+    ukirt_groups = good_ukirt.group_by("upload_ID")
+
+    main_contam_rows = []
+    # The optimal aperture size for Kepler photometry generally ranges from
+    # 10-50 pixels. Each pixel is about 4 arcseconds long.
+    kepler_window = np.sqrt(50) * 4 * u.arcsec
+    
+    for i, contam_list in enumerate(ukirt_groups.groups):
+        sortindices = np.argsort(contam_list["distance"])
+        # Target should be closest to the central region
+        targetind = sortindices[0]
+        # Contaminant should be second-closest.
+        try:
+            contamindex = sortindices[1]
+        except IndexError:
+            print("No object found on index {0}".format(
+                contam_list["upload_ID"]))
+            contamindex = sortindices[0]
+
+        main_contam_rows.append(contam_list[contamindex])
+
+    contam_table = Table(rows=main_contam_rows, names=ukirt_result.colnames)
+    return contam_table
+
+def UKIRT_num_contaminating_objects(ukirt_result):
+    '''Return array with number of contaminants in the UKIRT search window.
+
+    Will count the number of contaminants in the ukirt_result table for each
+    target. This will be useful in determining how densely populated certain
+    targets are. Only objects with measured aperture magnitudes will be
+    considered high enough quality to count.'''
+    good_ukirt = filter_good_UKIRT_observations(ukirt_result)
+    ukirt_groups = good_ukirt.group_by("upload_ID")
+
+    num_conts = np.zeros(len(ukirt_groups.groups), dtype=np.int)
+    for i, contam_list in enumerate(ukirt_groups.groups):
+        num_conts[i] = len(contam_list) - 1
+
+    return num_conts
+
 
 def find_UKIRT_target_object(ukirt_result):
     '''Return the row for the target from a UKIRT result.
@@ -2075,6 +2257,36 @@ def select_brightest_targets(
     the magnitudes are in magcol.'''
     for grp in tblgrp:
         pass
+
+def select_observing_targets(ntargets=75):
+    '''Selects a sample of targets that we will try to observe for our run.
+
+    This currently pulls from the McQuillan catalog. Will remove all objects
+    that don't match the current Kepler Stellar Parameter pipeline 
+    log(g) > 4.25 and 5600 K > Teff > 4850 K. We will define
+    tidally-synchronized as having 1 day < Prot < 5 day.
+    '''
+    mcq = read_McQuillan_catalog()
+    kep_stelparms = read_KIC_DR25_catalog()
+    mcq_stelparms = au.join_by_id(mcq, kep_stelparms, "KIC", "kepid")
+    # Let's keep memory usage low, shall we?
+    del(mcq)
+    del(kep_stelparms)
+
+    mcq_observing = perform_period_cut(
+        perform_teff_cut(
+            perform_logg_cut(mcq_stelparms, lowlogg=4.25), 
+            lowtemp=4850, hightemp=5600), 
+        lowperiod=1, highperiod=5)
+
+def apogee_targets_in_observed_sample(obs, apogee):
+    '''Explore the apogee targets that will be observed.
+
+    Plot the total observation sample, as well as the subsample which already
+    has APOGEE observations in an HR diagram.
+
+    Additionally, show the objects which '''
+    pass
 
 
 def select_tidally_synchronized_binaries(
@@ -2570,24 +2782,26 @@ def bad_ASPCAP_indices(aspcapflags, warn=False):
 ###############################################################################
 # Double-Lined Spectroscopic Binaries #
 ###############################################################################
-DLSB_LIST = [3654549, 6368779, 6381934, 6436652, 8520982]
-DLSB_PATH = paths.HOME_DIR / "DLSB.kic"
+DLSB_PATH = browse.DEFAULT_DLSB_DB
 
-def filter_double_lined_spectroscopic_binaries(apocat, kiccol="KEPLER_ID"):
-    '''Remove the Double-Lined Spectroscopic Binaries stored in DLSB_LIST.'''
-    filtered_cat = au.filter_column_from_subtable(apocat, kiccol, DLSB_LIST)
+def mark_DLSB_indices(apogee_ids, dlsb_db=DLSB_PATH):
+    '''Mark which apogee IDs correspond to known DLSBs.
+
+    Creates an index array which marks the apogee_ids which are known
+    double-line spectroscopic binaries. It looks at the file in at dlsb_db to
+    have a list of APOGEE_IDs corresponding to double-lined spectroscopic
+    binaries.'''
+    dlsbs = browse.read_DLSB_db(db_path=dlsb_db)
+    dlsb_indices = au.mark_selections_in_columns(apogee_ids, dlsbs["APOGEE_ID"])
+    return np.where(dlsb_indices)
+
+def filter_double_lined_spectroscopic_binaries(
+    apocat, apid_col="APOGEE_ID", dlsb_db=DLSB_PATH):
+    '''Remove Double-Lined Spectroscopic Binaries by APOGEE_ID'''
+    dlsb_indices = mark_DLSB_indices(apocat[apid_col], dlsb_db=dlsb_db)
+    filtered_cat = apocat[au.get_complement_indices(dlsb_indices, len(apocat))]
     add_cut_metadata(
-        filtered_cat, "Removed DLSBs: see {0} for list".format( DLSB_PATH))
+        filtered_cat, "Removed DLSBs: see {0} for list".format(dlsb_db))
     return filtered_cat
 
-def write_DLSB_list(outputpath=DLSB_PATH):
-    '''Write the list of double-lined spectroscopic binaries to a file.'''
-    dlsb_table = Table([DLSB_LIST])
-    comments = [
-        "These are KIC values of APOGEE objects which are double-lined "
-        "spectroscopic binaries.", "They do not include objects with the "
-        "STAR_BAD flag."]
-    dlsb_table.write(
-        str(DLSB_PATH), format="ascii.no_header", comment=comments)
-    DLSB_PATH.chmod(0o744)
 

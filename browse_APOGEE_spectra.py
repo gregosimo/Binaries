@@ -3,6 +3,9 @@ import cmd
 import fileinput
 import webbrowser
 
+from astropy.table import Table
+from astropy.io.ascii import InconsistentTableError
+
 import astropy_util as au
 
 DEFAULT_DLSB_DB = "./DLSB.txt"
@@ -19,9 +22,9 @@ class DLSB_prompt(cmd.Cmd):
     def __init__(self, dl_handle, nl_handle, apogee_id):
         cmd.Cmd.__init__(self)
         self.apid = apogee_id
-        self.intro = ("Does {0} appear to be a Double-lined Spectroscopic"
-                      "Binary? (no/yes/skip)\n").format(self.apid)
-        self.prompt = "APOGEE:>"
+        self.intro = ("Does {0} appear to be a Double-lined Spectroscopic "
+                      "Binary? (NO/yes/skip)\n").format(self.apid)
+        self.prompt = "APOGEE:> "
 
         if dl_handle.mode != "a":
             raise ValueError(
@@ -30,9 +33,12 @@ class DLSB_prompt(cmd.Cmd):
             raise ValueError(
                 "Null Database needs to be opened in append mode.")
 
+        self.dl_handle = dl_handle
+        self.nl_handle = nl_handle
+
     def do_yes(self, arg):
         '''Confirm that the object is a DLSB.'''
-        dl_handle.write(self.apid)
+        print(self.apid, file=self.dl_handle)
         return True
 
     def do_y(self, arg):
@@ -41,7 +47,7 @@ class DLSB_prompt(cmd.Cmd):
 
     def do_no(self, arg):
         '''Confirm that the object is NOT a DLSB'''
-        nl_handle.write(self.apid)
+        print(self.apid, file=self.nl_handle)
         return True
 
     def do_n(self, arg):
@@ -61,6 +67,10 @@ class DLSB_prompt(cmd.Cmd):
         '''Don't recognize the command.'''
         print("Do not recognize command: {0}".format(line))
 
+    def emptyline(self):
+        '''Default behavior is to say no.'''
+        return self.do_no('')
+
 
 def make_SAS_URL(apogee_ID, loc_ID):
     '''Take the apogee ID and Loc ID to make a SAS URL.
@@ -68,10 +78,36 @@ def make_SAS_URL(apogee_ID, loc_ID):
     Based on an APOGEE ID and Loc ID, will return a URL which goes to the
     APOGEE DR14 SAS page for that object.
     '''
-    urlbase = ("https://sas.sdss.org/infrared/spectrum/view/stars=aspcap]"
+    urlbase = ("https://sas.sdss.org/infrared/spectrum/view/stars=aspcap"
                "?apogee_id={0}&location_id={1:d}&commiss=0")
-    url = urlbase.format(apogee_ID, loc_ID)
+    url = urlbase.format(apogee_ID.strip(), loc_ID)
     return url
+
+def read_DLSB_db(db_path=DEFAULT_DLSB_DB):
+    '''Read in the DLSB database at the given path.
+
+    The format of the DLSB database should be a list of APOGEE IDs, one per
+    line, with no header. If the file is empty or does not exist, an empty
+    table will be read.'''
+    try:
+        dlsbs = Table.read(db_path, names=["APOGEE_ID"],
+                           format="ascii.no_header")
+    except (FileNotFoundError, InconsistentTableError):
+        dlsbs = Table(names=["APOGEE_ID"])
+    return dlsbs
+
+def read_null_db(db_path=DEFAULT_NULL_DB):
+    '''Read in the non-DLSB database at the given path.
+
+    The format of the non-DLSB database should be a list of APOGEE IDs, one per
+    line, with no header. If the file is empty or does not exist, an empty
+    table will be read.'''
+    try:
+        nulls = Table.read(db_path, names=["APOGEE_ID"],
+                           format="ascii.no_header")
+    except (FileNotFoundError, InconsistentTableError):
+        nulls = Table(names=["APOGEE_ID"])
+    return nulls
 
 # Maybe try an "audit" to see how reproducible finding DLSBs is. Although this
 # is sufficiently different that it may be better to make a whole new module
@@ -92,8 +128,8 @@ def find_DLSBs(apotable, dlsbpath=DEFAULT_DLSB_DB, nullpath=DEFAULT_NULL_DB,
     duplication of effort if a separate dataset is inspected.'''
 
     # Filter out the objects that have already been seen.
-    dlsbs = Table.read(dlsbpath, names=["APOGEE_ID"])
-    nulls = Table.read(nullpath, names=["APOGEE_ID"])
+    dlsbs = read_DLSB_db(db_path=dlsbpath)
+    nulls = read_null_db(db_path=nullpath)
 
     if verbose:
         orig_length = len(apotable)
@@ -101,23 +137,32 @@ def find_DLSBs(apotable, dlsbpath=DEFAULT_DLSB_DB, nullpath=DEFAULT_NULL_DB,
 
     apotable = au.filter_column_from_subtable(
         apotable, "APOGEE_ID", dlsbs["APOGEE_ID"])
+    print(len(apotable))
     apotable = au.filter_column_from_subtable(
         apotable, "APOGEE_ID", nulls["APOGEE_ID"])
+    print(len(apotable))
 
     if verbose:
         num_removed = orig_length - len(apotable)
         print("{0:d} objects were already classified.".format(num_removed))
 
     prompt = "APOGEE:>"
+    total_nums = len(apotable)
     # Now iterate through the table.
-    for row in apotable:
+    for i, row in enumerate(apotable):
         apoid = row["APOGEE_ID"]
-        locid = row["LOC_ID"]
+        locid = row["LOCATION_ID"]
 
         SAS_url = make_SAS_URL(apoid, locid)
+        print("Target {0:d}/{1:d}...".format(i, total_nums))
         if verbose:
             print("Opening {0}".format(SAS_url))
         webbrowser.open(SAS_url)
+        with open(dlsbpath, 'a') as dl_handle:
+            with open(nullpath, 'a') as nl_handle:
+                askuser = DLSB_prompt(dl_handle, nl_handle, apoid)
+                askuser.cmdloop()
+
 if __name__ == "__main__":
     parser = argparse.ArgumentParser()
 
