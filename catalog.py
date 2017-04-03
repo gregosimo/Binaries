@@ -40,7 +40,7 @@ APOGEE_NULL = -9999.0
 
 def read_APOKASC_catalog(
     filepath=paths.APOKASC_PATH, exclude_single_epoch=False, filter_BAD=False, 
-    filter_WARN=False):
+    filter_WARN=False, filter_DLSBs=True):
     '''Reads in the APOKASC catalog.
 
     The catalog should be located at filepath.
@@ -51,6 +51,9 @@ def read_APOKASC_catalog(
         add_cut_metadata(apocat, "VSCATTER > 0")
     if filter_BAD:
         apocat = filter_bad_ASPCAP_fits(apocat, filter_WARN)
+    if filter_DLSBs:
+        apocat = filter_double_lined_spectroscopic_binaries(
+            apocat, apid_col="2MASS_ID")
     return apocat
 
 def read_EHK_catalog(filepath=str(paths.EHK_PATH)):
@@ -268,7 +271,7 @@ def read_TGAS_McQuillan_APOGEE_overlap_tidsync(
     return tgas_table
 
 def join_by_2MASS_key(tbl1, tbl2, tm1, tm2, join_type="inner",
-                      skip_missing=True):
+                      skip_missing=True, conflict_suffixes=("_A", "_B")):
     '''Join two tables by their 2MASS key.
 
     Join tables according to a 2MASS key. Since different catalogs store the
@@ -304,8 +307,9 @@ def join_by_2MASS_key(tbl1, tbl2, tm1, tm2, join_type="inner",
         raise ValueError("Don't recognize 2MASS key: " + tbl2[tm2][0])
 
     if tbl1_type == tbl2_type:
-        new_table = au.join_by_id(tbl1, tbl2, tm1, tm2, join_type=join_type, 
-                                  idproc=npstr.strip)
+        new_table = au.join_by_id(
+            tbl1, tbl2, tm1, tm2, join_type=join_type, idproc=npstr.strip, 
+            conflict_suffixes=conflict_suffixes)
         print("Types the same")
     else:
         print("Types different")
@@ -320,8 +324,9 @@ def join_by_2MASS_key(tbl1, tbl2, tm1, tm2, join_type="inner",
         del(tbl2[tm2])
         try:
             tbl2[tm2] = tbl2_newcol
-            new_table = au.join_by_id(tbl1, tbl2, tm1, tm2, join_type=join_type,
-                                      idproc=npstr.strip)
+            new_table = au.join_by_id(
+                tbl1, tbl2, tm1, tm2, join_type=join_type, idproc=npstr.strip, 
+                conflict_suffixes=conflict_suffixes)
         finally:
             del(tbl2[tm2])
             tbl2[tm2] = tbl2_oldcol
@@ -357,7 +362,8 @@ def read_dr14_allVisit(allvisitpath=paths.DR14_ALLVISIT_PATH, kepleropt=True):
 
     return allvisit
 
-def read_dr14_allStar(allstarpath=paths.DR14_ALLSTAR_PATH, kepleropt=True):
+def read_dr14_allStar(allstarpath=paths.DR14_ALLSTAR_PATH, kepleropt=True,
+                      filter_DLSBs=True):
     '''Reads the allStar file for DR14.
     
     Reads in the allStar table for DR14. If the Kepleropt keyword is given,
@@ -380,6 +386,9 @@ def read_dr14_allStar(allstarpath=paths.DR14_ALLSTAR_PATH, kepleropt=True):
         allstar = Table(allstar_kepler)
     else:
         allstar = Table.read(str(allstarpath), format="fits")
+    if filter_DLSBs:
+        allstar = filter_double_lined_spectroscopic_binaries(
+            allstar, apoid_col="APOGEE_ID")
     return allstar
 
 def read_Rafa_rotation(rottable=paths.RAFA_SAVITA_PERIODS):
@@ -796,31 +805,43 @@ ASPCAP_STAR_WARN = 2**7
 ASPCAP_VSINI_WARN = 2**14
 NO_ASPCAP_RESULT = 2**31
 
-def apogee_select_quality(apotable, quality=("good", "bad", "warn"), 
+def apogee_filter_quality(apotable, quality=("good", "bad", "warn"), 
                           aspcapcol="ASPCAPFLAG"):
-    '''Select the entries in apotable of the given quality.
+    '''Remove the entries in apotable of the given quality.
     
     If aspcapcol is given, then the objects with the given qualities for
-    aspcapcol will be selected.'''
+    aspcapcol will be removed.'''
     
     bad_flags = ASPCAP_STAR_BAD + NO_ASPCAP_RESULT
     warn_flags = ASPCAP_STAR_WARN + ASPCAP_VSINI_WARN
 
-    aspcapflags = apotable[aspcapcol]
+    remaining_table = apotable
+    aspcapflags = remaining_table[aspcapcol]
     bad_indices = aspcapflags & bad_flags != 0
     warn_indices = np.logical_and(aspcapflags & warn_flags != 0,
                                   np.logical_not(bad_indices))
     good_indices = np.logical_not(np.logical_or(warn_indices, bad_indices))
 
-    indices = np.zeros(len(apotable), dtype=np.bool)
     if "good" in quality:
-        indices = np.logical_or(indices, good_indices)
+        remaining_table = remaining_table[
+            np.where(np.logical_not(good_indices))]
+        add_cut_metadata(remaining_table, "Removed good ASPCAP fits")
+        aspcapflags = remaining_table[aspcapcol]
+        bad_indices = aspcapflags & bad_flags != 0
+        warn_indices = np.logical_and(aspcapflags & warn_flags != 0,
+                                      np.logical_not(bad_indices))
     if "warn" in quality:
-        indices = np.logical_or(indices, warn_indices)
+        remaining_table = remaining_table[
+            np.where(np.logical_not(warn_indices))]
+        add_cut_metadata(remaining_table, "Removed warn ASPCAP fits")
+        aspcapflags = remaining_table[aspcapcol]
+        bad_indices = aspcapflags & bad_flags != 0
     if "bad" in quality:
-        indices = np.logical_or(indices, bad_indices)
+        remaining_table = remaining_table[
+            np.where(np.logical_not(bad_indices))]
+        add_cut_metadata(remaining_table, "Removed bad ASPCAP fits")
 
-    return apotable[indices]
+    return remaining_table
 
 
 def plot_by_ASPCAP_quality(x, y, aspcapflags, **kwargs):
@@ -1705,7 +1726,7 @@ def period_to_velocities(period, radii):
     Return the quantity 2 * pi * radii / period, but in units of km/s if period
     and radii are given in days and solar radii.'''
     solRad_per_day_to_km_per_sec = 7e10 / (1e5 * 60 * 60 * 24)
-    velocity = 2 * np.pi * radii / period
+    velocity = 2 * np.pi * radii / period * solRad_per_day_to_km_per_sec
 
     return velocity
 
@@ -1718,21 +1739,21 @@ def plot_velocity_vsini(period, radius, vsini, xvalue):
     num_invalid = len(vsini) - np.count_nonzero(valid_vsini_indices)
     valid_period = period[np.where(valid_vsini_indices)]
     valid_radius = radius[np.where(valid_vsini_indices)]
-    valid_vsini = period[np.where(valid_vsini_indices)]
-    valid_xvalue = period[np.where(valid_vsini_indices)]
+    valid_vsini = vsini[np.where(valid_vsini_indices)]
+    valid_xvalue = xvalue[np.where(valid_vsini_indices)]
     print("Invalid vsinis: {0:d}".format(num_invalid))
 
     max_vel = period_to_velocities(valid_period, valid_radius)
     obs_vel = valid_vsini
 
-    plt.plot(valid_xvalue, max_vel, 'bo', ms=3, label="Predicted V")
-    plt.plot(valid_xvalue, obs_vel, 'rd', label="V sin(i)")
-    for i in range(len(xvalue)):
+    plt.plot(valid_xvalue, max_vel, 'bo', ms=6, label="Predicted V")
+    plt.plot(valid_xvalue, obs_vel, 'rd', label="V sin(i)", ms=4)
+    for i in range(len(valid_xvalue)):
         if max_vel[i] >= obs_vel[i]:
             lc='k'
         else:
             lc='r'
-        plt.plot([valid_xvalue[i]]*2, [obs_vel[i], max_vel[i]], ls='-', lc=lc)
+        plt.plot([valid_xvalue[i]]*2, [obs_vel[i], max_vel[i]], ls='-', c=lc)
     plt.ylabel("Rotational Velocity (km/s)")
 
 
@@ -2297,6 +2318,13 @@ def select_observing_targets(ntargets=75):
             perform_logg_cut(mcq_stelparms, lowlogg=4.25), 
             lowtemp=4850, hightemp=5600), 
         lowperiod=1, highperiod=5)
+
+    apogee = read_dr14_allStar(filter_DLSBs=False)
+    mcq_observing = catalog.join_by_2MASS_key(
+        mcq_observing, apogee, "tm_designation", "APOGEE_ID", join_type="left",
+        conflict_suffixes=("_KIC", "_APOGEE"))
+
+    return mcq_observing
 
 def apogee_targets_in_observed_sample(obs, apogee):
     '''Explore the apogee targets that will be observed.
