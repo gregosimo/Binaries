@@ -642,7 +642,7 @@ def write_Villanova_EB_upload_list(
     kic_targets.write(str(output), format=writefmt, comment=False)
 
 def create_joined_APOKASC_McQuillan_catalog(
-        apocat=None, mcquillancat=None, apofile=APOKASC_PATH,
+        apocat=None, mcquillancat=None, apofile=paths.APOKASC_PATH,
     mcquillanfile=paths.MCQUILLAN_CATALOG):
     '''Creates a joint APOKASC/McQuillan catalog.
 
@@ -1709,12 +1709,31 @@ def period_to_velocities(period, radii):
 
     return velocity
 
-def plot_velocity_vsini(period, radius, vsini):
+def plot_velocity_vsini(period, radius, vsini, xvalue):
     '''Plot the expected velocities and the measured vsini.
 
     Plot the velocity expected from the radius and period of objects, along
     with the measured vsini.'''
-    max_vel = period_to_velocities(period, radius)
+    valid_vsini_indices = vsini >= 0
+    num_invalid = len(vsini) - np.count_nonzero(valid_vsini_indices)
+    valid_period = period[np.where(valid_vsini_indices)]
+    valid_radius = radius[np.where(valid_vsini_indices)]
+    valid_vsini = period[np.where(valid_vsini_indices)]
+    valid_xvalue = period[np.where(valid_vsini_indices)]
+    print("Invalid vsinis: {0:d}".format(num_invalid))
+
+    max_vel = period_to_velocities(valid_period, valid_radius)
+    obs_vel = valid_vsini
+
+    plt.plot(valid_xvalue, max_vel, 'bo', ms=3, label="Predicted V")
+    plt.plot(valid_xvalue, obs_vel, 'rd', label="V sin(i)")
+    for i in range(len(xvalue)):
+        if max_vel[i] >= obs_vel[i]:
+            lc='k'
+        else:
+            lc='r'
+        plt.plot([valid_xvalue[i]]*2, [obs_vel[i], max_vel[i]], ls='-', lc=lc)
+    plt.ylabel("Rotational Velocity (km/s)")
 
 
 def rotation_radius(vsini, prot, vsini_mask=APOGEE_NULL):
