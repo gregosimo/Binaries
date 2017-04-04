@@ -389,7 +389,7 @@ def read_dr14_allStar(allstarpath=paths.DR14_ALLSTAR_PATH, kepleropt=True,
         allstar = Table.read(str(allstarpath), format="fits")
     if filter_DLSBs:
         allstar = filter_double_lined_spectroscopic_binaries(
-            allstar, apoid_col="APOGEE_ID")
+            allstar, apid_col="APOGEE_ID")
     return allstar
 
 def read_Rafa_rotation(rottable=paths.RAFA_SAVITA_PERIODS):
@@ -970,6 +970,41 @@ def velocity_evolution(variable, nonvariable):
     fulltable = vstack(tablelist)
     return fulltable
     
+def apogee_vsini_distribution(period, radius, vsini, vsini_floor=5):
+    '''Plot the distribution of vsinis for an APOGEE sample.
+
+    Will determine sini by calculating vsini * P / (2 * pi * R). For objects
+    with vsini < vsini_floor, they will be treated as upper limits (ignored in
+    this case).'''
+    invalid_vsini_indices = vsini < 0
+    vsini_limit_indices = np.logical_and(vsini >= 0, vsini <= vsini_floor)
+    vsini_detections = np.logical_not(np.logical_or(
+        invalid_vsini_indices, vsini_limit_indices))
+    num_invalid = np.count_nonzero(invalid_vsini_indices)
+    num_limits = np.count_nonzero(vsini_limit_indices)
+    valid_period = period[np.where(vsini_detections)]
+    valid_radius = radius[np.where(vsini_detections)]
+    valid_vsini = vsini[np.where(vsini_detections)]
+    print("Invalid vsinis: {0:d}".format(num_invalid))
+    print("Vsini nondetections: {0:d}".format(num_limits))
+
+
+    eq_vel = period_to_velocities(valid_period, valid_radius)
+
+    impossible_vsini = valid_vsini > eq_vel
+    photometric_cont = valid_vsini < eq_vel / 2
+    contaminants = np.logical_or(impossible_vsini, photometric_cont)
+    num_cont = np.count_nonzero(contaminants)
+    print("Contaminants: {0:d}/{1:d}".format(num_cont, len(contaminants)))
+
+    uncontam_eqvel = eq_vel[np.where(np.logical_not(contaminants))]
+    uncontam_vsini = valid_vsini[np.where(np.logical_not(contaminants))]
+
+    sini = uncontam_vsini / uncontam_eqvel
+
+    plt.hist(sini, bins=10, range=(0, 1.0))
+    plt.xlabel("Sin (i)")
+    plt.ylabel("N")
 
 def get_APOGEE_visit_info(twomass_id, loc_id):
     '''Gets information for each visit of an APOGEE object.
