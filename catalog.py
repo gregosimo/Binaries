@@ -64,7 +64,8 @@ def read_EHK_catalog(filepath=str(paths.EHK_PATH)):
     return cat
 
 def read_McQuillan_catalog(
-    filepath=paths.MCQUILLAN_CATALOG, Huber_KIC=True, huberpath=paths.HUBER_CATALOG):
+    filepath=paths.MCQUILLAN_CATALOG, Huber_KIC=True, 
+    huberpath=paths.HUBER_CATALOG):
     '''Reads in the McQuillan catalog.
 
     The catalog shoul be located at filepath.
@@ -2306,8 +2307,17 @@ def select_observing_targets(ntargets=75):
     log(g) > 4.25 and 5600 K > Teff > 4850 K. We will define
     tidally-synchronized as having 1 day < Prot < 5 day.
     '''
-    mcq = read_McQuillan_catalog()
-    kep_stelparms = read_KIC_DR25_catalog()
+    mcq = read_McQuillan_catalog(Huber_KIC=False)[[
+        "KIC", "Prot", "e_Prot", "n_Prot", "Rper"]]
+    kep_stelparms = read_KIC_DR25_catalog()[[
+        "kepid", "tm_designation", "teff", "teff_err1", "teff_err2", 
+        "logg", "logg_err1", "logg_err2", "feh", "feh_err1", "feh_err2", 
+        "mass", "mass_err1", "mass_err2", 
+        "radius", "radius_err1", "radius_err2", "kepmag", 
+        "dist", "dist_err1", "dist_err2", "ra", "dec", "st_quarters", 
+        "teff_prov", "logg_prov", "feh_prov", 
+        "jmag", "jmag_err", "hmag", "hmag_err", "kmag", "kmag_err", 
+        "av", "av_err1", "av_err2"]]
     mcq_stelparms = au.join_by_id(mcq, kep_stelparms, "KIC", "kepid")
     # Let's keep memory usage low, shall we?
     del(mcq)
@@ -2315,14 +2325,22 @@ def select_observing_targets(ntargets=75):
 
     mcq_observing = perform_period_cut(
         perform_teff_cut(
-            perform_logg_cut(mcq_stelparms, lowlogg=4.25), 
-            lowtemp=4850, hightemp=5600), 
-        lowperiod=1, highperiod=5)
+            perform_logg_cut(mcq_stelparms, lowlogg=4.25, loggcol="logg"), 
+            lowtemp=4850, hightemp=5600, teffcol="teff"),
+        lowperiod=1, highperiod=5) 
 
-    apogee = read_dr14_allStar(filter_DLSBs=False)
-    mcq_observing = catalog.join_by_2MASS_key(
-        mcq_observing, apogee, "tm_designation", "APOGEE_ID", join_type="left",
-        conflict_suffixes=("_KIC", "_APOGEE"))
+#   apogee = read_dr14_allStar(filter_DLSBs=False)[[
+#       "APOGEE_ID", "LOCATION_ID", "NVISITS", "SNR", "STARFLAG", "STARFLAGS",
+#       "ANDFLAG", "ANDFLAGS", "VHELIO_AVG", "VSCATTER", "VERR", "VERR_MED",
+#       "PARAM", "FPARAM", "PARAM_COV", "FPARAM_COV", "TEFF", "TEFF_ERR",
+#       "LOGG", "LOGG_ERR", "VSINI", "M_H", "M_H_ERR", 
+#       "ALPHA_M", "ALPHA_M_ERR", "ASPCAPFLAG", "ASPCAPFLAGS", 
+#       "FE_H", "FE_H_ERR", "FE_H_FLAG", "VISITS"]]
+#   mcq_observing = join_by_2MASS_key(
+#       mcq_observing, apogee, "tm_designation", "APOGEE_ID", join_type="left",
+#       conflict_suffixes=("_KIC", "_APOGEE"))
+
+    mcq_observing = filter_pulsators(mcq_observing, KICcol="KIC")
 
     return mcq_observing
 
