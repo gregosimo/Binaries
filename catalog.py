@@ -1000,9 +1000,9 @@ def apogee_vsini_distribution(period, radius, vsini, vsini_floor=5):
     uncontam_eqvel = eq_vel[np.where(np.logical_not(contaminants))]
     uncontam_vsini = valid_vsini[np.where(np.logical_not(contaminants))]
 
-    sini = uncontam_vsini / uncontam_eqvel
+    sini = valid_vsini / eq_vel
 
-    plt.hist(sini, bins=10, range=(0, 1.0))
+    plt.hist(sini, bins=15, range=(0, 1.5))
     plt.xlabel("Sin (i)")
     plt.ylabel("N")
 
