@@ -1006,6 +1006,17 @@ def apogee_vsini_distribution(period, radius, vsini, vsini_floor=5):
     plt.xlabel("Sin (i)")
     plt.ylabel("N")
 
+def filter_invalid_APOGEE_entries(apotable, colname, maskvalue=-9999.0):
+    '''Remove rows from apotable where column values are the mask values.
+
+    This will filter apotable where only the rows that do not have the mask
+    value in the column will be returned.'''
+    filtered_table = au.filter_column_from_subtable(apotable, colname, 
+                                                    [maskvalue])
+    add_cut_metadata(filtered_table,
+        "Removed masked entries in {0}".format(colname))
+    return filtered_table
+
 def get_APOGEE_visit_info(twomass_id, loc_id):
     '''Gets information for each visit of an APOGEE object.
     
