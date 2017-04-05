@@ -17,6 +17,7 @@ import astropy.units as u
 from astropy.table import Table, join, vstack, unique, Column
 from astropy.coordinates import SkyCoord
 from astropy.io import fits
+from astropy.convolution import convolve, Gaussian1DKernel
 from bs4 import BeautifulSoup
 import requests
 # from apogee.tools import bitmask
@@ -38,22 +39,14 @@ APOGEE_NULL = -9999.0
 # Reading catalogs #
 ###############################################################################
 
+@au.memoized
 def read_APOKASC_catalog(
-    filepath=paths.APOKASC_PATH, exclude_single_epoch=False, filter_BAD=False, 
-    filter_WARN=False, filter_DLSBs=True):
+    filepath=paths.APOKASC_PATH):
     '''Reads in the APOKASC catalog.
 
     The catalog should be located at filepath.
     '''
     apocat = Table.read(filepath, format="fits")
-    if exclude_single_epoch:
-        apocat = apocat[np.where(apocat["VSCATTER"] > 0.0)]
-        add_cut_metadata(apocat, "VSCATTER > 0")
-    if filter_BAD:
-        apocat = filter_bad_ASPCAP_fits(apocat, filter_WARN)
-    if filter_DLSBs:
-        apocat = filter_double_lined_spectroscopic_binaries(
-            apocat, apid_col="2MASS_ID")
     return apocat
 
 def read_EHK_catalog(filepath=str(paths.EHK_PATH)):
@@ -64,18 +57,16 @@ def read_EHK_catalog(filepath=str(paths.EHK_PATH)):
     return cat
 
 def read_McQuillan_catalog(
-    filepath=paths.MCQUILLAN_CATALOG, Huber_KIC=True, 
-    huberpath=paths.HUBER_CATALOG):
+    filepath=paths.MCQUILLAN_CATALOG, stelparms=True):
     '''Reads in the McQuillan catalog.
 
     The catalog shoul be located at filepath.
     '''
     mcquillancat = Table.read(filepath, format="fits")
-    if Huber_KIC:
-        hubercat = read_Huber_KIC_catalog(huberpath)
-        del(mcquillancat["log_g_"])
-        del(mcquillancat["Teff"])
-        mcquillancat = au.join_by_id(mcquillancat, hubercat, "KIC", "KIC")
+    if stelparms:
+        stellcat = read_KIC_DR25_catalog()
+        mcquillancat = au.join_by_id(
+            mcquillancat, stellcat, "KIC", "kepid", join_type="left")
     return mcquillancat
 
 def read_original_KIC_catalog(filepath=paths.ORIG_KIC):
@@ -83,11 +74,13 @@ def read_original_KIC_catalog(filepath=paths.ORIG_KIC):
     kic = Table.read(str(filepath), format="ascii.basic", delimiter="|")
     return kic
 
+@au.memoized
 def read_Huber_KIC_catalog(huberpath=paths.HUBER_CATALOG):
     '''Read the HUBER KIC parameters.'''
     hubercat = Table.read(str(huberpath), format="ascii.cds")
     return hubercat
 
+@au.memoized
 def read_KIC_DR25_catalog(kicpath=paths.KIC_CATALOG):
     '''Read the KIC DR2 Stellar Parameter catalog.'''
     kiccat = Table.read(str(kicpath), format="ascii.ipac")
@@ -331,8 +324,9 @@ def join_by_2MASS_key(tbl1, tbl2, tm1, tm2, join_type="inner",
         finally:
             del(tbl2[tm2])
             tbl2[tm2] = tbl2_oldcol
-            
 
+    # Find a way to get tbl2_oldcol back in the table. This may require
+    # renaming tbl2 instead of deleting it.
     return new_table
 
 def read_dr14_allVisit(allvisitpath=paths.DR14_ALLVISIT_PATH, kepleropt=True):
@@ -363,8 +357,8 @@ def read_dr14_allVisit(allvisitpath=paths.DR14_ALLVISIT_PATH, kepleropt=True):
 
     return allvisit
 
-def read_dr14_allStar(allstarpath=paths.DR14_ALLSTAR_PATH, kepleropt=True,
-                      filter_DLSBs=True):
+@au.memoized
+def read_dr14_allStar(allstarpath=paths.DR14_ALLSTAR_PATH, kepleropt=True):
     '''Reads the allStar file for DR14.
     
     Reads in the allStar table for DR14. If the Kepleropt keyword is given,
@@ -376,20 +370,17 @@ def read_dr14_allStar(allstarpath=paths.DR14_ALLSTAR_PATH, kepleropt=True,
     several hours to fit into memory.
     '''
     if kepleropt:
-        allstar_hdus = fits.open(str(allstarpath), memmap=True)
-        allstar_indices = allstar_hdus[2]
-        index_start = allstar_indices.data[279]
-        index_end = allstar_indices.data[302]
-        # This will only have targets in the Kepler RA range.
-        allstar_kepler = allstar_hdus[1].data[index_start:index_end]
-        allstar_hdus.close()
-        # Convert from recarray to Table
-        allstar = Table(allstar_kepler)
+            allstar_hdus = fits.open(str(allstarpath), memmap=True)
+            allstar_indices = allstar_hdus[2]
+            index_start = allstar_indices.data[279]
+            index_end = allstar_indices.data[302]
+            # This will only have targets in the Kepler RA range.
+            allstar_kepler = allstar_hdus[1].data[index_start:index_end]
+            allstar_hdus.close()
+            # Convert from recarray to Table
+            allstar = Table(allstar_kepler)
     else:
         allstar = Table.read(str(allstarpath), format="fits")
-    if filter_DLSBs:
-        allstar = filter_double_lined_spectroscopic_binaries(
-            allstar, apid_col="APOGEE_ID")
     return allstar
 
 def read_Rafa_rotation(rottable=paths.RAFA_SAVITA_PERIODS):
@@ -2352,6 +2343,10 @@ def select_observing_targets(ntargets=75):
     that don't match the current Kepler Stellar Parameter pipeline 
     log(g) > 4.25 and 5600 K > Teff > 4850 K. We will define
     tidally-synchronized as having 1 day < Prot < 5 day.
+
+    We'll also filter out the known Kepler pulsators.
+
+    For targets with APOGEE observations, remove those with logg < 3.5
     '''
     mcq = read_McQuillan_catalog(Huber_KIC=False)[[
         "KIC", "Prot", "e_Prot", "n_Prot", "Rper"]]
@@ -2375,18 +2370,31 @@ def select_observing_targets(ntargets=75):
             lowtemp=4850, hightemp=5600, teffcol="teff"),
         lowperiod=1, highperiod=5) 
 
-#   apogee = read_dr14_allStar(filter_DLSBs=False)[[
-#       "APOGEE_ID", "LOCATION_ID", "NVISITS", "SNR", "STARFLAG", "STARFLAGS",
-#       "ANDFLAG", "ANDFLAGS", "VHELIO_AVG", "VSCATTER", "VERR", "VERR_MED",
-#       "PARAM", "FPARAM", "PARAM_COV", "FPARAM_COV", "TEFF", "TEFF_ERR",
-#       "LOGG", "LOGG_ERR", "VSINI", "M_H", "M_H_ERR", 
-#       "ALPHA_M", "ALPHA_M_ERR", "ASPCAPFLAG", "ASPCAPFLAGS", 
-#       "FE_H", "FE_H_ERR", "FE_H_FLAG", "VISITS"]]
-#   mcq_observing = join_by_2MASS_key(
-#       mcq_observing, apogee, "tm_designation", "APOGEE_ID", join_type="left",
-#       conflict_suffixes=("_KIC", "_APOGEE"))
-
     mcq_observing = filter_pulsators(mcq_observing, KICcol="KIC")
+
+    apogee = read_dr14_allStar(filter_DLSBs=False)[[
+        "APOGEE_ID", "LOCATION_ID", "NVISITS", "SNR", "STARFLAG", "STARFLAGS",
+        "ANDFLAG", "ANDFLAGS", "VHELIO_AVG", "VSCATTER", "VERR", "VERR_MED",
+        "PARAM", "FPARAM", "PARAM_COV", "FPARAM_COV", "TEFF", "TEFF_ERR",
+        "LOGG", "LOGG_ERR", "VSINI", "M_H", "M_H_ERR", 
+        "ALPHA_M", "ALPHA_M_ERR", "ASPCAPFLAG", "ASPCAPFLAGS", 
+        "FE_H", "FE_H_ERR", "FE_H_FLAG", "VISITS"]]
+    mcq_observing = join_by_2MASS_key(
+        mcq_observing, apogee, "tm_designation", "APOGEE_ID", join_type="left",
+        conflict_suffixes=("_KIC", "_APOGEE"))
+    
+    # Remove APOGEE giants
+    mcq_observing["TEMP_LOGG"] = mcq_observing["FPARAM"][:,1]
+    mcq_observing = perform_logg_cut(
+        mcq_observing, lowlogg=3.5, loggcol="TEMP_LOGG")
+    del(mcq_observing["TEMP_LOGG"])
+
+    # Remove objects which have already been observed.
+    mcq_observing["VSCATTER"] = mcq_observing["VSCATTER"].filled(-9999.0)
+    mcq_observing = perform_vscatter_cut(
+        mcq_observing, highv=1, vcol="VSCATTER")
+    mcq_observing["VSCATTER"] = np.masked_values(mcq_observing["VSCATTER"],
+                                                 -9999.0)
 
     return mcq_observing
 
@@ -2399,6 +2407,34 @@ def apogee_targets_in_observed_sample(obs, apogee):
     Additionally, show the objects which '''
     pass
 
+def compare_sini_distribution(velocities, vsinis, vsini_err=3,
+                              vsini_cutoff=5):
+    '''Compare the sin(i) distribution from modeling to calculated sin(i).
+
+    This will use model how the v distribution should be transformed to a
+    sin(i) distribution, as well as showing the actual vsini distribution
+    transformed to sin(i).
+    
+    This function will take a distribution of velocities and then compare it to
+    the distribution of observed vsinis.'''
+    v_dist, bins = np.histogram(velocities, range=(0, 100), bins=100)
+    print(bins)
+    errordist = Gaussian1DKernel(stddev=vsini_err)
+    v_error_dist = convolve(v_dist, errordist)
+
+    v_cum_dist = np.cumsum(v_dist)
+    v_cum_err_dist = np.cumsum(v_error_dist)
+
+    plt.subplot(211)
+    plt.step(bins[:-1], v_cum_dist, where="post")
+    plt.ylabel("N")
+    plt.title("Before error convolution")
+
+    plt.subplot(212)
+    plt.step(bins[:-1], v_cum_err_dist, where="post")
+    plt.ylabel("N")
+    plt.xlabel("V (km/s)")
+    plt.title("After error convolution")
 
 def select_tidally_synchronized_binaries(
     table, pcut=5, lowtemp=4850, hightemp=5600, lowperiod=1, teffcol="Teff",
