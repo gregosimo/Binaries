@@ -10,6 +10,7 @@ import numpy.core.defchararray as npstr
 import scipy
 from scipy.io import readsav
 from scipy.interpolate import interp1d
+from scipy.stats import norm
 import matplotlib.pyplot as plt
 from matplotlib import cm
 from mpl_toolkits.axes_grid1.inset_locator import inset_axes
@@ -2375,7 +2376,8 @@ def apogee_targets_in_observed_sample(obs, apogee):
     Additionally, show the objects which '''
     pass
 
-def compare_sini_distribution(velocities, vsinis, vsini_err=3,
+
+def compare_sini_distribution(velocities, vsinis, vsini_percent=0.1,
                               vsini_cutoff=5):
     '''Compare the sin(i) distribution from modeling to calculated sin(i).
 
@@ -2385,10 +2387,40 @@ def compare_sini_distribution(velocities, vsinis, vsini_err=3,
     
     This function will take a distribution of velocities and then compare it to
     the distribution of observed vsinis.'''
+    vel_bins = np.linspace(0, 100, 100)
+    binvalues = (vel_bins[1:] + vel_bins[:-1])/2
+
+    velocities = velocities[0:1]
+    dispersions = vsini_percent * velocities
+    # I'll do one data point now, but more will be on the way.
+    dist = 1/np.sqrt(2*np.pi*dispersions) * np.exp(-(
+        binvalues - velocities[:,np.newaxis])**2 / (2 * dispersions**2))
+    # Now make a data square that contains sin(i) convolution profiles for all
+    # velocity bin values.
+    sini_points = generate_sini_distribution()
+    vsini_weights = binvalues * sini_points[:,np.newaxis]
+    # I think the best way to do the histogram is to create a
+    # binvaluesxbinvalues array, and then fill it in with a for loop.
+    plt.plot(binvalues, dist[0,:])
+    print(velocities)
+    return
+
     v_dist, bins = np.histogram(velocities, range=(0, 100), bins=100)
-    print(bins)
+    binvalues = (bins[1:] + bins[:-1])/2
     errordist = Gaussian1DKernel(stddev=vsini_err)
     v_error_dist = convolve(v_dist, errordist)
+
+    MC_TRIALS = 500
+    vel_errors = stats.norm.rvs((len(velocities), MC_TRIALS))
+    # Now calculate the vsini distribution.
+    # This will be a slow way of doing it. But optimization can come later if
+    # needed.
+    v_sini_dist = np.zeros(len(v_error_dist))
+    for j in range(len(v_sini_dist)):
+        for k in range(j, len(v_error_dist)):
+            v_sini_dist[j] = (
+                v_sini_dist[j] + v_error_dist[k]*sini_prob(
+                    binvalues[j], binvalues[k]))
 
     v_cum_dist = np.cumsum(v_dist)
     v_cum_err_dist = np.cumsum(v_error_dist)
