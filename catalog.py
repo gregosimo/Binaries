@@ -314,16 +314,21 @@ def join_by_2MASS_key(tbl1, tbl2, tm1, tm2, join_type="inner",
                 newcol = npstr.replace(oldcol, kic_prefix, apogee_prefix)
             return newcol
         tbl2_oldcol = tbl2[tm2]
+        random_colname = au.generate_random_string(12)
         tbl2_newcol = transform(tbl2_oldcol)
         del(tbl2[tm2])
         try:
             tbl2[tm2] = tbl2_newcol
+            tbl2[random_colname] = tbl2_oldcol
             new_table = au.join_by_id(
                 tbl1, tbl2, tm1, tm2, join_type=join_type, idproc=npstr.strip, 
                 conflict_suffixes=conflict_suffixes)
         finally:
             del(tbl2[tm2])
             tbl2[tm2] = tbl2_oldcol
+
+        del(new_table[tm2])
+        new_table.rename_column(random_colname, tm2)
 
     # Find a way to get tbl2_oldcol back in the table. This may require
     # renaming tbl2 instead of deleting it.
@@ -797,43 +802,6 @@ ASPCAP_STAR_WARN = 2**7
 ASPCAP_VSINI_WARN = 2**14
 NO_ASPCAP_RESULT = 2**31
 
-def apogee_filter_quality(apotable, quality=("good", "bad", "warn"), 
-                          aspcapcol="ASPCAPFLAG"):
-    '''Remove the entries in apotable of the given quality.
-    
-    If aspcapcol is given, then the objects with the given qualities for
-    aspcapcol will be removed.'''
-    
-    bad_flags = ASPCAP_STAR_BAD + NO_ASPCAP_RESULT
-    warn_flags = ASPCAP_STAR_WARN + ASPCAP_VSINI_WARN
-
-    remaining_table = apotable
-    aspcapflags = remaining_table[aspcapcol]
-    bad_indices = aspcapflags & bad_flags != 0
-    warn_indices = np.logical_and(aspcapflags & warn_flags != 0,
-                                  np.logical_not(bad_indices))
-    good_indices = np.logical_not(np.logical_or(warn_indices, bad_indices))
-
-    if "good" in quality:
-        remaining_table = remaining_table[
-            np.where(np.logical_not(good_indices))]
-        add_cut_metadata(remaining_table, "Removed good ASPCAP fits")
-        aspcapflags = remaining_table[aspcapcol]
-        bad_indices = aspcapflags & bad_flags != 0
-        warn_indices = np.logical_and(aspcapflags & warn_flags != 0,
-                                      np.logical_not(bad_indices))
-    if "warn" in quality:
-        remaining_table = remaining_table[
-            np.where(np.logical_not(warn_indices))]
-        add_cut_metadata(remaining_table, "Removed warn ASPCAP fits")
-        aspcapflags = remaining_table[aspcapcol]
-        bad_indices = aspcapflags & bad_flags != 0
-    if "bad" in quality:
-        remaining_table = remaining_table[
-            np.where(np.logical_not(bad_indices))]
-        add_cut_metadata(remaining_table, "Removed bad ASPCAP fits")
-
-    return remaining_table
 
 
 def plot_by_ASPCAP_quality(x, y, aspcapflags, **kwargs):
@@ -997,7 +965,7 @@ def apogee_vsini_distribution(period, radius, vsini, vsini_floor=5):
     plt.xlabel("Sin (i)")
     plt.ylabel("N")
 
-def filter_invalid_APOGEE_entries(apotable, colname, maskvalue=-9999.0):
+def filter_invalid_APOGEE_entries(apotable, colname, maskvalue=APOGEE_NULL):
     '''Remove rows from apotable where column values are the mask values.
 
     This will filter apotable where only the rows that do not have the mask
@@ -2427,12 +2395,12 @@ def compare_sini_distribution(velocities, vsinis, vsini_err=3,
 
     plt.subplot(211)
     plt.step(bins[:-1], v_cum_dist, where="post")
-    plt.ylabel("N")
+    plt.ylabel("N (< V)")
     plt.title("Before error convolution")
 
     plt.subplot(212)
     plt.step(bins[:-1], v_cum_err_dist, where="post")
-    plt.ylabel("N")
+    plt.ylabel("N (< V)")
     plt.xlabel("V (km/s)")
     plt.title("After error convolution")
 
@@ -2925,6 +2893,44 @@ def bad_ASPCAP_indices(aspcapflags, warn=False):
             aspcapflags, "STAR_WARN") > 0)
 
     return bad_indices
+
+def apogee_filter_quality(apotable, quality=("good", "bad", "warn"), 
+                          aspcapcol="ASPCAPFLAG"):
+    '''Remove the entries in apotable of the given quality.
+    
+    If aspcapcol is given, then the objects with the given qualities for
+    aspcapcol will be removed.'''
+    
+    bad_flags = ASPCAP_STAR_BAD + NO_ASPCAP_RESULT
+    warn_flags = ASPCAP_STAR_WARN + ASPCAP_VSINI_WARN
+
+    remaining_table = apotable
+    aspcapflags = remaining_table[aspcapcol]
+    bad_indices = aspcapflags & bad_flags != 0
+    warn_indices = np.logical_and(aspcapflags & warn_flags != 0,
+                                  np.logical_not(bad_indices))
+    good_indices = np.logical_not(np.logical_or(warn_indices, bad_indices))
+
+    if "good" in quality:
+        remaining_table = remaining_table[
+            np.where(np.logical_not(good_indices))]
+        add_cut_metadata(remaining_table, "Removed good ASPCAP fits")
+        aspcapflags = remaining_table[aspcapcol]
+        bad_indices = aspcapflags & bad_flags != 0
+        warn_indices = np.logical_and(aspcapflags & warn_flags != 0,
+                                      np.logical_not(bad_indices))
+    if "warn" in quality:
+        remaining_table = remaining_table[
+            np.where(np.logical_not(warn_indices))]
+        add_cut_metadata(remaining_table, "Removed warn ASPCAP fits")
+        aspcapflags = remaining_table[aspcapcol]
+        bad_indices = aspcapflags & bad_flags != 0
+    if "bad" in quality:
+        remaining_table = remaining_table[
+            np.where(np.logical_not(bad_indices))]
+        add_cut_metadata(remaining_table, "Removed bad ASPCAP fits")
+
+    return remaining_table
 
 ###############################################################################
 # Double-Lined Spectroscopic Binaries #
