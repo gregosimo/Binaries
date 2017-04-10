@@ -2401,6 +2401,10 @@ def compare_sini_distribution(velocities, vsinis, vsini_percent=0.1,
     vsini_weights = binvalues * sini_points[:,np.newaxis]
     # I think the best way to do the histogram is to create a
     # binvaluesxbinvalues array, and then fill it in with a for loop.
+    fullhist = np.zeros(shape=(len(binvalues), len(binvalues)))
+    for i in range(len(binvalues)):
+        bins, hist = np.histogram(
+        fullhist[i,:]
     plt.plot(binvalues, dist[0,:])
     print(velocities)
     return
