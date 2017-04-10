@@ -10,7 +10,7 @@ import numpy.core.defchararray as npstr
 import scipy
 from scipy.io import readsav
 from scipy.interpolate import interp1d
-from scipy.stats import norm
+from scipy.stats import norm, uniform
 import matplotlib.pyplot as plt
 from matplotlib import cm
 from mpl_toolkits.axes_grid1.inset_locator import inset_axes
@@ -2376,6 +2376,35 @@ def apogee_targets_in_observed_sample(obs, apogee):
     Additionally, show the objects which '''
     pass
 
+def generate_sini_distribution(npoints=10000):
+    '''Generate a distribution of sin(i)s from randomly inclined orbits.
+
+    Note that "randomly inclined" does not mean uniform in inclinations. It
+    turns out that the distribution of inclinations goes as sin(i). Oddly
+    enough, the distribution of sin(i)s seems to go as tan(i), which diverges
+    at edge-on inclinations, which makes no mathematical sense.
+
+    To get around the weird result, I will generate sin(i) distributions by
+    hand.'''
+    randvar = uniform.rvs(size=npoints)
+    incs = np.arccos(2 * randvar - 1)
+    sinincs = np.sin(incs)
+    return sinincs
+
+def vsini_convolution_table(velbins, binvalues, mcpoints=10000):
+    '''Create a table allowing velocities to be convolved on a grid.
+
+    Generate a single table that holds the sin(i) convolution of each velocity
+    bin. In particular, the [i,:]th entry of the table contains the
+    vsini distribution of objects with true velocity velbins[i].
+    '''
+    sini_points = generate_sini_distribution(npoints=mcpoints)
+    vsini_weights = binvalues[:,np.newaxis] * sini_points
+    fullhist = np.zeros(shape=(len(binvalues), len(binvalues)))
+    for i in range(len(binvalues)):
+        hist, bins = np.histogram(vsini_weights[i,:], bins=velbins)
+        fullhist[i,:] = hist / mcpoints
+    return fullhist
 
 def compare_sini_distribution(velocities, vsinis, vsini_percent=0.1,
                               vsini_cutoff=5):
@@ -2387,26 +2416,41 @@ def compare_sini_distribution(velocities, vsinis, vsini_percent=0.1,
     
     This function will take a distribution of velocities and then compare it to
     the distribution of observed vsinis.'''
-    vel_bins = np.linspace(0, 100, 100)
+    vel_bins = np.linspace(0, 101, 101, endpoint=False)
     binvalues = (vel_bins[1:] + vel_bins[:-1])/2
 
-    velocities = velocities[0:1]
-    dispersions = vsini_percent * velocities
+#   velocities = velocities[0:2]
+    dispersions = np.reshape(vsini_percent * velocities, (len(velocities), 1))
     # I'll do one data point now, but more will be on the way.
     dist = 1/np.sqrt(2*np.pi*dispersions) * np.exp(-(
         binvalues - velocities[:,np.newaxis])**2 / (2 * dispersions**2))
     # Now make a data square that contains sin(i) convolution profiles for all
     # velocity bin values.
-    sini_points = generate_sini_distribution()
-    vsini_weights = binvalues * sini_points[:,np.newaxis]
-    # I think the best way to do the histogram is to create a
-    # binvaluesxbinvalues array, and then fill it in with a for loop.
-    fullhist = np.zeros(shape=(len(binvalues), len(binvalues)))
+    numpoints = 10000
+    fullhist = vsini_convolution_table(vel_bins, binvalues, mcpoints=numpoints)
+
+    # Now make a cube for all data points
+    convolutions = dist[:,:,np.newaxis] * fullhist
+
+    # Now add up all of the entries
+    data_dist = np.sum(convolutions, axis=1)
+
+    truevel = velocities[1]
+    plt.title("True Velocity: {0:.1f} km/s".format(truevel))
+    legend_handlers = []
     for i in range(len(binvalues)):
-        bins, hist = np.histogram(
-        fullhist[i,:]
-    plt.plot(binvalues, dist[0,:])
-    print(velocities)
+        label = "v_bin = {0:.1f}".format(binvalues[i])
+        step, = plt.step(vel_bins[:-1], convolutions[1, i, :], where="post",
+                         label=label)
+        if np.max(convolutions[1, i, :]) > 0.001:
+            legend_handlers.append(step)
+    step, = plt.step(vel_bins[:-1], data_dist[1, :], where="post", label="Sum",
+                     lw=3)
+    legend_handlers.append(step)
+    print("The integral of the new distribution is {0:.3f}.".format(
+        np.sum(data_dist[1,:])))
+    plt.xlim(0, 20)
+    plt.legend(handles=legend_handlers)
     return
 
     v_dist, bins = np.histogram(velocities, range=(0, 100), bins=100)
