@@ -10,9 +10,11 @@ import numpy.core.defchararray as npstr
 import scipy
 from scipy.io import readsav
 from scipy.interpolate import interp1d
-from scipy.stats import norm, uniform
+from scipy.stats import norm, uniform, ks_2samp
+from scipy.special import gammaincc
 import matplotlib.pyplot as plt
 from matplotlib import cm
+from matplotlib.ticker import AutoMinorLocator
 from mpl_toolkits.axes_grid1.inset_locator import inset_axes
 import astropy.units as u
 from astropy.table import Table, join, vstack, unique, Column
@@ -40,6 +42,7 @@ APOGEE_NULL = -9999.0
 # Reading catalogs #
 ###############################################################################
 
+
 @au.memoized
 def read_APOKASC_catalog(
     filepath=paths.APOKASC_PATH):
@@ -57,17 +60,12 @@ def read_EHK_catalog(filepath=str(paths.EHK_PATH)):
         names=["RA", "Dec", "U", "U_err", "B", "B_err", "V", "V_err"] )
     return cat
 
-def read_McQuillan_catalog(
-    filepath=paths.MCQUILLAN_CATALOG, stelparms=True):
+def read_McQuillan_catalog(filepath=paths.MCQUILLAN_CATALOG):
     '''Reads in the McQuillan catalog.
 
     The catalog shoul be located at filepath.
     '''
     mcquillancat = Table.read(filepath, format="fits")
-    if stelparms:
-        stellcat = read_KIC_DR25_catalog()
-        mcquillancat = au.join_by_id(
-            mcquillancat, stellcat, "KIC", "kepid", join_type="left")
     return mcquillancat
 
 def read_original_KIC_catalog(filepath=paths.ORIG_KIC):
@@ -81,9 +79,8 @@ def read_Huber_KIC_catalog(huberpath=paths.HUBER_CATALOG):
     hubercat = Table.read(str(huberpath), format="ascii.cds")
     return hubercat
 
-@au.memoized
 def read_KIC_DR25_catalog(kicpath=paths.KIC_CATALOG):
-    '''Read the KIC DR2 Stellar Parameter catalog.'''
+    '''Read the KIC DR25 Stellar Parameter catalog.'''
     kiccat = Table.read(str(kicpath), format="ascii.ipac")
     fix_table_coordinates_units(kiccat, "ra", "dec")
     return kiccat
@@ -405,7 +402,34 @@ def read_Rafa_rotation(rottable=paths.RAFA_SAVITA_PERIODS):
                                teffcol="teff")
     giantcut = perform_logg_cut(tempcut, lowlogg=3.5, loggcol="logg")
     return giantcut
+
+###################
+# Joined catalogs #
+###################
+#
+# These functions get catalogs which I use often, and are smaller than the
+# individual catalogs put together. Caching these instead of the full catalogs 
+# will hopefully lead to more efficient memory use.
+
+@au.memoized
+def mcquillan_with_stelparms(
+    mcq_path=paths.MCQUILLAN_CATALOG, kic_path=paths.KIC_CATALOG):
+    '''Read McQuillan catalog with full KIC stellar parameters.
+
+    Read in the McQuillan detections along with the KIC DR25 stellar
+    parameters.
+    '''
+    mcq = read_McQuillan_catalog(mcq_path)
+    stellcat = read_KIC_DR25_catalog(kic_path)
+    mcquillancat = au.join_by_id(
+        mcq, stellcat, "KIC", "kepid", join_type="left")
+    return mcquillancat
+
             
+@au.memoized
+def mcquillan_apokasc_dwarfs(
+    mcq_path=paths.MCQUILLAN_CATALOG, apokasc_path=paths):
+    pass
 ###############################################################################
 # Catalog Curation
 ###############################################################################
@@ -2317,31 +2341,17 @@ def select_observing_targets(ntargets=75):
 
     For targets with APOGEE observations, remove those with logg < 3.5
     '''
-    mcq = read_McQuillan_catalog(Huber_KIC=False)[[
-        "KIC", "Prot", "e_Prot", "n_Prot", "Rper"]]
-    kep_stelparms = read_KIC_DR25_catalog()[[
-        "kepid", "tm_designation", "teff", "teff_err1", "teff_err2", 
-        "logg", "logg_err1", "logg_err2", "feh", "feh_err1", "feh_err2", 
-        "mass", "mass_err1", "mass_err2", 
-        "radius", "radius_err1", "radius_err2", "kepmag", 
-        "dist", "dist_err1", "dist_err2", "ra", "dec", "st_quarters", 
-        "teff_prov", "logg_prov", "feh_prov", 
-        "jmag", "jmag_err", "hmag", "hmag_err", "kmag", "kmag_err", 
-        "av", "av_err1", "av_err2"]]
-    mcq_stelparms = au.join_by_id(mcq, kep_stelparms, "KIC", "kepid")
-    # Let's keep memory usage low, shall we?
-    del(mcq)
-    del(kep_stelparms)
+    mcq = mcquillan_with_stelparms()
 
     mcq_observing = perform_period_cut(
         perform_teff_cut(
-            perform_logg_cut(mcq_stelparms, lowlogg=4.25, loggcol="logg"), 
+            perform_logg_cut(mcq, lowlogg=4.25, loggcol="logg"), 
             lowtemp=4850, hightemp=5600, teffcol="teff"),
         lowperiod=1, highperiod=5) 
 
     mcq_observing = filter_pulsators(mcq_observing, KICcol="KIC")
 
-    apogee = read_dr14_allStar(filter_DLSBs=False)[[
+    apogee = read_dr14_allStar()[[
         "APOGEE_ID", "LOCATION_ID", "NVISITS", "SNR", "STARFLAG", "STARFLAGS",
         "ANDFLAG", "ANDFLAGS", "VHELIO_AVG", "VSCATTER", "VERR", "VERR_MED",
         "PARAM", "FPARAM", "PARAM_COV", "FPARAM_COV", "TEFF", "TEFF_ERR",
@@ -2362,10 +2372,26 @@ def select_observing_targets(ntargets=75):
     mcq_observing["VSCATTER"] = mcq_observing["VSCATTER"].filled(-9999.0)
     mcq_observing = perform_vscatter_cut(
         mcq_observing, highv=1, vcol="VSCATTER")
-    mcq_observing["VSCATTER"] = np.masked_values(mcq_observing["VSCATTER"],
+    mcq_observing["VSCATTER"] = np.ma.masked_values(mcq_observing["VSCATTER"],
                                                  -9999.0)
 
-    return mcq_observing
+    # Bin the sample by period to ensure that all periods are represented.
+    pbins = np.trunc(mcq_observing["Prot"])
+    period_groups = mcq_observing.group_by(pbins)
+    # This will hold each teff subgroup for the period.
+    bingroups = []
+    for grp in period_groups.groups:
+        teffbins = np.trunc(grp["Teff"] / 50)
+        teffgroups = grp.group_by(teffbins)
+        for teffgrp in teffgroups.groups:
+            teffgrp.sort("jmag")
+        bingroups.append(teffgroups)
+
+    datarows = au.roundrobin(*bingroups)
+    prioritytable = Table(rows=datarows)
+    prioritytable.meta = mcq_observing.meta
+
+    return prioritytable
 
 def apogee_targets_in_observed_sample(obs, apogee):
     '''Explore the apogee targets that will be observed.
@@ -2416,17 +2442,19 @@ def compare_sini_distribution(velocities, vsinis, vsini_percent=0.1,
     
     This function will take a distribution of velocities and then compare it to
     the distribution of observed vsinis.'''
-    vel_bins = np.linspace(0, 101, 101, endpoint=False)
+    vel_bins = np.linspace(0, 101, 401, endpoint=False)
+    vel_hist, bins = np.histogram(velocities, bins=vel_bins)
+    dv = vel_bins[2] - vel_bins[1]
     binvalues = (vel_bins[1:] + vel_bins[:-1])/2
 
-#   velocities = velocities[0:2]
     dispersions = np.reshape(vsini_percent * velocities, (len(velocities), 1))
     # I'll do one data point now, but more will be on the way.
     dist = 1/np.sqrt(2*np.pi*dispersions) * np.exp(-(
         binvalues - velocities[:,np.newaxis])**2 / (2 * dispersions**2))
+    print("Assuming VSINI uncertainties are 10%. Check this.")
     # Now make a data square that contains sin(i) convolution profiles for all
     # velocity bin values.
-    numpoints = 10000
+    numpoints = 30000
     fullhist = vsini_convolution_table(vel_bins, binvalues, mcpoints=numpoints)
 
     # Now make a cube for all data points
@@ -2435,22 +2463,65 @@ def compare_sini_distribution(velocities, vsinis, vsini_percent=0.1,
     # Now add up all of the entries
     data_dist = np.sum(convolutions, axis=1)
 
-    truevel = velocities[1]
-    plt.title("True Velocity: {0:.1f} km/s".format(truevel))
-    legend_handlers = []
-    for i in range(len(binvalues)):
-        label = "v_bin = {0:.1f}".format(binvalues[i])
-        step, = plt.step(vel_bins[:-1], convolutions[1, i, :], where="post",
-                         label=label)
-        if np.max(convolutions[1, i, :]) > 0.001:
-            legend_handlers.append(step)
-    step, = plt.step(vel_bins[:-1], data_dist[1, :], where="post", label="Sum",
-                     lw=3)
-    legend_handlers.append(step)
-    print("The integral of the new distribution is {0:.3f}.".format(
-        np.sum(data_dist[1,:])))
-    plt.xlim(0, 20)
-    plt.legend(handles=legend_handlers)
+    # And now all of the data points
+    vsini_dist = np.sum(data_dist, axis=0)
+
+    # Pick out the upper limits.
+    upper_index = np.argmin(binvalues<vsini_cutoff)
+    num_upper = np.sum(vsini_dist[:upper_index])*dv
+    vsini_dist[:upper_index] = 0
+    vsini_dist[0] = num_upper
+    dist_cum = np.cumsum(vsini_dist)*dv
+    dist_df = dist_cum / dist_cum[-1]
+    
+    # Done modeling. Now do vsinis.
+    vsini_hist, bins = np.histogram(vsinis, bins=vel_bins)
+    num_upper_vsinis = np.sum(vsini_hist[:upper_index])
+    vsini_hist[:upper_index] = 0
+    vsini_hist[0] = num_upper_vsinis
+    hist_cum = np.cumsum(vsini_hist)
+    hist_df = hist_cum / hist_cum[-1]
+
+    fig, (ax1, ax2) = plt.subplots(2, 1, sharex=True)
+    # Plot the pdf
+    ax1.step(vel_bins[:-1], vsini_dist, where="post", lw=4, label="Model vsini", 
+             c="#000000")
+    ax1.step(vel_bins[:-1], vsini_hist, where="post", lw=3, 
+             label="ASPCAP vsini", c="#e41a1c")
+    ax1.step(vel_bins[:-1], vel_hist, where="post", lw=1, label="Vrot", 
+             c="#377eb8")
+    ax1.set_xlim(0, 100)
+    ax1.set_ylabel("N (vsini)")
+    ax1.legend(loc="upper right")
+
+
+    # Plot the cdf
+    ax2.step(vel_bins[:-1], dist_df, where="post", lw=3, label="Model", 
+             c="#000000")
+    ax2.step(vel_bins[:-1], hist_df, where="post", lw=2, label="ASPCAP", 
+             c="#e41a1c")
+    print("The integral error of the distribution is {0:.3f}%.".format(
+        (1-np.sum(vsini_dist)*dv/(len(velocities)))*100))
+    ax2.xaxis.set_minor_locator(AutoMinorLocator())
+    ax2.set_xlabel("V sin(i) (km/s)")
+    ax2.set_ylabel("f (< vsini)")
+
+    # Calculate the significance.
+    # I am using a chi-squared test (Numerical Recipes pg 731) since I have
+    # what should be a distribution compared to a binned dataset.
+    nonzero_indices = np.where(vsini_dist > 0)
+    reduced_dist = vsini_dist[nonzero_indices]
+    reduced_hist = vsini_hist[nonzero_indices]
+    chisq = np.sum((reduced_hist - reduced_dist)**2 / reduced_dist)
+    dof = len(reduced_dist) - 1
+    # Since most of the bins are empty or close to empty, this is a way to
+    # compensate for that (Numerical Recipes pg 734)
+    lucy_Ysq = dof + np.sqrt(
+        2*dof / (2 * dof + np.sum(1/reduced_dist))) * (chisq - dof)
+    prob = gammaincc(0.5*dof, 0.5*lucy_Ysq)
+    print(dof)
+    print("Calculated Chi-squared: {0:f}".format(lucy_Ysq))
+    print("Probability of data is {0:.4f}".format(prob))
     return
 
     v_dist, bins = np.histogram(velocities, range=(0, 100), bins=100)
