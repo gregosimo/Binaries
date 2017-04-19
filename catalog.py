@@ -53,10 +53,10 @@ def read_APOKASC_catalog(
     apocat = Table.read(filepath, format="fits")
     return apocat
 
-def read_EHK_catalog(filepath=str(paths.EHK_PATH)):
+def read_EHK_catalog(filepath=paths.EHK_PATH):
     '''Reads in the UBV catalog fof the Kepler field.'''
     cat = Table.read(
-        filepath, format="ascii.csv", 
+        str(filepath), format="ascii.csv", 
         names=["RA", "Dec", "U", "U_err", "B", "B_err", "V", "V_err"] )
     return cat
 
@@ -360,7 +360,6 @@ def read_dr14_allVisit(allvisitpath=paths.DR14_ALLVISIT_PATH, kepleropt=True):
 
     return allvisit
 
-@au.memoized
 def read_dr14_allStar(allstarpath=paths.DR14_ALLSTAR_PATH, kepleropt=True):
     '''Reads the allStar file for DR14.
     
@@ -423,6 +422,7 @@ def mcquillan_with_stelparms(
     stellcat = read_KIC_DR25_catalog(kic_path)
     mcquillancat = au.join_by_id(
         mcq, stellcat, "KIC", "kepid", join_type="left")
+    mcquillancat.remove_columns(["Teff", "log_g_", "Mass", "_RA", "_DE", "Ref"])
     return mcquillancat
 
             
@@ -430,6 +430,27 @@ def mcquillan_with_stelparms(
 def mcquillan_apokasc_dwarfs(
     mcq_path=paths.MCQUILLAN_CATALOG, apokasc_path=paths):
     pass
+
+@au.memoized
+def mcquillan_dr14_overlap(
+    mcq_path=paths.MCQUILLAN_CATALOG, apopath=paths.DR14_ALLSTAR_PATH):
+    '''Read the overlap sample between McQuillan and APOGEE DR14.'''
+    mcq = read_McQuillan_catalog(filepath=mcq_path)[["tm_designation"]]
+    dr14 = read_dr14_allStar(allstarpath=apopath)
+    mcq_dr14 = join_by_2MASS_key(dr14, mcq, "APOGEE_ID", "tm_designation")
+    return mcq_dr14
+
+@au.memoized
+def mcquillan_photometry(
+    mcq_path=paths.MCQUILLAN_CATALOG, photo_path=paths.EHK_PATH):
+    '''Reads in photometry from the EHK catalog for McQuillan targets.'''
+    mcq = read_McQuillan_catalog(mcq_path)[["KIC", "_RA", "_DE"]]
+    ehk = read_EHK_catalog()
+    mcq_photo = au.join_by_ra_dec(
+        mcq, ehk, "_RA", "_DE", "RA", "Dec", join_type="left")
+
+    return mcq_photo
+
 ###############################################################################
 # Catalog Curation
 ###############################################################################
@@ -2329,7 +2350,7 @@ def select_brightest_targets(
     for grp in tblgrp:
         pass
 
-def select_observing_targets(ntargets=75):
+def select_observing_targets(ntargets=50, tbins=3, pbins=3, vbins=3):
     '''Selects a sample of targets that we will try to observe for our run.
 
     This currently pulls from the McQuillan catalog. Will remove all objects
@@ -2345,22 +2366,17 @@ def select_observing_targets(ntargets=75):
 
     mcq_observing = perform_period_cut(
         perform_teff_cut(
-            perform_logg_cut(mcq, lowlogg=4.25, loggcol="logg"), 
+            perform_logg_cut(mcq, lowlogg=3.5, loggcol="logg"), 
             lowtemp=4850, hightemp=5600, teffcol="teff"),
         lowperiod=1, highperiod=5) 
 
     mcq_observing = filter_pulsators(mcq_observing, KICcol="KIC")
 
-    apogee = read_dr14_allStar()[[
-        "APOGEE_ID", "LOCATION_ID", "NVISITS", "SNR", "STARFLAG", "STARFLAGS",
-        "ANDFLAG", "ANDFLAGS", "VHELIO_AVG", "VSCATTER", "VERR", "VERR_MED",
-        "PARAM", "FPARAM", "PARAM_COV", "FPARAM_COV", "TEFF", "TEFF_ERR",
-        "LOGG", "LOGG_ERR", "VSINI", "M_H", "M_H_ERR", 
-        "ALPHA_M", "ALPHA_M_ERR", "ASPCAPFLAG", "ASPCAPFLAGS", 
-        "FE_H", "FE_H_ERR", "FE_H_FLAG", "VISITS"]]
+    apogee = mcquillan_dr14_overlap()
     mcq_observing = join_by_2MASS_key(
         mcq_observing, apogee, "tm_designation", "APOGEE_ID", join_type="left",
         conflict_suffixes=("_KIC", "_APOGEE"))
+    del(apogee)
     
     # Remove APOGEE giants
     mcq_observing["TEMP_LOGG"] = mcq_observing["FPARAM"][:,1]
@@ -2375,23 +2391,56 @@ def select_observing_targets(ntargets=75):
     mcq_observing["VSCATTER"] = np.ma.masked_values(mcq_observing["VSCATTER"],
                                                  -9999.0)
 
+    # Prioritize objects with APOGEE spectra.
+    prioritytable = mcq_observing[~mcq_observing["APOGEE_ID"].mask]
+    mcq_observing = mcq_observing[mcq_observing["APOGEE_ID"].mask]
+
     # Bin the sample by period to ensure that all periods are represented.
     pbins = np.trunc(mcq_observing["Prot"])
     period_groups = mcq_observing.group_by(pbins)
     # This will hold each teff subgroup for the period.
     bingroups = []
     for grp in period_groups.groups:
-        teffbins = np.trunc(grp["Teff"] / 50)
+        teffbins = np.trunc(grp["Teff"] / 150)
         teffgroups = grp.group_by(teffbins)
         for teffgrp in teffgroups.groups:
             teffgrp.sort("jmag")
-        bingroups.append(teffgroups)
+            bingroups.append(teffgrp)
 
     datarows = au.roundrobin(*bingroups)
-    prioritytable = Table(rows=datarows)
+    for row in au.take(ntargets-len(prioritytable), datarows):
+        prioritytable.add_row(row)
     prioritytable.meta = mcq_observing.meta
 
     return prioritytable
+
+def write_target_list_for_MDM(target_table, filename="MDM_list.txt",
+                              output_path=paths.HEAD_DIR):
+    '''Write a target list containing KIC ID, ra, dec, estimated V-mag.'''
+    output_table = target_table[["kepid", "ra", "dec"]]
+
+    photometry = mcquillan_photometry()
+    phot_table = au.join_by_id(target_table, photometry, "kepid", "KIC",
+                               join_type="left")
+    Vmag = phot_table["V"]
+
+    masked_entries = phot_table[Vmag.mask]
+    DSEP_lookup = {"V": 1, "J": 1, "H": 1, "K": 1}
+    JK_color = masked_entries["jmag"] - masked_entries["kmag"]
+    VH_interp = sed.color_to_color_DSEP_interpolator(
+        "J-K", "V-H", DSEP_lookup, lowT=3000)
+    VH_color = VH_interp(JK_color.filled())
+    Vmag[Vmag.mask] = VH_color + masked_entries["hmag"]
+    
+    output_table["EstV"] = Vmag
+    output_table.write( 
+        str(output_path / filename), format="ascii.csv", comment=False)
+    
+
+    assert(np.all(~phot_table["V"].mask))
+    output_table["EstV"] = phot_table["V"]
+    output_table.write( 
+        str(output_path / filename), format="ascii.csv", comment=False)
 
 def apogee_targets_in_observed_sample(obs, apogee):
     '''Explore the apogee targets that will be observed.
@@ -2432,25 +2481,47 @@ def vsini_convolution_table(velbins, binvalues, mcpoints=10000):
         fullhist[i,:] = hist / mcpoints
     return fullhist
 
-def compare_sini_distribution(velocities, vsinis, vsini_percent=0.1,
-                              vsini_cutoff=5):
-    '''Compare the sin(i) distribution from modeling to calculated sin(i).
+def compare_sini_distribution(velocities, vsinis, vsini_cutoff=5, nbins=20):
+    '''Compare the inferred sin(i) distribution to a random one.
 
-    This will use model how the v distribution should be transformed to a
-    sin(i) distribution, as well as showing the actual vsini distribution
-    transformed to sin(i).
+    Derive a sin(i) distribution from a given velocity and observed vsin(i). In
+    order to decrease the amount of noise, objects with velocities less than
+    vsini_cutoff will be ignored.'''
+
+    detection_indices = np.where(vsinis > vsini_cutoff)
+    sini = vsinis[detection_indices] / velocities[detection_indices]
+    art_sini = generate_sini_distribution(30000)
+
+    bins = np.linspace(0, (1.1+1/nbins), nbins+1, endpoint=False)
+    sini_bins, bins = np.histogram(sini, bins=bins) 
+    sini_bins = sini_bins 
+    art_sini_bins, bins = np.histogram(art_sini, bins=bins) 
+    art_sini_bins = art_sini_bins / len(art_sini) * len(sini)
+
+    plt.step(bins[1:], art_sini_bins, where="pre", lw=2, label="Random")
+    plt.step(bins[1:], sini_bins, where="pre", lw=1, label="Observed")
+    plt.xlim((1.1, 0.0))
+    plt.xlabel("sin(i)")
+    plt.ylabel("N(sini)")
     
-    This function will take a distribution of velocities and then compare it to
-    the distribution of observed vsinis.'''
-    vel_bins = np.linspace(0, 101, 401, endpoint=False)
+
+def compare_vsini_distribution(velocities, vsinis, vsini_percent=0.1,
+                               vsini_cutoff=5, nbins=100):
+    '''Compare the observed vsin(i) distribution to that inferred from vrot.
+
+    This will reconstruct a vsin(i) distribution using the provided velocity
+    distribution. The reconstruction involves convolving with a fractional vsini
+    uncertainty, and then convolving with a population of random
+    inclinations.'''
+    vel_bins = np.linspace(0, 100+100/nbins, nbins+1, endpoint=False)
     vel_hist, bins = np.histogram(velocities, bins=vel_bins)
     dv = vel_bins[2] - vel_bins[1]
     binvalues = (vel_bins[1:] + vel_bins[:-1])/2
 
     dispersions = np.reshape(vsini_percent * velocities, (len(velocities), 1))
     # I'll do one data point now, but more will be on the way.
-    dist = 1/np.sqrt(2*np.pi*dispersions) * np.exp(-(
-        binvalues - velocities[:,np.newaxis])**2 / (2 * dispersions**2))
+    dist = 1/np.sqrt(2*np.pi*dispersions**2) * np.exp(-(
+        binvalues - velocities[:,np.newaxis])**2 / (2 * dispersions**2))*dv
     print("Assuming VSINI uncertainties are 10%. Check this.")
     # Now make a data square that contains sin(i) convolution profiles for all
     # velocity bin values.
@@ -2458,7 +2529,7 @@ def compare_sini_distribution(velocities, vsinis, vsini_percent=0.1,
     fullhist = vsini_convolution_table(vel_bins, binvalues, mcpoints=numpoints)
 
     # Now make a cube for all data points
-    convolutions = dist[:,:,np.newaxis] * fullhist
+    convolutions = dist[:,:,np.newaxis] * (fullhist)
 
     # Now add up all of the entries
     data_dist = np.sum(convolutions, axis=1)
@@ -2468,19 +2539,16 @@ def compare_sini_distribution(velocities, vsinis, vsini_percent=0.1,
 
     # Pick out the upper limits.
     upper_index = np.argmin(binvalues<vsini_cutoff)
-    num_upper = np.sum(vsini_dist[:upper_index])*dv
+    display_index = upper_index // 2
+    num_upper = np.sum(vsini_dist[:upper_index])
     vsini_dist[:upper_index] = 0
-    vsini_dist[0] = num_upper
-    dist_cum = np.cumsum(vsini_dist)*dv
-    dist_df = dist_cum / dist_cum[-1]
+    vsini_dist[display_index] = num_upper
     
     # Done modeling. Now do vsinis.
     vsini_hist, bins = np.histogram(vsinis, bins=vel_bins)
     num_upper_vsinis = np.sum(vsini_hist[:upper_index])
     vsini_hist[:upper_index] = 0
-    vsini_hist[0] = num_upper_vsinis
-    hist_cum = np.cumsum(vsini_hist)
-    hist_df = hist_cum / hist_cum[-1]
+    vsini_hist[display_index] = num_upper_vsinis
 
     fig, (ax1, ax2) = plt.subplots(2, 1, sharex=True)
     # Plot the pdf
@@ -2496,15 +2564,26 @@ def compare_sini_distribution(velocities, vsinis, vsini_percent=0.1,
 
 
     # Plot the cdf
+    # This is just moving around the upper limits for display purposes.
+    vsini_dist[0] = vsini_dist[display_index]
+    vsini_dist[display_index]=0
+    vsini_hist[0] = vsini_hist[display_index]
+    vsini_hist[display_index]=0
+    dist_cum = np.cumsum(vsini_dist)
+    dist_df = dist_cum / dist_cum[-1]
+    hist_cum = np.cumsum(vsini_hist)
+    hist_df = hist_cum / hist_cum[-1]
     ax2.step(vel_bins[:-1], dist_df, where="post", lw=3, label="Model", 
              c="#000000")
     ax2.step(vel_bins[:-1], hist_df, where="post", lw=2, label="ASPCAP", 
              c="#e41a1c")
     print("The integral error of the distribution is {0:.3f}%.".format(
-        (1-np.sum(vsini_dist)*dv/(len(velocities)))*100))
+        (1-np.sum(vsini_dist)/(len(velocities)))*100))
     ax2.xaxis.set_minor_locator(AutoMinorLocator())
     ax2.set_xlabel("V sin(i) (km/s)")
     ax2.set_ylabel("f (< vsini)")
+    ax2.set_ylim(0, 1)
+    print(dv)
 
     # Calculate the significance.
     # I am using a chi-squared test (Numerical Recipes pg 731) since I have
@@ -2519,41 +2598,10 @@ def compare_sini_distribution(velocities, vsinis, vsini_percent=0.1,
     lucy_Ysq = dof + np.sqrt(
         2*dof / (2 * dof + np.sum(1/reduced_dist))) * (chisq - dof)
     prob = gammaincc(0.5*dof, 0.5*lucy_Ysq)
-    print(dof)
-    print("Calculated Chi-squared: {0:f}".format(lucy_Ysq))
+    print("Calculated Chi-squared with {1:d} dof: {0:f}".format(lucy_Ysq, dof))
     print("Probability of data is {0:.4f}".format(prob))
     return
 
-    v_dist, bins = np.histogram(velocities, range=(0, 100), bins=100)
-    binvalues = (bins[1:] + bins[:-1])/2
-    errordist = Gaussian1DKernel(stddev=vsini_err)
-    v_error_dist = convolve(v_dist, errordist)
-
-    MC_TRIALS = 500
-    vel_errors = stats.norm.rvs((len(velocities), MC_TRIALS))
-    # Now calculate the vsini distribution.
-    # This will be a slow way of doing it. But optimization can come later if
-    # needed.
-    v_sini_dist = np.zeros(len(v_error_dist))
-    for j in range(len(v_sini_dist)):
-        for k in range(j, len(v_error_dist)):
-            v_sini_dist[j] = (
-                v_sini_dist[j] + v_error_dist[k]*sini_prob(
-                    binvalues[j], binvalues[k]))
-
-    v_cum_dist = np.cumsum(v_dist)
-    v_cum_err_dist = np.cumsum(v_error_dist)
-
-    plt.subplot(211)
-    plt.step(bins[:-1], v_cum_dist, where="post")
-    plt.ylabel("N (< V)")
-    plt.title("Before error convolution")
-
-    plt.subplot(212)
-    plt.step(bins[:-1], v_cum_err_dist, where="post")
-    plt.ylabel("N (< V)")
-    plt.xlabel("V (km/s)")
-    plt.title("After error convolution")
 
 def select_tidally_synchronized_binaries(
     table, pcut=5, lowtemp=4850, hightemp=5600, lowperiod=1, teffcol="Teff",
