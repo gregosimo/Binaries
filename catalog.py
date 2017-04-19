@@ -2481,6 +2481,27 @@ def vsini_convolution_table(velbins, binvalues, mcpoints=10000):
         fullhist[i,:] = hist / mcpoints
     return fullhist
 
+def vsini_convolution_table_test(velbins, binvalues):
+    '''Create a table allowing velocities to be convolved on a grid.
+
+    Generate a single table that holds the sin(i) convolution of each velocity
+    bin. In particular, the [i,:]th entry of the table contains the
+    vsini distribution of objects with true velocity velbins[i].
+    '''
+    # The problem with this might be that the equation is just scaled
+    # incorrectly.
+    # p(v=vc sini) dv = p(sini = v/vc) vc * d(sini)
+    dv = velbins[1]-velbins[0]
+    veldiffs = binvalues[:,np.newaxis] - velbins[1:]
+    print(veldiffs[1:10, :])
+    veldiffs[np.where(veldiffs < 0)] = 0
+    fullhists = veldiffs / np.sqrt(1 - veldiffs**2) * dv
+
+    for i in range(0, len(binvalues), 10):
+        plt.step(velbins[1:], fullhists[:,i], where="pre")
+    return fullhists
+
+
 def compare_sini_distribution(velocities, vsinis, vsini_cutoff=5, nbins=20):
     '''Compare the inferred sin(i) distribution to a random one.
 
@@ -2492,7 +2513,7 @@ def compare_sini_distribution(velocities, vsinis, vsini_cutoff=5, nbins=20):
     sini = vsinis[detection_indices] / velocities[detection_indices]
     art_sini = generate_sini_distribution(30000)
 
-    bins = np.linspace(0, (1.1+1/nbins), nbins+1, endpoint=False)
+    bins = np.linspace(0, 1.1, nbins+1)
     sini_bins, bins = np.histogram(sini, bins=bins) 
     sini_bins = sini_bins 
     art_sini_bins, bins = np.histogram(art_sini, bins=bins) 
