@@ -60,6 +60,7 @@ def read_EHK_catalog(filepath=paths.EHK_PATH):
         names=["RA", "Dec", "U", "U_err", "B", "B_err", "V", "V_err"] )
     return cat
 
+@au.memoized
 def read_McQuillan_catalog(filepath=paths.MCQUILLAN_CATALOG):
     '''Reads in the McQuillan catalog.
 
@@ -402,6 +403,14 @@ def read_Rafa_rotation(rottable=paths.RAFA_SAVITA_PERIODS):
     giantcut = perform_logg_cut(tempcut, lowlogg=3.5, loggcol="logg")
     return giantcut
 
+def read_flicker_loggs(loggpath=paths.FLICKER_LOGG):
+    '''Read in the catalog of flicker log(g)s based on Bastien et al (2016).
+
+    This will have the KICs, and log(g)s based on the 8-hour flicker boxcar
+    window.'''
+    flicker_loggs = Table.read(loggpath, format="ascii.cds")
+    return flicker_loggs
+
 ###################
 # Joined catalogs #
 ###################
@@ -425,6 +434,16 @@ def mcquillan_with_stelparms(
     mcquillancat.remove_columns(["Teff", "log_g_", "Mass", "_RA", "_DE", "Ref"])
     return mcquillancat
 
+@au.memoized
+def mcquillan_flicker_loggs(
+    mcq_path=paths.MCQUILLAN_CATALOG, flicker_path=paths.FLICKER_LOGG):
+    '''Read Flicker catalog for McQuillan objects.'''
+    mcq = read_McQuillan_catalog(mcq_path)[["KIC"]]
+    flickercat = read_flicker_loggs(flicker_path)
+    mcq_flicker = au.join_by_id(mcq, flickercat, "KIC", "KIC")
+    mcq_flicker.remove_columns(["kepmag", "Teff"])
+    return mcq_flicker
+
             
 @au.memoized
 def mcquillan_apokasc_dwarfs(
@@ -435,9 +454,9 @@ def mcquillan_apokasc_dwarfs(
 def mcquillan_dr14_overlap(
     mcq_path=paths.MCQUILLAN_CATALOG, apopath=paths.DR14_ALLSTAR_PATH):
     '''Read the overlap sample between McQuillan and APOGEE DR14.'''
-    mcq = read_McQuillan_catalog(filepath=mcq_path)[["tm_designation"]]
+    mcq = read_McQuillan_catalog(mcq_path)
     dr14 = read_dr14_allStar(allstarpath=apopath)
-    mcq_dr14 = join_by_2MASS_key(dr14, mcq, "APOGEE_ID", "tm_designation")
+    mcq_dr14 = join_by_2MASS_key(mcq, dr14, "tm_designation", "APOGEE_ID")
     return mcq_dr14
 
 @au.memoized
@@ -2492,13 +2511,13 @@ def vsini_convolution_table_test(velbins, binvalues):
     # incorrectly.
     # p(v=vc sini) dv = p(sini = v/vc) vc * d(sini)
     dv = velbins[1]-velbins[0]
-    veldiffs = binvalues[:,np.newaxis] - velbins[1:]
-    print(veldiffs[1:10, :])
-    veldiffs[np.where(veldiffs < 0)] = 0
+    veldiffs = binvalues / velbins[1:, np.newaxis]
+    veldiffs[np.where(veldiffs > 1)] = 0
+    print(veldiffs)
     fullhists = veldiffs / np.sqrt(1 - veldiffs**2) * dv
 
     for i in range(0, len(binvalues), 10):
-        plt.step(velbins[1:], fullhists[:,i], where="pre")
+        plt.step(velbins[1:], fullhists[i,:], where="pre")
     return fullhists
 
 
@@ -2508,7 +2527,30 @@ def compare_sini_distribution(velocities, vsinis, vsini_cutoff=5, nbins=20):
     Derive a sin(i) distribution from a given velocity and observed vsin(i). In
     order to decrease the amount of noise, objects with velocities less than
     vsini_cutoff will be ignored.'''
+    # This will be the same as before. Except non-detections will be removed.
+    vel_bins = np.linspace(0, 100+100/nbins, nbins+1, endpoint=False)
+    vel_hist, bins = np.histogram(velocities, bins=vel_bins)
+    dv = vel_bins[2] - vel_bins[1]
+    binvalues = (vel_bins[1:] + vel_bins[:-1])/2
 
+    dispersions = np.reshape(vsini_percent * velocities, (len(velocities), 1))
+    # I'll do one data point now, but more will be on the way.
+    dist = 1/np.sqrt(2*np.pi*dispersions**2) * np.exp(-(
+        binvalues - velocities[:,np.newaxis])**2 / (2 * dispersions**2))*dv
+    print("Assuming VSINI uncertainties are 10%. Check this.")
+    # Now make a data square that contains sin(i) convolution profiles for all
+    # velocity bin values.
+    numpoints = 30000
+    fullhist = vsini_convolution_table(vel_bins, binvalues, mcpoints=numpoints)
+
+    # Now make a cube for all data points
+    convolutions = dist[:,:,np.newaxis] * (fullhist)
+
+    # Now get the sini distributions for each object.
+    sini_dists = convolutions / velocities[:,np.newaxis,np.newaxis]
+    plt.step(sini_dists[0]
+
+    return
     detection_indices = np.where(vsinis > vsini_cutoff)
     sini = vsinis[detection_indices] / velocities[detection_indices]
     art_sini = generate_sini_distribution(30000)
@@ -2621,7 +2663,6 @@ def compare_vsini_distribution(velocities, vsinis, vsini_percent=0.1,
     prob = gammaincc(0.5*dof, 0.5*lucy_Ysq)
     print("Calculated Chi-squared with {1:d} dof: {0:f}".format(lucy_Ysq, dof))
     print("Probability of data is {0:.4f}".format(prob))
-    return
 
 
 def select_tidally_synchronized_binaries(
@@ -2643,7 +2684,16 @@ def select_tidally_synchronized_binaries(
 
     return temp_cut
 
+def compare_inferred_flicker_loggs(
+    flicker_logg, kic_logg, dsep_logg, teff):
+    '''Compare the flicker, Huber, and DSEP-inferred loggs.
 
+    A plot will compare the three different values of logg. They will be
+    plotted with respect to Teff. The flicker logg will be plotted with a blue
+    diamond, kic loggs with a black diamond, and dsep loggs with a red diamond.
+    '''
+    for i in range(len(flicker_logg)):
+        plt.plot
 def progress_plot():
     '''Plots the various subclasses of objects so that they can be easily
     figured out.
