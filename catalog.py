@@ -454,9 +454,9 @@ def mcquillan_apokasc_dwarfs(
 def mcquillan_dr14_overlap(
     mcq_path=paths.MCQUILLAN_CATALOG, apopath=paths.DR14_ALLSTAR_PATH):
     '''Read the overlap sample between McQuillan and APOGEE DR14.'''
-    mcq = read_McQuillan_catalog(mcq_path)
+    mcq_col = mcquillan_with_stelparms(mcq_path)[["tm_designation"]]
     dr14 = read_dr14_allStar(allstarpath=apopath)
-    mcq_dr14 = join_by_2MASS_key(mcq, dr14, "tm_designation", "APOGEE_ID")
+    mcq_dr14 = join_by_2MASS_key(mcq_col, dr14, "tm_designation", "APOGEE_ID")
     return mcq_dr14
 
 @au.memoized
@@ -2405,7 +2405,7 @@ def select_brightest_targets(
     for grp in tblgrp:
         pass
 
-def select_observing_targets(ntargets=50, tbins=3, pbins=3, vbins=3):
+def select_observing_targets(ntargets=50, tbins=3, pbins=3, Vcut=14):
     '''Selects a sample of targets that we will try to observe for our run.
 
     This currently pulls from the McQuillan catalog. Will remove all objects
@@ -2429,8 +2429,8 @@ def select_observing_targets(ntargets=50, tbins=3, pbins=3, vbins=3):
 
     apogee = mcquillan_dr14_overlap()
     mcq_observing = join_by_2MASS_key(
-        mcq_observing, apogee, "tm_designation", "APOGEE_ID", join_type="left",
-        conflict_suffixes=("_KIC", "_APOGEE"))
+        mcq_observing, apogee, "tm_designation", "tm_designation", 
+        join_type="left", conflict_suffixes=("_KIC", "_APOGEE"))
     del(apogee)
     
     # Remove APOGEE giants
@@ -2445,6 +2445,19 @@ def select_observing_targets(ntargets=50, tbins=3, pbins=3, vbins=3):
         mcq_observing, highv=1, vcol="VSCATTER")
     mcq_observing["VSCATTER"] = np.ma.masked_values(mcq_observing["VSCATTER"],
                                                  -9999.0)
+
+    # Perform a magnitude cut.
+    mcq_phot = mcquillan_photometry()
+    mcq_observing = au.join_by_id(mcq_observing, mcq_phot, "kepid", "KIC")
+    del(mcq_phot)
+    missing_Vs = mcq_observing["V"].mask
+    JK_interp = sed.color_to_color_DSEP_interpolator(
+        "J-Ks", "V-H", {"V": 1, "J": 1, "H": 1, "Ks": 1}, age=2, init_mass=0.9)
+    missing_JKs = (mcq_observing['jmag'][missing_Vs] -
+                   mcq_observing["kmag"][missing_Vs]).filled()
+    mcq_observing["V"][missing_Vs] = (
+        JK_interp(missing_JKs) + mcq_observing["hmag"][missing_Vs])
+    mcq_observing = perform_cut(mcq_observing, "V", highval=14)
 
     # Prioritize objects with APOGEE spectra.
     prioritytable = mcq_observing[~mcq_observing["APOGEE_ID"].mask]
