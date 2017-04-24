@@ -787,8 +787,9 @@ def color_mag_extinction(
 # DSEP Interpolation Routines #
 ###############################
 
-def DSEP_interpolation(fromcol, tocol, age=1.5, metallicity=0.0, bands=1, Y=1,
-                       afe=2, lowT=3000):
+def DSEP_interpolation(
+    fromcol, tocol, age=1.5, metallicity=0.0, bands=1, Y=1, afe=2, lowT=3000, 
+    highT=6000, bound_error=True, minlogg=4.1):
     '''Return an interpolator between two DSEP isochrone quantities.
 
     This will return a function which, given a value of fromcol which is
@@ -798,10 +799,10 @@ def DSEP_interpolation(fromcol, tocol, age=1.5, metallicity=0.0, bands=1, Y=1,
     isochrone = read_DSEP_isochrone(metallicity, age, bands=bands, Y=Y, afe=afe)
 
     interp_isochrone = restrict_interpolation_table(
-        isochrone, highT=6000, lowT=lowT, minlogG=4.1)
+        isochrone, highT=highT, lowT=lowT, minlogG=minlogg)
 
     interpolator = interp1d(interp_isochrone[fromcol], interp_isochrone[tocol], 
-                            kind="linear")
+                            kind="linear", bounds_error=bound_error)
 
     wrapped_interpolator = out_of_bounds_wrapper(
         interpolator, fromcol, interp_isochrone[fromcol][0],
@@ -1717,6 +1718,22 @@ def teff_to_radius_DSEP_interpolator(
 
     return teff_to_radius
 
+def teff_to_logg_dwarf_DSEP_interpolator(
+    age=1.5, metallicity=0.0, bands=1, Y=1, afe=2, lowT=3000, highT=6000,
+    bound_error=True, minlogg=4.1):
+    '''Create an interpolator from effective temperature to log(g).
+
+    This maps Teff to logg for stars on the dwarf sequence. The dwarf sequence
+    is defined as the sequence with log(g) > minlogg. As a result, the log(g)
+    values aren't quite free. They also may be strange at high temperatures.
+
+    Note that this interpolator takes in logTeff.
+    '''
+    interpolator = DSEP_interpolation(
+        "LogTeff", "LogG", age, metallicity, bands=bands, Y=Y, afe=afe,
+        lowT=lowT, highT=highT, bound_error=True, minlogg=minlogg)
+
+    return interpolator
 # Directly calculate fluxes and colors from mass #
 
 def calculate_single_star_magnitude_DSEP(

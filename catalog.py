@@ -1901,6 +1901,42 @@ def compare_DSEP_radii_to_KIC_radii(
     plt.xlabel("APOGEE Teff (K)")
     plt.ylabel("Fractional KIC - DSEP radius")
 
+def DSEP_logg(teffs, metallicities, alphas, age=2.0, lowTeff=3000,
+              highTeff=7000):
+    '''Calculate logg predicted from DSEP.
+
+    Using an isochrone of a given age, calculate the log(g) of a star given an
+    effective temperature, metallicity, and alpha abundance.'''
+    # This may be complicated, so I wanna take it slow.
+    masked_teffs = np.ma.masked_equal(teffs, APOGEE_NULL)
+    masked_metallicities = np.ma.masked_equal(metallicities, APOGEE_NULL)
+    masked_alphas = np.ma.masked_equal(alphas, APOGEE_NULL)
+    logg_mask = au.multi_logical_or(
+        masked_teffs.mask, masked_metallicities.mask, masked_alphas.mask)
+    model_logg = np.ma.zeros(len(masked_teffs))
+    model_logg.mask = logg_mask
+
+    # These are the alpha/Fe bins that will be fed into DSEP.
+    alpha_binedges = np.arange(-0.1, 0.9, 0.2)
+    # a/Fe < -0.1 corresponds to 1, and a/Fe > 0.7 corresponds to 6.
+    alpha_bins = np.digitize(masked_alphas, alpha_binedges)+1
+    # DSEP should crash or something if the metallicity and alpha enhancement
+    # are not compatible. In particular, high alpha enhancements are only
+    # available for low metallicity stars. I want to ensure that this will be
+    # the case before running into weird DSEP bugs.
+    assert(np.all(np.logical_or(alpha_bins < 4, np.logical_and(
+        alpha_bins >= 4, masked_metallicities <= 0.0))))
+
+    rounded_metallicities = np.around(masked_metallicities, 2)
+    for i in range(len(model_logg)):
+        if not model_logg.mask[i]:
+            interp = sed.teff_to_logg_dwarf_DSEP_interpolator(
+                age=age, metallicity=rounded_metallicities[i], afe=alpha_bins[i],
+                lowT=lowTeff, highT=highTeff)
+            model_logg[i] = interp(np.log10(masked_teffs[i]))
+
+    return model_logg
+
 def HR_standout_plot(
     fullsample, rv_nonvar, rv_var, Teff_colname="TEFF_FIT",
     logg_colname="LOGG_FIT"):
@@ -2548,7 +2584,7 @@ def compare_sini_distribution(velocities, vsinis, vsini_cutoff=5, nbins=20):
 
     # Now get the sini distributions for each object.
     sini_dists = convolutions / velocities[:,np.newaxis,np.newaxis]
-    plt.step(sini_dists[0]
+    plt.step(sini_dists[0])
 
     return
     detection_indices = np.where(vsinis > vsini_cutoff)
@@ -2685,15 +2721,36 @@ def select_tidally_synchronized_binaries(
     return temp_cut
 
 def compare_inferred_flicker_loggs(
-    flicker_logg, kic_logg, dsep_logg, teff):
+    flicker_logg, kic_logg, dsep_logg, apogee_logg, xvalue):
     '''Compare the flicker, Huber, and DSEP-inferred loggs.
 
     A plot will compare the three different values of logg. They will be
-    plotted with respect to Teff. The flicker logg will be plotted with a blue
-    diamond, kic loggs with a black diamond, and dsep loggs with a red diamond.
+    plotted with respect to the given xvalue. The flicker logg will be plotted 
+    with a blue diamond, kic loggs with a black diamond, and dsep loggs with a 
+    red diamond.
     '''
-    for i in range(len(flicker_logg)):
-        plt.plot
+    apogee_giants = np.where(np.logical_and(
+        apogee_logg > 0, apogee_logg < 3.5))
+    plt.plot(xvalue, flicker_logg, 'bo', ms=6, label="Flicker")
+    plt.plot(xvalue, kic_logg, 'rd', label="Huber", ms=6)
+    plt.plot(xvalue, dsep_logg, 'kx', label="DSEP", ms=4)
+    plt.plot(xvalue[apogee_giants], flicker_logg[apogee_giants], 'sm',
+             label="APOGEE GIANT", ms=6)
+    for i in range(len(xvalue)):
+        fkdiff = abs(flicker_logg[i] - kic_logg[i])
+        kddiff = abs(kic_logg[i] - dsep_logg[i])
+        fddiff = abs(flicker_logg[i] - dsep_logg[i])
+        maxdiff = max([fkdiff, kddiff, fddiff])
+        print(maxdiff)
+        if fkdiff < 1:
+            lc='k'
+        else:
+            lc='r'
+        plt.plot([xvalue[i]]*2, [flicker_logg[i], kic_logg[i]], ls=':', c=lc)
+        plt.plot([xvalue[i]]*2, [kic_logg[i], dsep_logg[i]], ls=':', c=lc)
+    plt.ylabel("Log(g)")
+    hr.invert_y_axis()
+
 def progress_plot():
     '''Plots the various subclasses of objects so that they can be easily
     figured out.
