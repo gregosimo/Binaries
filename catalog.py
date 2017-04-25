@@ -2583,7 +2583,7 @@ def vsini_convolution_table_test(velbins, velocities):
     data_indices = np.arange(len(velocities))
     profiles[data_indices, edge_indices] = np.sqrt(
         1-scaled_vels[data_indices, edge_indices]**2)
-    assert(np.all(np.sum(profiles, axis=1) == 1))
+    np.testing.assert_almost_equal(np.sum(profiles, axis=1), 1)
     return profiles
 
 def compare_sini_distribution(velocities, vsinis, vsini_cutoff=5, nbins=20):
@@ -2654,7 +2654,7 @@ def compare_vsini_distribution(velocities, vsinis, vsini_percent=0.1,
     # Now make a data square that contains sin(i) convolution profiles for all
     # velocity bin values.
     numpoints = 30000
-    fullhist = vsini_convolution_table(vel_bins, binvalues, mcpoints=numpoints)
+    fullhist = vsini_convolution_table_test(vel_bins, binvalues)
 
     # Now make a cube for all data points
     convolutions = dist[:,:,np.newaxis] * (fullhist)
@@ -3249,6 +3249,11 @@ def bad_ASPCAP_indices(aspcapflags, warn=False):
             aspcapflags, "STAR_WARN") > 0)
 
     return bad_indices
+
+def good_aspcap_fits(apotable, aspcapcol="ASPCAPFLAG"):
+    '''Only return the entries with good ASPCAP fits.'''
+    return apogee_filter_quality(
+        apotable, quality=("bad", "warn"), aspcapcol=aspcapcol)
 
 def apogee_filter_quality(apotable, quality=("good", "bad", "warn"), 
                           aspcapcol="ASPCAPFLAG"):
