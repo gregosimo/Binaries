@@ -4,6 +4,7 @@ import os
 import re
 import itertools
 import io
+import random
 
 import numpy as np
 import numpy.core.defchararray as npstr
@@ -2439,12 +2440,18 @@ def select_observing_targets(ntargets=50, tbins=3, pbins=3, Vcut=14):
         mcq_observing, lowlogg=3.5, loggcol="TEMP_LOGG")
     del(mcq_observing["TEMP_LOGG"])
 
-    # Remove objects which have already been observed.
+    # Remove objects which are already observed to be RV variable
     mcq_observing["VSCATTER"] = mcq_observing["VSCATTER"].filled(-9999.0)
     mcq_observing = perform_vscatter_cut(
         mcq_observing, highv=1, vcol="VSCATTER")
     mcq_observing["VSCATTER"] = np.ma.masked_values(mcq_observing["VSCATTER"],
                                                  -9999.0)
+    
+    # Remove objects which have been observed enough to indicate non
+    # RV-variability.
+    mcq_observing["NVISITS"] = mcq_observing["NVISITS"].filled(0)
+    mcq_observing= perform_cut(mcq_observing, "NVISITS", highval=4)
+    mcq_observing["NVISITS"] = np.ma.masked_values(mcq_observing["NVISITS"], 0)
 
     # Perform a magnitude cut.
     mcq_phot = mcquillan_photometry()
@@ -2463,19 +2470,23 @@ def select_observing_targets(ntargets=50, tbins=3, pbins=3, Vcut=14):
     prioritytable = mcq_observing[~mcq_observing["APOGEE_ID"].mask]
     mcq_observing = mcq_observing[mcq_observing["APOGEE_ID"].mask]
 
+    
+    # Ensure reproducibility.
+    random.seed(a="20170529")
     # Bin the sample by period to ensure that all periods are represented.
     pbins = np.trunc(mcq_observing["Prot"])
     period_groups = mcq_observing.group_by(pbins)
     # This will hold each teff subgroup for the period.
     bingroups = []
     for grp in period_groups.groups:
-        teffbins = np.trunc(grp["Teff"] / 150)
+        teffbins = np.trunc(grp["teff"] / 150)
         teffgroups = grp.group_by(teffbins)
         for teffgrp in teffgroups.groups:
-            teffgrp.sort("jmag")
-            bingroups.append(teffgrp)
+            randommag = au.random_permutation(teffgrp)
+            bingroups.append(randommag)
 
-    datarows = au.roundrobin(*bingroups)
+    randgroups = au.random_permutation(bingroups)
+    datarows = au.roundrobin(*randgroups)
     for row in au.take(ntargets-len(prioritytable), datarows):
         prioritytable.add_row(row)
     prioritytable.meta = mcq_observing.meta
