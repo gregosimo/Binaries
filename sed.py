@@ -1371,6 +1371,7 @@ def color_to_color_DSEP_interpolator(
             interpolator, fromcolor, fromcolor_val[0], fromcolor_val[-1])
 
     elif frompacket in multi_valued_colors:
+        print("Warning! Color interpolation is multivalued!")
         mass_to_color = mass_to_color_DSEP_interpolator(
             tocolor, DSEP_lookup, age=age, metallicity=metallicity, Y=Y,
             afe=afe)
@@ -1385,7 +1386,8 @@ def color_to_color_DSEP_interpolator(
                 metallicity=metallicity, Y=Y, afe=afe, bound_error=bound_error,
                 lowT=lowT)
         # This is a bitch to debug
-        wrapped_interpolator = (lambda x: mass_to_color(color_to_mass(x)))
+        def wrapped_interpolator(x):
+            return mass_to_color(color_to_mass(x))
         # Add these so that the endpoints of the interpolator can be known.
         wrapped_interpolator.x = color_to_mass.x
         wrapped_interpolator.y = mass_to_color(color_to_mass.y)

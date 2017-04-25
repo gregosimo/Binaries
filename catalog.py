@@ -2583,7 +2583,7 @@ def vsini_convolution_table_test(velbins, velocities):
     data_indices = np.arange(len(velocities))
     profiles[data_indices, edge_indices] = np.sqrt(
         1-scaled_vels[data_indices, edge_indices]**2)
-    np.testing.assert_almost_equal(np.sum(profiles, axis=1), 1)
+    np.testing.assert_allclose(np.sum(profiles, axis=1), 1.0)
     return profiles
 
 def compare_sini_distribution(velocities, vsinis, vsini_cutoff=5, nbins=20):
