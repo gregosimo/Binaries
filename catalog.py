@@ -2560,26 +2560,31 @@ def vsini_convolution_table(velbins, binvalues, mcpoints=10000):
         fullhist[i,:] = hist / mcpoints
     return fullhist
 
-def vsini_convolution_table_test(velbins, binvalues):
+def vsini_convolution_table_test(velbins, velocities):
     '''Create a table allowing velocities to be convolved on a grid.
 
     Generate a single table that holds the sin(i) convolution of each velocity
     bin. In particular, the [i,:]th entry of the table contains the
     vsini distribution of objects with true velocity velbins[i].
     '''
-    # The problem with this might be that the equation is just scaled
-    # incorrectly.
-    # p(v=vc sini) dv = p(sini = v/vc) vc * d(sini)
-    dv = velbins[1]-velbins[0]
-    veldiffs = binvalues / velbins[1:, np.newaxis]
-    veldiffs[np.where(veldiffs > 1)] = 0
-    print(veldiffs)
-    fullhists = veldiffs / np.sqrt(1 - veldiffs**2) * dv
-
-    for i in range(0, len(binvalues), 10):
-        plt.step(velbins[1:], fullhists[i,:], where="pre")
-    return fullhists
-
+    # Since the pdf is actually analytically integrable, we'll make the
+    # histogram by simply integrating in each bin.
+    # Transform velocity bins to sin(i) bins. 
+    scaled_vels = velbins / velocities[:,np.newaxis]
+    # This is the table of histograms. profiles[i,:] will be the histogram of
+    # the ith profile. The sum along the 2nd axis should be 1. However, the
+    # boundaries will be incorrect without further corrections.
+    # The area of each histogram will be sqrt(1-sin^2 i_1) - sqrt(1-sin^2 i_2)
+    profiles = np.nan_to_num(
+        np.sqrt(1-scaled_vels[:,:-1]**2) - np.sqrt(1-scaled_vels[:,1:]**2))
+    # Determine the values in the bins where v/vc > 1
+    edge_indices = np.argmin(scaled_vels < 1, axis=1)-1
+    # I need data indices to take advantage of the advanced indexing.
+    data_indices = np.arange(len(velocities))
+    profiles[data_indices, edge_indices] = np.sqrt(
+        1-scaled_vels[data_indices, edge_indices]**2)
+    assert(np.all(np.sum(profiles, axis=1) == 1))
+    return profiles
 
 def compare_sini_distribution(velocities, vsinis, vsini_cutoff=5, nbins=20):
     '''Compare the inferred sin(i) distribution to a random one.
