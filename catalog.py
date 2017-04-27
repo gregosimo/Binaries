@@ -2397,6 +2397,32 @@ def compare_vsini_distribution(velocities, vsinis, vsini_percent=0.1,
     print("Calculated Chi-squared with {1:d} dof: {0:f}".format(lucy_Ysq, dof))
     print("Probability of data is {0:.4f}".format(prob))
 
+def Bruntt_vsini_comparison():
+    '''Plot the vsini values between APOGEE and Bruntt et al (2013).
+
+    This is a good way to determine the uncertainty in vsini, as well as the
+    cutoff vsini which is really an upper limit.'''
+    brunttcat = catin.bruntt_dr14_overlap()
+    aspcap_vsini = brunttcat["VSINI"]
+    bad_vsini = np.where(aspcap_vsini < 0)
+    good_vsini = np.where(aspcap_vsini > 0)
+    aspcap_vsini[bad_vsini] = 0.0
+    bruntt_vsini = brunttcat["vsini"]
+
+    vsini_fracdiff = (bruntt_vsini - aspcap_vsini) / bruntt_vsini
+
+#   plt.plot(bruntt_vsini[good_vsini], vsini_fracdiff[good_vsini], 'ko')
+    plt.plot(bruntt_vsini[good_vsini], vsini_fracdiff[good_vsini], 'ko')
+    plt.plot([7, 7], plt.ylim(), 'r-')
+
+    detections = aspcap_vsini > 7
+    print("Number of non-detections: {0:d}/{1:d}.".format(
+        len(detections) - np.count_nonzero(detections), len(detections)))
+    print("Vsini uncertainty is {0:.1f}%.".format(
+        np.std(vsini_fracdiff[detections])*100))
+
+    plt.xlabel("Bruntt vsini (km/s)")
+    plt.ylabel("(Vsini (Bruntt) - Vsini (ASPCAP)) / Vsini(Bruntt)")
 
 def select_tidally_synchronized_binaries(
     table, pcut=5, lowtemp=4850, hightemp=5600, lowperiod=1, teffcol="Teff",

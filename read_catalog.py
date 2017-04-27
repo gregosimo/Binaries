@@ -270,7 +270,7 @@ def read_flicker_loggs(loggpath=paths.FLICKER_LOGG):
 # individual catalogs put together. Caching these instead of the full catalogs 
 # will hopefully lead to more efficient memory use.
 
-@au.memoized
+@au.shortcut_file(paths.SHORTCUT_MCQUILLAN_STELLPARM)
 def mcquillan_with_stelparms(
     mcq_path=paths.MCQUILLAN_CATALOG, kic_path=paths.KIC_CATALOG):
     '''Read McQuillan catalog with full KIC stellar parameters.
@@ -285,7 +285,7 @@ def mcquillan_with_stelparms(
     mcquillancat.remove_columns(["Teff", "log_g_", "Mass", "_RA", "_DE", "Ref"])
     return mcquillancat
 
-@au.memoized
+@au.shortcut_file(paths.SHORTCUT_MCQUILLAN_FLICKER)
 def mcquillan_flicker_loggs(
     mcq_path=paths.MCQUILLAN_CATALOG, flicker_path=paths.FLICKER_LOGG):
     '''Read Flicker catalog for McQuillan objects.'''
@@ -295,9 +295,9 @@ def mcquillan_flicker_loggs(
     mcq_flicker.remove_columns(["kepmag", "Teff"])
     return mcq_flicker
 
+@au.shortcut_file(paths.SHORTCUT_MCQUILLAN_APOKASC)
 def create_joined_APOKASC_McQuillan_catalog(
-        apocat=None, mcquillancat=None, apofile=paths.APOKASC_PATH,
-    mcquillanfile=paths.MCQUILLAN_CATALOG):
+        apofile=paths.APOKASC_PATH, mcquillanfile=paths.MCQUILLAN_CATALOG):
     '''Creates a joint APOKASC/McQuillan catalog.
 
     All Kepler objects which are measured in both the McQuillan sample as well
@@ -313,13 +313,8 @@ def create_joined_APOKASC_McQuillan_catalog(
 
     combocat = au.join_by_id(apocat, mcquillancat, "KEPLER_INT", "KIC")
     return combocat
-# Combine these two.            
-@au.memoized
-def mcquillan_apokasc_dwarfs(
-    mcq_path=paths.MCQUILLAN_CATALOG, apokasc_path=paths):
-    pass
 
-@au.memoized
+@au.shortcut_file(paths.SHORTCUT_MCQUILLAN_DR14)
 def mcquillan_dr14_overlap(
     mcq_path=paths.MCQUILLAN_CATALOG, apopath=paths.DR14_ALLSTAR_PATH):
     '''Read the overlap sample between McQuillan and APOGEE DR14.'''
@@ -328,7 +323,7 @@ def mcquillan_dr14_overlap(
     mcq_dr14 = catalog.join_by_2MASS_key(mcq_col, dr14, "tm_designation", "APOGEE_ID")
     return mcq_dr14
 
-@au.memoized
+@au.shortcut_file(paths.SHORTCUT_MCQUILLAN_EHK)
 def mcquillan_photometry(
     mcq_path=paths.MCQUILLAN_CATALOG, photo_path=paths.EHK_PATH):
     '''Reads in photometry from the EHK catalog for McQuillan targets.'''
@@ -338,6 +333,25 @@ def mcquillan_photometry(
         mcq, ehk, "_RA", "_DE", "RA", "Dec", join_type="left")
 
     return mcq_photo
+
+@au.shortcut_file(paths.SHORTCUT_BRUNTT_DR14)
+def bruntt_dr14_overlap(
+    brunttpath=paths.BRUNTT_PATH, apopath=paths.DR14_ALLSTAR_PATH):
+    '''Read in the Bruntt et al (2013) targets that are in APOGEE.
+
+    This will also filter out the objects which don't have good ASPCAP fits.
+    '''
+    bruntt = read_Bruntt_catalog(brunttpath)
+    kiccat = read_KIC_DR25_catalog()
+    brunttkic = au.join_by_id(bruntt, kiccat, "KIC", "kepid", join_type="left",
+                              conflict_suffixes=("_Bruntt", "_Huber"))
+    apo = read_dr14_allStar(apopath, kepleropt=True)
+    fullcat = catalog.join_by_2MASS_key(
+        brunttkic, apo, "tm_designation", "APOGEE_ID", 
+        conflict_suffixes=("_Bruntt", "_APOGEE"))
+
+    goodcat = catalog.good_aspcap_fits(fullcat)
+    return goodcat
 
 def read_villanova_EBs(EBpath=paths.EB_PATH):
     '''Reads in the Villanova Keler EB catalog.'''
@@ -384,3 +398,13 @@ def read_KepVIM_catalog(
     their variability.'''
     kepvim = Table.read(KepVIMpath, format="fits")
     return kepvim
+
+def read_Bruntt_catalog(brunttpath=paths.BRUNTT_PATH):
+    '''Read in the stellar parameter table from Bruntt et al. (2013).
+
+    This table contains the results from analyzing 93 Kepler targets, and
+    comparing the stellar parameters determined through the KIC, spectroscopy,
+    and asteroseismology.'''
+    bruntt = Table.read(brunttpath, format="votable")
+    return bruntt
+

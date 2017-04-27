@@ -53,6 +53,7 @@ KOI_PATH = HEAD_DIR / "koi.csv"
 TGAS_MCQUILLAN_APOGEE_TIDSYNC_PATH = (
     HEAD_DIR / "TGAS_McQuillan_APOGEE_tidsync.fits")
 FLICKER_LOGG = HEAD_DIR / "flicker_loggs.txt"
+BRUNTT_PATH = HEAD_DIR / "Bruntt_vsini.vot"
 
 THESIS_PATH = HEAD_DIR / "Thesis"
 PROPOSAL_PATH = THESIS_PATH / "Proposals"
@@ -60,3 +61,15 @@ APOGEE_ANCILLARY_TARGETS_TABLE = PROPOSAL_PATH / "ancillary_targets.txt"
 
 DR14_ALLVISIT_PATH = HEAD_DIR / "allVisit-l31c.1.fits"
 DR14_ALLSTAR_PATH = HEAD_DIR / "allStar-l31c.1.fits"
+
+# SHORTCUT PATHS
+# These are for subsets of table that take a really long time to generate.
+# Since disk space is cheap, I think it will be much more valuable to just
+# shove these tables in a file and then read them when needed.
+SHORTCUTS = HEAD_DIR / "srtct"
+SHORTCUT_MCQUILLAN_STELLPARM = SHORTCUTS / "mcq_stelparms.fits"
+SHORTCUT_MCQUILLAN_FLICKER = SHORTCUTS / "mcq_flicker.fits"
+SHORTCUT_MCQUILLAN_APOKASC = SHORTCUTS / "mcq_apokasc.fits"
+SHORTCUT_MCQUILLAN_DR14 = SHORTCUTS / "mcq_dr14.fits"
+SHORTCUT_MCQUILLAN_EHK = SHORTCUTS / "mcq_ehk.fits"
+SHORTCUT_BRUNTT_DR14 = SHORTCUTS / "bruntt_dr14.fits"
