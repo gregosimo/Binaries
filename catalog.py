@@ -1470,30 +1470,33 @@ def period_to_velocities(period, radii):
 
     return velocity
 
-def plot_velocity_vsini(period, radius, vsini, xvalue):
+def plot_velocity_vsini(max_vel, vsini, xvalue, vsini_lim=7):
     '''Plot the expected velocities and the measured vsini.
 
     Plot the velocity expected from the radius and period of objects, along
     with the measured vsini.'''
-    valid_vsini_indices = vsini >= 0
-    num_invalid = len(vsini) - np.count_nonzero(valid_vsini_indices)
-    valid_period = period[np.where(valid_vsini_indices)]
-    valid_radius = radius[np.where(valid_vsini_indices)]
+    sub_vsini = vsini.copy()
+    sub_vsini[vsini < 0] = 0
+    vsini = sub_vsini
+    valid_vsini_indices = np.logical_or(
+        vsini >= vsini_lim, max_vel >= vsini_lim)
+    valid_vel = max_vel[np.where(valid_vsini_indices)]
     valid_vsini = vsini[np.where(valid_vsini_indices)]
     valid_xvalue = xvalue[np.where(valid_vsini_indices)]
+    num_invalid = len(vsini) - np.count_nonzero(valid_vsini_indices)
     print("Invalid vsinis: {0:d}".format(num_invalid))
 
-    max_vel = period_to_velocities(valid_period, valid_radius)
-    obs_vel = valid_vsini
-
-    plt.plot(valid_xvalue, max_vel, 'bo', ms=6, label="Predicted V")
-    plt.plot(valid_xvalue, obs_vel, 'rd', label="V sin(i)", ms=4)
+    plt.plot(valid_xvalue, valid_vel, 'bo', ms=6, label="Predicted V")
+    plt.plot(valid_xvalue, valid_vsini, 'rd', label="V sin(i)", ms=4)
     for i in range(len(valid_xvalue)):
-        if max_vel[i] >= obs_vel[i]:
+        if valid_vel[i] >= valid_vsini[i]:
             lc='k'
         else:
             lc='r'
-        plt.plot([valid_xvalue[i]]*2, [obs_vel[i], max_vel[i]], ls='-', c=lc)
+        plt.plot([valid_xvalue[i]]*2, [valid_vel[i], valid_vsini[i]], ls='-', 
+                 c=lc)
+    plt.plot(plt.xlim(), [vsini_lim, vsini_lim], 'r--', 
+             label="Detection Threshold")
     plt.ylabel("Rotational Velocity (km/s)")
 
 
@@ -2318,10 +2321,8 @@ def compare_vsini_distribution(velocities, vsinis, vsini_percent=0.1,
     # I'll do one data point now, but more will be on the way.
     dist = 1/np.sqrt(2*np.pi*dispersions**2) * np.exp(-(
         binvalues - velocities[:,np.newaxis])**2 / (2 * dispersions**2))*dv
-    print("Assuming VSINI uncertainties are 10%. Check this.")
     # Now make a data square that contains sin(i) convolution profiles for all
     # velocity bin values.
-    numpoints = 30000
     fullhist = vsini_convolution_table_test(vel_bins, binvalues)
 
     # Now make a cube for all data points
@@ -2335,36 +2336,41 @@ def compare_vsini_distribution(velocities, vsinis, vsini_percent=0.1,
 
     # Pick out the upper limits.
     upper_index = np.argmin(binvalues<vsini_cutoff)
-    display_index = upper_index // 2
     num_upper = np.sum(vsini_dist[:upper_index])
     vsini_dist[:upper_index] = 0
-    vsini_dist[display_index] = num_upper
+    # I want to display the raw numbers in text.
     
     # Done modeling. Now do vsinis.
     vsini_hist, bins = np.histogram(vsinis, bins=vel_bins)
     num_upper_vsinis = np.sum(vsini_hist[:upper_index])
     vsini_hist[:upper_index] = 0
-    vsini_hist[display_index] = num_upper_vsinis
 
     fig, (ax1, ax2) = plt.subplots(2, 1, sharex=True)
     # Plot the pdf
-    ax1.step(vel_bins[:-1], vsini_dist, where="post", lw=4, label="Model vsini", 
-             c="#000000")
+    modelcolor = "#000000"
+    rotcolor = "#377eb8"
+    aspcapcolor = "#e41a1c"
     ax1.step(vel_bins[:-1], vsini_hist, where="post", lw=3, 
-             label="ASPCAP vsini", c="#e41a1c")
+             label="ASPCAP vsini", c=aspcapcolor)
+    ax1.step(vel_bins[:-1], vsini_dist, where="post", lw=4, label="Model vsini", 
+             c=modelcolor)
     ax1.step(vel_bins[:-1], vel_hist, where="post", lw=1, label="Vrot", 
-             c="#377eb8")
+             c=rotcolor)
     ax1.set_xlim(0, 100)
     ax1.set_ylabel("N (vsini)")
     ax1.legend(loc="upper right")
+    ax1.text(0.3, 0.8, "{0:d} Total".format(len(velocities)),
+             transform=ax1.transAxes, color=modelcolor)
+    ax1.text(0.3, 0.7, "{0:d} Nondetections".format(int(num_upper_vsinis)),
+             transform=ax1.transAxes, color=aspcapcolor)
+    ax1.text(0.3, 0.6, "{0:d} Nondetections".format(int(num_upper)),
+             transform=ax1.transAxes, color=modelcolor)
 
 
     # Plot the cdf
     # This is just moving around the upper limits for display purposes.
-    vsini_dist[0] = vsini_dist[display_index]
-    vsini_dist[display_index]=0
-    vsini_hist[0] = vsini_hist[display_index]
-    vsini_hist[display_index]=0
+    vsini_dist[0] = num_upper
+    vsini_hist[0] = num_upper_vsinis
     dist_cum = np.cumsum(vsini_dist)
     dist_df = dist_cum / dist_cum[-1]
     hist_cum = np.cumsum(vsini_hist)
@@ -2385,6 +2391,7 @@ def compare_vsini_distribution(velocities, vsinis, vsini_percent=0.1,
     # I am using a chi-squared test (Numerical Recipes pg 731) since I have
     # what should be a distribution compared to a binned dataset.
     nonzero_indices = np.where(vsini_dist > 0)
+    print(nonzero_indices)
     reduced_dist = vsini_dist[nonzero_indices]
     reduced_hist = vsini_hist[nonzero_indices]
     chisq = np.sum((reduced_hist - reduced_dist)**2 / reduced_dist)

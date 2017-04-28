@@ -306,10 +306,8 @@ def create_joined_APOKASC_McQuillan_catalog(
     If these parameters are left as None, they will be read from apofile and
     mcquillanfile first.
     '''
-    if apocat is None:
-        apocat = read_APOKASC_catalog(apofile)
-    if mcquillancat is None:
-        mcquillancat = read_McQuillan_catalog(mcquillanfile)
+    apocat = read_APOKASC_catalog(apofile)
+    mcquillancat = read_McQuillan_catalog(mcquillanfile)
 
     combocat = au.join_by_id(apocat, mcquillancat, "KEPLER_INT", "KIC")
     return combocat
