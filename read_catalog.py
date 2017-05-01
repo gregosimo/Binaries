@@ -353,6 +353,16 @@ def bruntt_dr14_overlap(
     goodcat = catalog.good_aspcap_fits(fullcat)
     return goodcat
 
+@au.shortcut_file(paths.SHORTCUT_MCQUILLAN_EBS)
+def mcquillan_ebs(
+    mcq_path=paths.MCQUILLAN_CATALOG, ebpath=paths.EB_PATH):
+    '''Read in the Villanova EBs in the McQuillan catalog.'''
+    mcq = read_McQuillan_catalog(mcq_path)[["KIC"]]
+    ebs = read_villanova_EBs(ebpath)
+
+    mcq_ebs = au.join_by_id(ebs, mcq, "KIC", "kepid")
+    return mcq_ebs
+
 def read_villanova_EBs(EBpath=paths.EB_PATH):
     '''Reads in the Villanova Keler EB catalog.'''
     ebcat = Table.read(EBpath, format="ascii.commented_header",
