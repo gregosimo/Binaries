@@ -2404,6 +2404,35 @@ def compare_vsini_distribution(velocities, vsinis, vsini_percent=0.1,
     print("Calculated Chi-squared with {1:d} dof: {0:f}".format(lucy_Ysq, dof))
     print("Probability of data is {0:.4f}".format(prob))
 
+def cool_dwarf_subgiants_comparison(
+    dwarf_teff, dwarf_logg, dwarf_vsini, subgiant_teff, subgiant_logg,
+    subgiant_vsini):
+    '''Highlight high-vsini dwarfs and subgiants on an HR diagram.
+
+    Plot the Teff and Log(g) for dwarf and subgiant groups. It will highlight
+    targets with high vsinis.
+    '''
+    vsini_dwarf_detections = dwarf_vsini >= 7
+    vsini_subgiant_detections = subgiant_vsini >= 7
+    vsini_dwarf_nondetections = dwarf_vsini < 7
+    vsini_subgiant_nondetections = subgiant_vsini < 7
+
+    hr.logg_teff_plot(dwarf_teff[vsini_dwarf_nondetections], 
+                      dwarf_logg[vsini_dwarf_nondetections], 
+                      style="bx", label="Huber dwarfs")
+    hr.logg_teff_plot(subgiant_teff[vsini_subgiant_nondetections], 
+                      subgiant_logg[vsini_subgiant_nondetections], 
+                      style="rd", label="Huber subgiants")
+    hr.logg_teff_plot(dwarf_teff[vsini_dwarf_detections], 
+                      dwarf_logg[vsini_dwarf_detections],
+                      style="ws", label="Dwarf vsini")
+    hr.logg_teff_plot(subgiant_teff[vsini_subgiant_detections], 
+                      subgiant_logg[vsini_subgiant_detections],
+                      style="ms", label="Subgiant vsini")
+    plt.xlabel("APOGEE Teff (K)")
+    plt.ylabel("APOGEE logg (uncalibrated)")
+    plt.ylim((4.8, 3.2))
+
 def Bruntt_vsini_comparison():
     '''Plot the vsini values between APOGEE and Bruntt et al (2013).
 
