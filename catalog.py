@@ -1470,6 +1470,20 @@ def period_to_velocities(period, radii):
 
     return velocity
 
+def period_to_velocities_uncertainties(period, radii, radius_up, radius_down):
+    '''Convert periods to predicted velocities with uncertainties.
+
+    Return the quantity 2 * pi * radii / period in terms of km/s if period and
+    radii are given in days and solar radii. It also takes upper and lower
+    limits of the radii error bars. This will return a 3-tuple with the lower
+    limit, most probable value, and the upper value.'''
+    solRad_per_day_to_km_per_sec = 7e10 / (1e5 * 60 * 60 * 24)
+    velocity = 2 * np.pi * radii / period * solRad_per_day_to_km_per_sec
+    velocity_up = 2 * np.pi * radius_up / period * solRad_per_day_to_km_per_sec
+    velocity_down = 2 * np.pi * radius_down / period * solRad_per_day_to_km_per_sec
+
+    return (velocity_down, velocity, velocity_up)
+
 def plot_velocity_vsini(max_vel, vsini, xvalue, vsini_lim=7):
     '''Plot the expected velocities and the measured vsini.
 
@@ -1499,6 +1513,20 @@ def plot_velocity_vsini(max_vel, vsini, xvalue, vsini_lim=7):
              label="Detection Threshold")
     plt.ylabel("Rotational Velocity (km/s)")
 
+def plot_velocity_with_errorbars(vsini, lowvels, medvels, highvels):
+    '''Plot the predicted velocity against vsini.
+
+    This will have error bars for the vsinis as well as the predicted
+    velocities which should originate from the radii errors.'''
+    sub_vsini = vsini.copy()
+    sub_vsini[vsini < 0] = 0.0
+    vsini = sub_vsini
+    
+    plt.errorbar(medvels, vsini, yerr=0.1*vsini, xerr=[lowvels, highvels],
+                 fmt="b*")
+    plt.plot([0, 80], [0, 80], 'k-', lw=3)
+    plt.xlabel("Predicted velocity")
+    plt.ylabel("V sini")
 
 def rotation_radius(vsini, prot, vsini_mask=APOGEE_NULL):
     '''Calculate the maximum radius of a star with rotation period and vsini.
@@ -2432,6 +2460,26 @@ def cool_dwarf_subgiants_comparison(
     plt.xlabel("APOGEE Teff (K)")
     plt.ylabel("APOGEE logg (uncalibrated)")
     plt.ylim((4.8, 3.2))
+
+def apokasc_logg_rotation_trend(apogee_logg, asteroseismic_logg, vsini):
+    '''Plot the log(g) comparison against rotation.
+
+    Plot the log(g) measured from asteroseismology against the log(g)
+    determined spectroscopically against vsini. One thing that may explain why
+    the cool stars look completely off is if rotation causes log(g) values to
+    be off for spectroscopic parameters.'''
+    filled_vsini = vsini.copy()
+    filled_vsini[np.where(vsini < 0)] = 0.0
+    vsini_detections = vsini > 7
+    logg_diff = (apogee_logg - asteroseismic_logg)
+    subgiants = asteroseismic_logg < 4.1
+    plt.plot(filled_vsini[~subgiants], logg_diff[~subgiants], 'ko',
+             label="dwarfs")
+    plt.plot(filled_vsini[subgiants], logg_diff[subgiants], 'ro',
+             label="subgiants")
+    print("Slow scatter: {0:.2f}".format(np.std(logg_diff[~vsini_detections])))
+    print("Fast scatter: {0:.2f}".format(np.std(logg_diff[vsini_detections])))
+    plt.plot([7, 7], [-0.1, 0.5], 'b--')
 
 def Bruntt_vsini_comparison():
     '''Plot the vsini values between APOGEE and Bruntt et al (2013).
