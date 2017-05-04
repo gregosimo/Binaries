@@ -1479,10 +1479,14 @@ def period_to_velocities_uncertainties(period, radii, radius_up, radius_down):
     limit, most probable value, and the upper value.'''
     solRad_per_day_to_km_per_sec = 7e10 / (1e5 * 60 * 60 * 24)
     velocity = 2 * np.pi * radii / period * solRad_per_day_to_km_per_sec
-    velocity_up = 2 * np.pi * radius_up / period * solRad_per_day_to_km_per_sec
-    velocity_down = 2 * np.pi * radius_down / period * solRad_per_day_to_km_per_sec
+    velocity_up = 2 * np.pi * (radii + radius_up) / period * solRad_per_day_to_km_per_sec
+    velocity_down = 2 * np.pi * (radii + radius_down) / period * solRad_per_day_to_km_per_sec
+    print(np.any(velocity_down < 0))
 
-    return (velocity_down, velocity, velocity_up)
+    updiff = velocity_up - velocity
+    downdiff = velocity_down - velocity
+
+    return (downdiff, velocity, updiff)
 
 def plot_velocity_vsini(max_vel, vsini, xvalue, vsini_lim=7):
     '''Plot the expected velocities and the measured vsini.
@@ -1513,7 +1517,7 @@ def plot_velocity_vsini(max_vel, vsini, xvalue, vsini_lim=7):
              label="Detection Threshold")
     plt.ylabel("Rotational Velocity (km/s)")
 
-def plot_velocity_with_errorbars(vsini, lowvels, medvels, highvels):
+def plot_velocity_with_errorbars(vsini, lowdiff, medvels, highdiff):
     '''Plot the predicted velocity against vsini.
 
     This will have error bars for the vsinis as well as the predicted
@@ -1521,10 +1525,12 @@ def plot_velocity_with_errorbars(vsini, lowvels, medvels, highvels):
     sub_vsini = vsini.copy()
     sub_vsini[vsini < 0] = 0.0
     vsini = sub_vsini
+    goodvels = np.logical_or(vsini > 7, medvels > 7)
     
-    plt.errorbar(medvels, vsini, yerr=0.1*vsini, xerr=[lowvels, highvels],
-                 fmt="b*")
+    plt.errorbar(medvels[goodvels], vsini[goodvels], yerr=0.1*vsini[goodvels], 
+                 xerr=[-lowdiff[goodvels], highdiff[goodvels]], fmt="b*")
     plt.plot([0, 80], [0, 80], 'k-', lw=3)
+    plt.plot([0, 7, 7], [7, 7, 0], 'r--')
     plt.xlabel("Predicted velocity")
     plt.ylabel("V sini")
 
