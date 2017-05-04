@@ -3,6 +3,9 @@ import random
 import numpy as np
 import numpy.core.defchararray as npstr
 import astropy_util as au
+from astropy.coordinates import SkyCoord
+from astropy.table import Table
+import astropy.units as u
 import matplotlib.pyplot as plt
 
 import catalog
@@ -234,3 +237,40 @@ def write_target_list_for_MDM(target_table, filename="MDM_list.txt",
     output_table["EstV"] = phot_table["V"]
     output_table.write( 
         str(output_path / filename), format="ascii.csv", comment=False)
+
+def write_MDM_target_list(target_table, filename="MDM_list.txt",
+                          output_path=paths.HEAD_DIR):
+    '''Write the target table to the given filename.'''
+
+    kics = npstr.add("KIC", target_table["kepid"].astype(np.str))
+    Vmag = npstr.add("P=", target_table["Prot"].astype("U3"))
+    objname = npstr.add(kics, Vmag)
+
+    coords = SkyCoord(target_table["ra"], target_table["dec"], frame="icrs")
+
+    write_jskycalc_file(objname, coords, filename=filename,
+                        output_path=output_path)
+
+def write_jskycalc_file(names, coords, filename="MDM_list.txt", 
+                        output_path=paths.HEAD_DIR):
+    '''Write the targets in the table to JSkycalc format.
+
+    Whitespace in the name will be converted to underscores. The coordinates
+    should be included in a SkyCoord object, which shoul also contain the
+    equinox.'''
+    objnames = npstr.replace(names, " ", "_")
+
+    ra_h = coords.ra.hms.h.astype(np.int)
+    ra_m = coords.ra.hms.m.astype(np.int)
+    ra_s = coords.ra.hms.s
+    dec_d = coords.dec.dms.d.astype(np.int)
+    dec_m = coords.dec.dms.m.astype(np.int)
+    dec_s = coords.dec.dms.s
+    equinox = ["2000"]*len(objnames)
+
+    output_table = Table([
+        objnames, ra_h, ra_m, ra_s, dec_d, dec_m, dec_s, equinox], names=(
+        "Name", "hh", "mm", "ss", "dd", "mm ", "ss ", "equinox"))
+
+    output_table.write(str(output_path / filename),
+                       format="ascii.commented_header")
