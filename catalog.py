@@ -1230,30 +1230,18 @@ def teff_velocity_apogee(
     plt.legend(loc="upper right")
 
 def teff_radius_apogee(
-    teffs, vsinis, periods, apogee_flags):
+    teffs, vsinis, periods):
     '''Plots the inferred radius vs teff for rapid rotators.
 
     The inferred radius will basically be vsini * P. Typical bounds on sini
     will also be displayed for clarity. If cool objects have a large radius,
     then this may be indicative of subgiant contamination.'''
-    bad_indices = apogee_flags & 2**23 != 0
-    # The 2**14 is a flag called VSINI_WARN. It does not trigger the STAR_BAD
-    # or STAR_WARN flags.
-    warn_indices = np.logical_and(apogee_flags & (2**7+2**14) != 0,
-                                  np.logical_not(bad_indices))
-    good_indices = np.logical_not(np.logical_or(bad_indices, warn_indices))
-
     conv = 24*60*60*1e5/6.96e10/2/np.pi
 
+    good_indices = vsinis > 7
     plt.scatter(
         teffs[good_indices], vsinis[good_indices]*periods[good_indices]*conv, 
         s=50, c="g", marker="o", label="good")
-    plt.scatter(
-        teffs[warn_indices], vsinis[warn_indices]*periods[warn_indices]*conv,
-        s=15, c="m", marker="s", label="warn")
-    plt.scatter(
-        teffs[bad_indices], vsinis[bad_indices]*periods[bad_indices]*conv, 
-        s=15, c="r", marker="D", label="bad")
     hr.invert_x_axis()
 
     # Use the isochrones to determine the radius as a function of Teff.
@@ -1272,6 +1260,46 @@ def teff_radius_apogee(
     plt.ylim(0, 5)
     plt.xlabel("Teff (K)")
     plt.ylabel("vsini * P (Rsun)")
+
+def rotation_radius_comparison(
+    asteroseismic_radii, vsinis, periods):
+    '''Plots the asteroseismic radius vs R sini from rotation.
+
+    The inferred radius will basically be vsini * P.'''
+    good_indices = vsinis > 7
+    inferred_radii = rotation_radius(
+        vsinis[good_indices], periods[good_indices])
+    plt.plot(
+        asteroseismic_radii[good_indices], inferred_radii, c="g", marker="o",
+        ls="None")
+    plt.plot([0, 4], [0, 4], 'k-')
+    plt.xlabel("Asteroseismic Radius (Rsun)")
+    plt.ylabel("Inferred R sini (Rsun)")
+
+def compare_rotation_velocity_radius(vsini, period, radii):
+    '''Evaluate rotation quality in velocity and radius space.
+
+    Create a double-paneled figure that plots the same data in velocity space
+    and radius space for clarity of understanding.'''
+    f, (ax1, ax2) = plt.subplots(1, 2)
+
+    valid_indices = vsini > 7
+    valid_vsini = vsini[valid_indices]
+    valid_period = period[valid_indices]
+    valid_radii = radii[valid_indices]
+
+    inferred_velocities = period_to_velocities(valid_period, valid_radii)
+
+    ax1.plot(inferred_velocities, valid_vsini, 'go')
+    ax1.plot([0, 40], [0, 40], 'k-')
+    ax1.set_xlabel("Inferred equatorial velocity (km/s)")
+    ax1.set_ylabel("V sini (km/s)")
+
+    inferred_radii = rotation_radius(valid_vsini, valid_period)
+    ax2.plot(valid_radii, inferred_radii, 'go')
+    ax2.plot([0, 3.5], [0, 3.5], 'k-')
+    ax2.set_xlabel("Radius (Rsun)")
+    ax2.set_ylabel("Inferred R sini (Rsun)")
 
 def rotation_teff_test(
     vsini, period, teff, metallicity, alpha, apogee_flags, age=2.0):

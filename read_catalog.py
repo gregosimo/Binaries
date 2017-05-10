@@ -351,6 +351,67 @@ def bruntt_dr14_overlap(
     goodcat = catalog.good_aspcap_fits(fullcat)
     return goodcat
 
+@au.shortcut_file(paths.SHORTCUT_MCQUILLAN_EBS)
+def mcquillan_ebs(
+    mcq_path=paths.MCQUILLAN_CATALOG, ebpath=paths.EB_PATH):
+    '''Read in the Villanova EBs in the McQuillan catalog.'''
+    mcq = read_McQuillan_catalog(mcq_path)[["KIC"]]
+    ebs = read_villanova_EBs(ebpath)
+
+    mcq_ebs = au.join_by_id(ebs, mcq, "KIC", "kepid")
+    return mcq_ebs
+
+######################
+# Processed Catalogs #
+######################
+# These catalogs are to easily reproduce commonly-used catalogs. They will be
+# in a state of flux depending on what "commonly-used" entails, and if more
+# processing will need to occur. These catalogs are to ensure
+# reproducibility in case the ipython console needs to be terminated.
+def cool_dwarfs():
+    '''Get the sample of cool dwarfs in the McQuillan/APOGEE DR14 sample.
+
+    These are the sample of dwarfs where we wouldn't expect stellar evolution
+    to play a large role. By this point, they should be well-divided into
+    massive subgiants and less-massive dwarfs without much in-between.
+    '''
+    mcq = mcquillan_with_stelparms()
+    dr14 = mcquillan_dr14_overlap()
+    mcq_dr14 = au.join_by_id(mcq, dr14, "kepid", "KIC")
+
+    good_mcq_dr14 = good_aspcap_fits(mcq_dr14)
+    cool_good_mcq_dr14 = perform_teff_cut(hightemp=5450, teffcol="teff")
+
+    cleaned = filter_double_lined_spectroscopic_binaries(
+        filter_pulsators(cool_good_mcq_dr14))
+
+    return cleaned
+
+def asteroseismic_sample():
+    '''Get the asteroseismic sample in the McQuillan/APOGEE DR14 sample.'''
+    mcq_parms = mcquillan_with_stelparms()
+    dr14 = mcquillan_dr14_overlap()
+    mcq_dr14 = au.join_by_id(mcq, dr14, "kepid", "KIC")
+
+    apokasc = create_joined_APOKASC_McQuillan_catalog()
+    apokasc_dwarfradii = catalog.filter_invalid_APOGEE_entries(
+        apokasc, "RADIUS_DW")
+
+    mcq_apokasc_dr14 = au.join_by_id(
+        mcq_dr14, apokasc, "kepid", "RADIUS_DW", join_type="left",
+        conflict_suffixes=("_DR14", "_APOKASC"))
+
+    good_mcq_apokasc_dr14 = catalog.good_aspcap_fits(
+        catalog.filter_double_lined_spectroscopic_binaries(
+            catalog.filter_pulsators(mcq_apokasc_dr14)), "ASPCAPFLAG")
+
+    return good_mcq_apokasc_dr14
+    
+
+######################
+# Ancillary Catalogs #
+######################
+
 def read_villanova_EBs(EBpath=paths.EB_PATH):
     '''Reads in the Villanova Keler EB catalog.'''
     ebcat = Table.read(EBpath, format="ascii.commented_header",
