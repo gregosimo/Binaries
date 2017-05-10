@@ -59,6 +59,7 @@ def select_targets_before_magcut():
     mcq_observing = catalog.join_by_2MASS_key(
         mcq_observing, apogee, "tm_designation", "tm_designation", 
         join_type="left", conflict_suffixes=("_KIC", "_APOGEE"))
+    return mcq_observing
     del(apogee)
     
     # Remove APOGEE giants
@@ -114,8 +115,10 @@ def select_observing_targets(ntargets=50, tbins=3, pbins=3, Vcut=14):
     mcq_observing = catalog.perform_cut(mcq_observing, "V", highval=14)
 
     # Prioritize objects with APOGEE spectra.
-    prioritytable = mcq_observing[~mcq_observing["APOGEE_ID"].mask]
-    mcq_observing = mcq_observing[mcq_observing["APOGEE_ID"].mask]
+    prioritytable = mcq_observing[~npstr.endswith(
+        mcq_observing["APOGEE_ID"], "N/A")]
+    mcq_observing = mcq_observing[npstr.endswith(
+        mcq_observing["APOGEE_ID"], "N/A")]
 
     
     # Ensure reproducibility.
