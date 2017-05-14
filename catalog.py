@@ -1301,6 +1301,22 @@ def compare_rotation_velocity_radius(vsini, period, radii):
     ax2.set_xlabel("Radius (Rsun)")
     ax2.set_ylabel("Inferred R sini (Rsun)")
 
+def write_rotation_table(
+        table, output_filename, title,  apid_col="APOGEE_ID", KICcol="KIC", 
+        Teffcol="TEFF", logg_col="LOGG_DW", vsini_col="VSINI_DR14", 
+        radius_col="RADIUS_DW", periodcol="Prot_DR14", 
+        aspcapcol="ASPCAPFLAGS_DR14", starcol="STARFLAGS", 
+        outputpath=paths.HEAD_DIR):
+    '''Write the table with quantities relevant to rotation.'''
+    output_table = table[[apid_col, KICcol, Teffcol, logg_col, vsini_col,
+                          radius_col, periodcol, aspcapcol, starcol]]
+    output_table.add_column(table["FPARAM"][:,1], index=3)
+    names = ("APOGEE ID", "KIC", "Teff", "Spec Log(g)", "Ast. Log(g)", "vsini",
+             "Ast. Radius", "Rot. Period", "ASPCAP Flags", "Star Flags")
+    
+    output_table.write(str(outputpath / output_filename), format="ascii.aastex",
+                       names=names, latexdict={"caption": title})
+
 def rotation_teff_test(
     vsini, period, teff, metallicity, alpha, apogee_flags, age=2.0):
     '''Test the subgiant status using displacement in radius.
