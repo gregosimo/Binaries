@@ -5,6 +5,8 @@ import webbrowser
 
 from astropy.table import Table
 from astropy.io.ascii import InconsistentTableError
+import numpy.core.defchararray as npstr
+import numpy as np
 
 import astropy_util as au
 
@@ -112,8 +114,8 @@ def read_null_db(db_path=DEFAULT_NULL_DB):
 # Maybe try an "audit" to see how reproducible finding DLSBs is. Although this
 # is sufficiently different that it may be better to make a whole new module
 # than integrate it into this one.
-def find_DLSBs(apotable, dlsbpath=DEFAULT_DLSB_DB, nullpath=DEFAULT_NULL_DB,
-               verbose=False):
+def find_DLSBs(apids, locids, dlsbpath=DEFAULT_DLSB_DB, nullpath=DEFAULT_NULL_DB,
+               verbose=False, apidcol="APOGEE_ID", locidcol="LOCATION_ID"):
     '''Inspect APOGEE spectra for Double-lined Spectroscopic Binaries.
 
     Automates the process of going through a list of APOGEE_IDs and LOC_IDs and
@@ -134,27 +136,24 @@ def find_DLSBs(apotable, dlsbpath=DEFAULT_DLSB_DB, nullpath=DEFAULT_NULL_DB,
     if verbose:
         orig_length = len(apotable)
         print("{0:d} objects read in.".format(orig_length))
-
-    apotable = au.filter_column_from_subtable(
-        apotable, "APOGEE_ID", dlsbs["APOGEE_ID"])
-    print(len(apotable))
-    apotable = au.filter_column_from_subtable(
-        apotable, "APOGEE_ID", nulls["APOGEE_ID"])
-    print(len(apotable))
+    apids = npstr.strip(apids)
+    observed_indices = np.logical_or(
+        au.mark_selections_in_columns(apids, npstr.strip(dlsbs["APOGEE_ID"])),
+        au.mark_selections_in_columns(apids, npstr.strip(nulls["APOGEE_ID"])))
+    new_apids = apids[~observed_indices]
+    new_locids = locids[~observed_indices]
+    print(len(new_apids))
 
     if verbose:
-        num_removed = orig_length - len(apotable)
+        num_removed = orig_length - len(apids)
         print("{0:d} objects were already classified.".format(num_removed))
 
     prompt = "APOGEE:>"
-    total_nums = len(apotable)
+    total_nums = len(new_apids)
     # Now iterate through the table.
-    for i, row in enumerate(apotable):
-        apoid = row["APOGEE_ID"]
-        locid = row["LOCATION_ID"]
-
+    for (i, (apoid, locid)) in enumerate(zip(new_apids, new_locids)): 
         SAS_url = make_SAS_URL(apoid, locid)
-        print("Target {0:d}/{1:d}...".format(i, total_nums))
+        print("Target {0:d}/{1:d}...".format(i+1, total_nums))
         if verbose:
             print("Opening {0}".format(SAS_url))
         webbrowser.open(SAS_url)
@@ -180,7 +179,8 @@ if __name__ == "__main__":
                               names=("APOGEE_ID", "LOC_ID"))
 
     find_DLSBs(
-        apotable, dlsbpath=args.dlsb_database, nullpath=args.null_database)
+        apotable["APOGEE_ID"], apotable["LOCATION_ID"], 
+        dlsbpath=args.dlsb_database, nullpath=args.null_database)
 
 
 

@@ -306,10 +306,8 @@ def create_joined_APOKASC_McQuillan_catalog(
     If these parameters are left as None, they will be read from apofile and
     mcquillanfile first.
     '''
-    if apocat is None:
-        apocat = read_APOKASC_catalog(apofile)
-    if mcquillancat is None:
-        mcquillancat = read_McQuillan_catalog(mcquillanfile)[["KIC"]]
+    apocat = read_APOKASC_catalog(apofile)
+    mcquillancat = read_McQuillan_catalog(mcquillanfile)
 
     combocat = au.join_by_id(apocat, mcquillancat, "KEPLER_INT", "KIC")
     return combocat
@@ -404,7 +402,8 @@ def asteroseismic_sample():
         conflict_suffixes=("_DR14", "_APOKASC"))
 
     good_mcq_apokasc_dr14 = catalog.good_aspcap_fits(
-        catalog.filter_pulsators(mcq_apokasc_dr14), "ASPCAPFLAG")
+        catalog.filter_double_lined_spectroscopic_binaries(
+            catalog.filter_pulsators(mcq_apokasc_dr14)), "ASPCAPFLAG")
 
     return good_mcq_apokasc_dr14
     
