@@ -391,14 +391,15 @@ def asteroseismic_sample():
     '''Get the asteroseismic sample in the McQuillan/APOGEE DR14 sample.'''
     mcq_parms = mcquillan_with_stelparms()
     dr14 = mcquillan_dr14_overlap()
-    mcq_dr14 = au.join_by_id(mcq, dr14, "kepid", "KIC")
+    mcq_dr14 = catalog.join_by_2MASS_key(
+        mcq_parms, dr14, "tm_designation", "tm_designation")
 
     apokasc = create_joined_APOKASC_McQuillan_catalog()
     apokasc_dwarfradii = catalog.filter_invalid_APOGEE_entries(
         apokasc, "RADIUS_DW")
 
     mcq_apokasc_dr14 = au.join_by_id(
-        mcq_dr14, apokasc, "kepid", "RADIUS_DW", join_type="left",
+        mcq_dr14, apokasc_dwarfradii, "KIC", "KIC", join_type="inner",
         conflict_suffixes=("_DR14", "_APOKASC"))
 
     good_mcq_apokasc_dr14 = catalog.good_aspcap_fits(
