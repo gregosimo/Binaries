@@ -307,7 +307,7 @@ def create_joined_APOKASC_McQuillan_catalog(
     mcquillanfile first.
     '''
     apocat = read_APOKASC_catalog(apofile)
-    mcquillancat = read_McQuillan_catalog(mcquillanfile)
+    mcquillancat = read_McQuillan_catalog(mcquillanfile)[["KIC"]]
 
     combocat = au.join_by_id(apocat, mcquillancat, "KEPLER_INT", "KIC")
     return combocat
