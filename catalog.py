@@ -3043,9 +3043,14 @@ def mark_DLSB_indices(apogee_ids, dlsb_db=DLSB_PATH):
     return np.where(dlsb_indices)
 
 def filter_double_lined_spectroscopic_binaries(
-    apocat, apid_col="APOGEE_ID", dlsb_db=DLSB_PATH):
+    apocat, apid_col="APOGEE_ID", dlsb_db=DLSB_PATH, verbose=False):
     '''Remove Double-Lined Spectroscopic Binaries by APOGEE_ID'''
     dlsb_indices = mark_DLSB_indices(apocat[apid_col], dlsb_db=dlsb_db)
+    # Print out the found DLSBs
+    if verbose:
+        dlsb_names = apocat[apid_col][dlsb_indices]
+        for dlsb in dlsb_names:
+            print("{0} is a known DLSB.".format(dlsb))
     filtered_cat = apocat[au.get_complement_indices(dlsb_indices, len(apocat))]
     add_cut_metadata(
         filtered_cat, "Removed DLSBs: see {0} for list".format(dlsb_db))
