@@ -2383,14 +2383,14 @@ def compare_sini_distribution(velocities, vsinis, vsini_cutoff=5, nbins=20):
     
 
 def compare_vsini_distribution(velocities, vsinis, vsini_percent=0.1,
-                               vsini_cutoff=5, nbins=100):
+                               vsini_cutoff=5, nbins=70, maxv=70):
     '''Compare the observed vsin(i) distribution to that inferred from vrot.
 
     This will reconstruct a vsin(i) distribution using the provided velocity
     distribution. The reconstruction involves convolving with a fractional vsini
     uncertainty, and then convolving with a population of random
     inclinations.'''
-    vel_bins = np.linspace(0, 100+100/nbins, nbins+1, endpoint=False)
+    vel_bins = np.linspace(0, maxv*(1+1/nbins), nbins+1, endpoint=False)
     vel_hist, bins = np.histogram(velocities, bins=vel_bins)
     dv = vel_bins[2] - vel_bins[1]
     binvalues = (vel_bins[1:] + vel_bins[:-1])/2
@@ -2434,7 +2434,7 @@ def compare_vsini_distribution(velocities, vsinis, vsini_percent=0.1,
              c=modelcolor)
     ax1.step(vel_bins[:-1], vel_hist, where="post", lw=1, label="Vrot", 
              c=rotcolor)
-    ax1.set_xlim(0, 100)
+    ax1.set_xlim(0, vel_bins[-1])
     ax1.set_ylabel("N (vsini)")
     ax1.legend(loc="upper right")
     ax1.text(0.3, 0.8, "{0:d} Total".format(len(velocities)),
