@@ -59,7 +59,6 @@ def select_targets_before_magcut():
     mcq_observing = catalog.join_by_2MASS_key(
         mcq_observing, apogee, "tm_designation", "tm_designation", 
         join_type="left", conflict_suffixes=("_KIC", "_APOGEE"))
-    return mcq_observing
     del(apogee)
     
     # Remove APOGEE giants
