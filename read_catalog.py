@@ -358,7 +358,7 @@ def mcquillan_ebs(
     mcq = read_McQuillan_catalog(mcq_path)[["KIC"]]
     ebs = read_villanova_EBs(ebpath)
 
-    mcq_ebs = au.join_by_id(ebs, mcq, "KIC", "kepid")
+    mcq_ebs = au.join_by_id(ebs, mcq, "KIC", "KIC")
     return mcq_ebs
 
 ######################
