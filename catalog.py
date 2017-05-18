@@ -2564,13 +2564,15 @@ def radial_velocity_tides_contour(combined_mass, tidal_limit=5*u.day):
 ###############################################################################
 
 
-def remove_Kepler_EBs(maincat, ebcat=None, mainkiccol="KIC"):
+def remove_Kepler_EBs(maincat, McQuillan=True, mainkiccol="KIC"):
     '''Filters out Kepler Eclipsing Binaries.
 
     Removes the KIC values corresponding to the eclipsing binaries in the
     version of the EB catalog given in paths.EB_PATH.
     '''
-    if not ebcat:
+    if McQuillan:
+        ebcat = catin.mcquillan_ebs()
+    else:
         ebcat = catin.read_villanova_EBs()
     filtered_maincat = au.filter_column_from_subtable(
             maincat, mainkiccol, ebcat["KIC"])
