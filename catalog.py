@@ -1966,7 +1966,7 @@ def read_pulsators(pulsatorfile=paths.KIC_PULSATORS):
         pulsatorfile, format="ascii.no_header", names=["KIC"])
     return pulsatortable
 
-def filter_pulsators(fulltable, quiet=False, KICcol="KEPLER_INT"):
+def filter_pulsators(fulltable, quiet=False, KICcol="KIC"):
     '''Removes known Kepler pulsators from a table of Kepler objects.
 
     If the quiet keyword is disabled, then this function will print the KIC IDs
