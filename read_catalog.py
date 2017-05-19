@@ -375,15 +375,17 @@ def cool_dwarfs():
     to play a large role. By this point, they should be well-divided into
     massive subgiants and less-massive dwarfs without much in-between.
     '''
-    mcq = mcquillan_with_stelparms()
+    mcq_parms = mcquillan_with_stelparms()
     dr14 = mcquillan_dr14_overlap()
-    mcq_dr14 = au.join_by_id(mcq, dr14, "kepid", "KIC")
+    mcq_dr14 = catalog.join_by_2MASS_key(
+        mcq_parms, dr14, "tm_designation", "tm_designation")
 
-    good_mcq_dr14 = good_aspcap_fits(mcq_dr14)
-    cool_good_mcq_dr14 = perform_teff_cut(hightemp=5450, teffcol="teff")
+    good_mcq_dr14 = catalog.good_aspcap_fits(mcq_dr14)
+    cool_good_mcq_dr14 = catalog.perform_teff_cut(good_mcq_dr14, hightemp=5450, 
+                                                  teffcol="teff")
 
-    cleaned = filter_double_lined_spectroscopic_binaries(
-        filter_pulsators(cool_good_mcq_dr14))
+    cleaned = catalog.filter_double_lined_spectroscopic_binaries(
+        catalog.filter_pulsators(cool_good_mcq_dr14))
 
     return cleaned
 
