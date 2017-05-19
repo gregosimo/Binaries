@@ -33,18 +33,35 @@ def invert_y_axis(axes=None):
         # Invert the axis
         axes.set_ylim(ylims[::-1])
 
-def three_panel_hrdiagram(teff, luminosity, BVcolor, Vmag, JKcolor, Kmag):
-    '''Makes a three-panel HR diagram.
+def compare_two_logg_teff(logg1, teff1, logg2, teff2, label1, label2):
+    '''Make a 2x2 grid comparing two sets of log(g) vs Teff.'''
+    f, ((ax1, ax2), (ax3, ax4)) = plt.subplots(
+        2, 2, sharex="col", sharey="row")
 
-    The first panel should be a Teff-Luminosity diagram. This is purely
-    theoretical and should reflect what the isochrones as a whole are doing.
-
-    The second panel will be a B-V vs M_V diagram. This will describe how the
-    stars behave in the optical.
-
-    The last panel will be a J-Ks vs M_Ks diagram. This will describe how the
-    stars behave in the NIR.'''
-
-    plt.subplot(131)
-    plt.plot(teff, luminosity, line_style="-")
-    # TBD
+    subgiant_indices = logg1 > 4.2
+    dwarf_indices = logg1 <= 4.2
+    plt.sca(ax1)
+    logg_teff_plot(teff1[subgiant_indices], logg1[subgiant_indices], style='r.')
+    logg_teff_plot(teff1[dwarf_indices], logg1[dwarf_indices], style='b.')
+    plt.xlabel("")
+    plt.ylabel("{0} log(g)".format(label1))
+    plt.sca(ax2)
+    logg_teff_plot(teff2[subgiant_indices], logg1[subgiant_indices], style='r.')
+    logg_teff_plot(teff2[dwarf_indices], logg1[dwarf_indices], style='b.')
+    plt.xlabel("")
+    plt.ylabel("")
+    plt.sca(ax3)
+    logg_teff_plot(teff1[subgiant_indices], logg2[subgiant_indices], style='r.')
+    logg_teff_plot(teff1[dwarf_indices], logg2[dwarf_indices], style='b.')
+    plt.xlabel("{0} Teff".format(label1))
+    plt.ylabel("{0} log(g)".format(label2))
+    plt.sca(ax4)
+    logg_teff_plot(teff2[subgiant_indices], logg2[subgiant_indices], style='r.')
+    logg_teff_plot(teff2[dwarf_indices], logg2[dwarf_indices], style='b.')
+    plt.xlabel("{0} Teff".format(label2))
+    plt.ylabel("")
+    ax1.set_xlim(5500, 4000)
+    ax1.set_ylim(5.0, 2.0)
+    ax4.set_xlim(5600, 4200)
+    ax4.set_ylim(4.8, 3.5)
+    
