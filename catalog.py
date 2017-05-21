@@ -388,6 +388,7 @@ def write_Villanova_EB_upload_list(
     kic_targets.write(str(output), format=writefmt, comment=False)
 
 
+
 def visit_table(obj_ids, loc_ids):
     '''Gets a table with all observations.
 
@@ -1301,7 +1302,7 @@ def compare_rotation_velocity_radius(vsini, period, radii):
     ax2.set_xlabel("Radius (Rsun)")
     ax2.set_ylabel("Inferred R sini (Rsun)")
 
-def write_rotation_table(
+def write_asteroseismic_rotation_table(
         table, output_filename, title,  apid_col="APOGEE_ID", KICcol="KIC", 
         Teffcol="TEFF", logg_col="LOGG_DW", vsini_col="VSINI_DR14", 
         radius_col="RADIUS_DW", periodcol="Prot_DR14", 
@@ -1316,6 +1317,23 @@ def write_rotation_table(
     
     output_table.write(str(outputpath / output_filename), format="ascii.aastex",
                        names=names, latexdict={"caption": title})
+
+def write_rotation_debug_table(
+    tbl, outfile, title, label, apid_col="APOGEE_ID", KICcol="KIC",
+    apogee_teff="TEFF", huber_teff="teff", huber_logg="logg", vsini="VSINI",
+    radius="radius", period="Prot", aspcapcol="ASPCAPFLAGS",
+    outputpath=paths.HEAD_DIR):
+    '''Write a table to output rotation information.'''
+    output_table = tbl[["APOGEE_ID", "KIC", "TEFF", "teff", "logg", "VSINI",
+                        "radius", "Prot", "ASPCAPFLAGS"]]
+    output_table.add_column(tbl["FPARAM"][:,1], index=4)
+    names=("APOGEE ID", "KIC", "Spec Teff", "Huber Teff", "Spec Log(g)", 
+           "Huber Log(g)", "vsini", "Huber Radius", "Rot. Period", 
+           "ASPCAP Flags")
+    output_table.write(
+        str(outputpath / outfile), format="ascii.aastex", names=names, 
+        latexdict={"caption": title + "\\\\label{{table:{0}}}".format(label), 
+                   "preamble": r"\tabletypesize{\footnotesize}"})
 
 def rotation_teff_test(
     vsini, period, teff, metallicity, alpha, apogee_flags, age=2.0):
