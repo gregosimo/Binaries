@@ -1277,7 +1277,8 @@ def rotation_radius_comparison(
     plt.xlabel("Asteroseismic Radius (Rsun)")
     plt.ylabel("Inferred R sini (Rsun)")
 
-def compare_rotation_velocity_radius(vsini, period, radii):
+def compare_rotation_velocity_radius(
+    vsini, period, radii, raderr_below, raderr_above, subgiant_indices):
     '''Evaluate rotation quality in velocity and radius space.
 
     Create a double-paneled figure that plots the same data in velocity space
@@ -1288,16 +1289,44 @@ def compare_rotation_velocity_radius(vsini, period, radii):
     valid_vsini = vsini[valid_indices]
     valid_period = period[valid_indices]
     valid_radii = radii[valid_indices]
+    valid_raderr_above = raderr_above[valid_indices]
+    valid_raderr_below = raderr_below[valid_indices]
+    valid_subgiant_indices = subgiant_indices[valid_indices]
+    valid_dwarf_indices = au.get_complement_indices(
+        valid_subgiant_indices, len(valid_subgiant_indices))
 
-    inferred_velocities = period_to_velocities(valid_period, valid_radii)
+    downvel, infvel, upvel = period_to_velocities_uncertainties(
+        valid_period, valid_radii, valid_raderr_below, valid_raderr_above)
 
-    ax1.plot(inferred_velocities, valid_vsini, 'go')
+    ax1.errorbar(
+        infvel[valid_subgiant_indices], valid_vsini[valid_subgiant_indices],
+        xerr=[-downvel[valid_subgiant_indices], upvel[valid_subgiant_indices]],
+        yerr=0.1*valid_vsini[valid_subgiant_indices], fmt='b*',
+        label="Subgiants")
+    ax1.errorbar(
+        infvel[valid_dwarf_indices], valid_vsini[valid_dwarf_indices],
+        xerr=[-downvel[valid_dwarf_indices], upvel[valid_dwarf_indices]],
+        yerr=0.1*valid_vsini[valid_dwarf_indices], fmt='ro', label="Dwarfs")
     ax1.plot([0, 40], [0, 40], 'k-')
+    ax1.plot([0, 40], [7, 7], 'r--', label="Detection Limit")
+    plt.sca(ax1)
+    plt.legend(loc="upper left")
     ax1.set_xlabel("Inferred equatorial velocity (km/s)")
     ax1.set_ylabel("V sini (km/s)")
 
     inferred_radii = rotation_radius(valid_vsini, valid_period)
-    ax2.plot(valid_radii, inferred_radii, 'go')
+    ax2.errorbar(
+        valid_radii[valid_subgiant_indices], 
+        inferred_radii[valid_subgiant_indices], 
+        yerr=0.1*inferred_radii[valid_subgiant_indices],
+        xerr=[-valid_raderr_below[valid_subgiant_indices],
+              valid_raderr_above[valid_subgiant_indices]], fmt='b*')
+    ax2.errorbar(
+        valid_radii[valid_dwarf_indices], 
+        inferred_radii[valid_dwarf_indices], 
+        yerr=0.1*inferred_radii[valid_dwarf_indices],
+        xerr=[-valid_raderr_below[valid_dwarf_indices],
+              valid_raderr_above[valid_dwarf_indices]], fmt='ro')
     ax2.plot([0, 3.5], [0, 3.5], 'k-')
     ax2.set_xlabel("Radius (Rsun)")
     ax2.set_ylabel("Inferred R sini (Rsun)")
