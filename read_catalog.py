@@ -262,6 +262,7 @@ def read_flicker_loggs(loggpath=paths.FLICKER_LOGG):
     flicker_loggs = Table.read(loggpath, format="ascii.cds")
     return flicker_loggs
 
+
 ###################
 # Joined catalogs #
 ###################
@@ -470,3 +471,65 @@ def read_Bruntt_catalog(brunttpath=paths.BRUNTT_PATH):
     bruntt = Table.read(brunttpath, format="votable")
     return bruntt
 
+def read_Stauffer_Pleiades(vsini_file=paths.STAUFFER_VSINI_PATH):
+    '''Read the vsinis from Table one of Stauffer & Hartmann 1987.'''
+
+    tbl = Table.read(str(vsini_file), format="ascii.basic", fill_values=[
+        ('---', '0'), ('', '0')])
+    separate_limit(tbl, ["vsini"], eqdelim="")
+    return tbl
+
+def separate_limit(table, limcols, updelim="<", lowdelim=">", eqdelim="=",
+                   coltemplate="{0} lim"):
+    '''Takes limcols from a table and splits them into limit columns.
+
+    For all columns in the list of limcols, this function will split them into
+    a limit column and a numerical value column. The column will change dtype
+    to be numerical. The limit will have a column name as determined by
+    coltemplate, which should be a format string which takes the column name 
+    as the first argument.
+    '''
+    for col in limcols:
+        strcol = table[col]
+        valcol, limcol = split_limit_col(strcol, updelim, lowdelim, eqdelim)
+        del(table[col])
+        table[col] = valcol
+        table[coltemplate.format(col)] = limcol
+
+def split_limit_col(initcol, updelim="<", lowdelim=">", eqdelim="=",
+                    dtype=np.float):
+    '''Splits a column into a limit and numerical value column.
+
+    One problem with table representations of limits is that the symbols for
+    limits cause the columns to be represented as a string, not as a numerical
+    limit. Therefore, this function splits a string column into two arrays:
+    one with a limit representation, another with the numerical values.
+    '''
+    # If the column was not read as a string, then just return it.
+    oldmask = initcol.mask
+    limcol = stat.generate_limit(None, len(initcol))
+    try:
+        upperindices = np.where(npstr.startswith(initcol, updelim))
+        lowerindices = np.where(npstr.startswith(initcol, lowdelim))
+    except TypeError:
+        print("{0} is not a string column. Ignoring.".format(initcol.name))
+    else:
+        # If initcol is not a string column, we want to skip all of these
+        # string operations.
+        initcol = npstr.lstrip(initcol, updelim)
+        initcol = npstr.lstrip(initcol, lowdelim)
+        if eqdelim is not "":
+            eqindices = np.where(npstr.startswith(initcol, eqdelim))
+            initcol = npstr.lstrip(initcol, eqdelim)
+        limcol[upperindices] = stat.UPPER
+        limcol[lowerindices] = stat.LOWER
+    newcol = np.ma.asanyarray(initcol, dtype=dtype)
+    newcol.mask = oldmask
+    # If there is a mask, then we want to ensure that the masked values are
+    # considered to be invalid data points.
+    try:
+        limcol[newcol.mask] = stat.NA
+    except AttributeError:
+        pass
+
+    return newcol, limcol
