@@ -1364,6 +1364,31 @@ def write_rotation_debug_table(
         latexdict={"caption": title + "\\\\label{{table:{0}}}".format(label), 
                    "preamble": r"\tabletypesize{\footnotesize}"})
 
+def write_table_for_period_people(tbl, outfile, outputpath=paths.HEAD_DIR):
+    '''Write a table for relevant parameters for period people.'''
+    # APOGEE_ID, KIC, Huber Teff, Huber Log(g), Huber radius, McQuillan P, 
+    # Spec Teff, Spec Log(g), VSINI, Predicted Pmin, Predicted Pmax
+    output_table = tbl[["KIC", "APOGEE_ID", "teff", "logg", "radius", "Prot",
+                        "TEFF", "VSINI"]]
+    output_table.add_column(tbl["FPARAM"][:,1], index=7)
+    lowp, midp, highp = vsini_to_period(
+        output_table["VSINI"], output_table["radius"])
+    output_table["Pmin"] = lowp                                                    
+    output_table["Pmax"] = highp
+    names = (
+        "KIC", "APOGEE ID", "Huber Teff", "Huber Log(g)", "Huber Radius",
+        "McQuillan P", "APOGEE Teff", "APOGEE Log(g)", "VSINI", "Minimum per.",
+        "Maximum per.")
+    output_table.write(str(outputpath / outfile), format="ascii.fixed_width",
+                       names=names)
+
+def write_table_for_spec_people(tbl, outfile, outputpath=paths.HEAD_DIR):
+    '''Write a table with relevant parameters for spectroscopic people.'''
+    # APOGEE_ID, LOCATION_ID, KIC, Spec Teff, Spec Log(g), VSINI, ASPCAPFLAGS,
+    # STARFLAGS, McQuillan P, Equatorial V.
+    output_table = tbl
+    output_table.write(str(outputpath / outfile), format="ascii.basic")
+
 def rotation_teff_test(
     vsini, period, teff, metallicity, alpha, apogee_flags, age=2.0):
     '''Test the subgiant status using displacement in radius.
@@ -2521,6 +2546,22 @@ def compare_inferred_flicker_loggs(
         plt.plot([xvalue[i]]*2, [kic_logg[i], dsep_logg[i]], ls=':', c=lc)
     plt.ylabel("Log(g)")
     hr.invert_y_axis()
+
+def compare_Huber_APOGEE_loggs(
+    apogee_logg, huber_logg, huber_logg_low, huber_logg_high):
+    '''Compare APOGEE log(g) to Huber log(g) with uncertainties.
+
+    Will basically make a One-to-one plot with the asymmetric Huber
+    uncertainties taken into account, to see if objects that scatter into the
+    dwarf regime are uncertain subgiants.'''
+    plt.errorbar(
+        apogee_logg, huber_logg, yerr=[-huber_logg_low, huber_logg_high],
+        fmt="go")
+    plt.plot([2, 5], [2, 5], 'k-')
+    plt.plot([2, 5], [4.2, 4.2], 'b--')
+    plt.plot([4.2, 4.2], [2, 5], 'b--')
+    plt.xlabel("Uncalibrated APOGEE log(g)")
+    plt.ylabel("Huber log(g)")
 
 
 def EBs_missed_by_Rafa(rafa_ebs, missed_ebs, xcol, ycol, xlabel="", ylabel=""):
