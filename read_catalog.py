@@ -262,6 +262,7 @@ def read_flicker_loggs(loggpath=paths.FLICKER_LOGG):
     flicker_loggs = Table.read(loggpath, format="ascii.cds")
     return flicker_loggs
 
+
 ###################
 # Joined catalogs #
 ###################
@@ -307,7 +308,7 @@ def create_joined_APOKASC_McQuillan_catalog(
     mcquillanfile first.
     '''
     apocat = read_APOKASC_catalog(apofile)
-    mcquillancat = read_McQuillan_catalog(mcquillanfile)
+    mcquillancat = read_McQuillan_catalog(mcquillanfile)[["KIC"]]
 
     combocat = au.join_by_id(apocat, mcquillancat, "KEPLER_INT", "KIC")
     return combocat
@@ -358,7 +359,7 @@ def mcquillan_ebs(
     mcq = read_McQuillan_catalog(mcq_path)[["KIC"]]
     ebs = read_villanova_EBs(ebpath)
 
-    mcq_ebs = au.join_by_id(ebs, mcq, "KIC", "kepid")
+    mcq_ebs = au.join_by_id(ebs, mcq, "KIC", "KIC")
     return mcq_ebs
 
 ######################
@@ -375,15 +376,17 @@ def cool_dwarfs():
     to play a large role. By this point, they should be well-divided into
     massive subgiants and less-massive dwarfs without much in-between.
     '''
-    mcq = mcquillan_with_stelparms()
+    mcq_parms = mcquillan_with_stelparms()
     dr14 = mcquillan_dr14_overlap()
-    mcq_dr14 = au.join_by_id(mcq, dr14, "kepid", "KIC")
+    mcq_dr14 = catalog.join_by_2MASS_key(
+        mcq_parms, dr14, "tm_designation", "tm_designation")
 
-    good_mcq_dr14 = good_aspcap_fits(mcq_dr14)
-    cool_good_mcq_dr14 = perform_teff_cut(hightemp=5450, teffcol="teff")
+    good_mcq_dr14 = catalog.good_aspcap_fits(mcq_dr14)
+    cool_good_mcq_dr14 = catalog.perform_teff_cut(good_mcq_dr14, hightemp=5450, 
+                                                  teffcol="teff")
 
-    cleaned = filter_double_lined_spectroscopic_binaries(
-        filter_pulsators(cool_good_mcq_dr14))
+    cleaned = catalog.filter_double_lined_spectroscopic_binaries(
+        catalog.filter_pulsators(cool_good_mcq_dr14))
 
     return cleaned
 
@@ -391,14 +394,15 @@ def asteroseismic_sample():
     '''Get the asteroseismic sample in the McQuillan/APOGEE DR14 sample.'''
     mcq_parms = mcquillan_with_stelparms()
     dr14 = mcquillan_dr14_overlap()
-    mcq_dr14 = au.join_by_id(mcq, dr14, "kepid", "KIC")
+    mcq_dr14 = catalog.join_by_2MASS_key(
+        mcq_parms, dr14, "tm_designation", "tm_designation")
 
     apokasc = create_joined_APOKASC_McQuillan_catalog()
     apokasc_dwarfradii = catalog.filter_invalid_APOGEE_entries(
         apokasc, "RADIUS_DW")
 
     mcq_apokasc_dr14 = au.join_by_id(
-        mcq_dr14, apokasc, "kepid", "RADIUS_DW", join_type="left",
+        mcq_dr14, apokasc_dwarfradii, "KIC", "KIC", join_type="inner",
         conflict_suffixes=("_DR14", "_APOKASC"))
 
     good_mcq_apokasc_dr14 = catalog.good_aspcap_fits(
@@ -467,3 +471,65 @@ def read_Bruntt_catalog(brunttpath=paths.BRUNTT_PATH):
     bruntt = Table.read(brunttpath, format="votable")
     return bruntt
 
+def read_Stauffer_Pleiades(vsini_file=paths.STAUFFER_VSINI_PATH):
+    '''Read the vsinis from Table one of Stauffer & Hartmann 1987.'''
+
+    tbl = Table.read(str(vsini_file), format="ascii.basic", fill_values=[
+        ('---', '0'), ('', '0')])
+    separate_limit(tbl, ["vsini"], eqdelim="")
+    return tbl
+
+def separate_limit(table, limcols, updelim="<", lowdelim=">", eqdelim="=",
+                   coltemplate="{0} lim"):
+    '''Takes limcols from a table and splits them into limit columns.
+
+    For all columns in the list of limcols, this function will split them into
+    a limit column and a numerical value column. The column will change dtype
+    to be numerical. The limit will have a column name as determined by
+    coltemplate, which should be a format string which takes the column name 
+    as the first argument.
+    '''
+    for col in limcols:
+        strcol = table[col]
+        valcol, limcol = split_limit_col(strcol, updelim, lowdelim, eqdelim)
+        del(table[col])
+        table[col] = valcol
+        table[coltemplate.format(col)] = limcol
+
+def split_limit_col(initcol, updelim="<", lowdelim=">", eqdelim="=",
+                    dtype=np.float):
+    '''Splits a column into a limit and numerical value column.
+
+    One problem with table representations of limits is that the symbols for
+    limits cause the columns to be represented as a string, not as a numerical
+    limit. Therefore, this function splits a string column into two arrays:
+    one with a limit representation, another with the numerical values.
+    '''
+    # If the column was not read as a string, then just return it.
+    oldmask = initcol.mask
+    limcol = stat.generate_limit(None, len(initcol))
+    try:
+        upperindices = np.where(npstr.startswith(initcol, updelim))
+        lowerindices = np.where(npstr.startswith(initcol, lowdelim))
+    except TypeError:
+        print("{0} is not a string column. Ignoring.".format(initcol.name))
+    else:
+        # If initcol is not a string column, we want to skip all of these
+        # string operations.
+        initcol = npstr.lstrip(initcol, updelim)
+        initcol = npstr.lstrip(initcol, lowdelim)
+        if eqdelim is not "":
+            eqindices = np.where(npstr.startswith(initcol, eqdelim))
+            initcol = npstr.lstrip(initcol, eqdelim)
+        limcol[upperindices] = stat.UPPER
+        limcol[lowerindices] = stat.LOWER
+    newcol = np.ma.asanyarray(initcol, dtype=dtype)
+    newcol.mask = oldmask
+    # If there is a mask, then we want to ensure that the masked values are
+    # considered to be invalid data points.
+    try:
+        limcol[newcol.mask] = stat.NA
+    except AttributeError:
+        pass
+
+    return newcol, limcol

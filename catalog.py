@@ -388,6 +388,7 @@ def write_Villanova_EB_upload_list(
     kic_targets.write(str(output), format=writefmt, comment=False)
 
 
+
 def visit_table(obj_ids, loc_ids):
     '''Gets a table with all observations.
 
@@ -1276,7 +1277,8 @@ def rotation_radius_comparison(
     plt.xlabel("Asteroseismic Radius (Rsun)")
     plt.ylabel("Inferred R sini (Rsun)")
 
-def compare_rotation_velocity_radius(vsini, period, radii):
+def compare_rotation_velocity_radius(
+    vsini, period, radii, raderr_below, raderr_above, subgiant_indices):
     '''Evaluate rotation quality in velocity and radius space.
 
     Create a double-paneled figure that plots the same data in velocity space
@@ -1287,19 +1289,105 @@ def compare_rotation_velocity_radius(vsini, period, radii):
     valid_vsini = vsini[valid_indices]
     valid_period = period[valid_indices]
     valid_radii = radii[valid_indices]
+    valid_raderr_above = raderr_above[valid_indices]
+    valid_raderr_below = raderr_below[valid_indices]
+    valid_subgiant_indices = subgiant_indices[valid_indices]
+    valid_dwarf_indices = au.get_complement_indices(
+        valid_subgiant_indices, len(valid_subgiant_indices))
 
-    inferred_velocities = period_to_velocities(valid_period, valid_radii)
+    downvel, infvel, upvel = period_to_velocities_uncertainties(
+        valid_period, valid_radii, valid_raderr_below, valid_raderr_above)
 
-    ax1.plot(inferred_velocities, valid_vsini, 'go')
+    ax1.errorbar(
+        infvel[valid_subgiant_indices], valid_vsini[valid_subgiant_indices],
+        xerr=[-downvel[valid_subgiant_indices], upvel[valid_subgiant_indices]],
+        yerr=0.1*valid_vsini[valid_subgiant_indices], fmt='b*',
+        label="Subgiants")
+    ax1.errorbar(
+        infvel[valid_dwarf_indices], valid_vsini[valid_dwarf_indices],
+        xerr=[-downvel[valid_dwarf_indices], upvel[valid_dwarf_indices]],
+        yerr=0.1*valid_vsini[valid_dwarf_indices], fmt='ro', label="Dwarfs")
     ax1.plot([0, 40], [0, 40], 'k-')
+    ax1.plot([0, 40], [7, 7], 'r--', label="Detection Limit")
+    plt.sca(ax1)
+    plt.legend(loc="upper left")
     ax1.set_xlabel("Inferred equatorial velocity (km/s)")
     ax1.set_ylabel("V sini (km/s)")
 
     inferred_radii = rotation_radius(valid_vsini, valid_period)
-    ax2.plot(valid_radii, inferred_radii, 'go')
+    ax2.errorbar(
+        valid_radii[valid_subgiant_indices], 
+        inferred_radii[valid_subgiant_indices], 
+        yerr=0.1*inferred_radii[valid_subgiant_indices],
+        xerr=[-valid_raderr_below[valid_subgiant_indices],
+              valid_raderr_above[valid_subgiant_indices]], fmt='b*')
+    ax2.errorbar(
+        valid_radii[valid_dwarf_indices], 
+        inferred_radii[valid_dwarf_indices], 
+        yerr=0.1*inferred_radii[valid_dwarf_indices],
+        xerr=[-valid_raderr_below[valid_dwarf_indices],
+              valid_raderr_above[valid_dwarf_indices]], fmt='ro')
     ax2.plot([0, 3.5], [0, 3.5], 'k-')
     ax2.set_xlabel("Radius (Rsun)")
     ax2.set_ylabel("Inferred R sini (Rsun)")
+
+def write_asteroseismic_rotation_table(
+        table, output_filename, title,  apid_col="APOGEE_ID", KICcol="KIC", 
+        Teffcol="TEFF", logg_col="LOGG_DW", vsini_col="VSINI_DR14", 
+        radius_col="RADIUS_DW", periodcol="Prot_DR14", 
+        aspcapcol="ASPCAPFLAGS_DR14", starcol="STARFLAGS", 
+        outputpath=paths.HEAD_DIR):
+    '''Write the table with quantities relevant to rotation.'''
+    output_table = table[[apid_col, KICcol, Teffcol, logg_col, vsini_col,
+                          radius_col, periodcol, aspcapcol, starcol]]
+    output_table.add_column(table["FPARAM"][:,1], index=3)
+    names = ("APOGEE ID", "KIC", "Teff", "Spec Log(g)", "Ast. Log(g)", "vsini",
+             "Ast. Radius", "Rot. Period", "ASPCAP Flags", "Star Flags")
+    
+    output_table.write(str(outputpath / output_filename), format="ascii.aastex",
+                       names=names, latexdict={"caption": title})
+
+def write_rotation_debug_table(
+    tbl, outfile, title, label, apid_col="APOGEE_ID", KICcol="KIC",
+    apogee_teff="TEFF", huber_teff="teff", huber_logg="logg", vsini="VSINI",
+    radius="radius", period="Prot", aspcapcol="ASPCAPFLAGS",
+    outputpath=paths.HEAD_DIR):
+    '''Write a table to output rotation information.'''
+    output_table = tbl[["APOGEE_ID", "KIC", "TEFF", "teff", "logg", "VSINI",
+                        "radius", "Prot", "ASPCAPFLAGS"]]
+    output_table.add_column(tbl["FPARAM"][:,1], index=4)
+    names=("APOGEE ID", "KIC", "Spec Teff", "Huber Teff", "Spec Log(g)", 
+           "Huber Log(g)", "vsini", "Huber Radius", "Rot. Period", 
+           "ASPCAP Flags")
+    output_table.write(
+        str(outputpath / outfile), format="ascii.aastex", names=names, 
+        latexdict={"caption": title + "\\\\label{{table:{0}}}".format(label), 
+                   "preamble": r"\tabletypesize{\footnotesize}"})
+
+def write_table_for_period_people(tbl, outfile, outputpath=paths.HEAD_DIR):
+    '''Write a table for relevant parameters for period people.'''
+    # APOGEE_ID, KIC, Huber Teff, Huber Log(g), Huber radius, McQuillan P, 
+    # Spec Teff, Spec Log(g), VSINI, Predicted Pmin, Predicted Pmax
+    output_table = tbl[["KIC", "APOGEE_ID", "teff", "logg", "radius", "Prot",
+                        "TEFF", "VSINI"]]
+    output_table.add_column(tbl["FPARAM"][:,1], index=7)
+    lowp, midp, highp = vsini_to_period(
+        output_table["VSINI"], output_table["radius"])
+    output_table["Pmin"] = lowp                                                    
+    output_table["Pmax"] = highp
+    names = (
+        "KIC", "APOGEE ID", "Huber Teff", "Huber Log(g)", "Huber Radius",
+        "McQuillan P", "APOGEE Teff", "APOGEE Log(g)", "VSINI", "Minimum per.",
+        "Maximum per.")
+    output_table.write(str(outputpath / outfile), format="ascii.fixed_width",
+                       names=names)
+
+def write_table_for_spec_people(tbl, outfile, outputpath=paths.HEAD_DIR):
+    '''Write a table with relevant parameters for spectroscopic people.'''
+    # APOGEE_ID, LOCATION_ID, KIC, Spec Teff, Spec Log(g), VSINI, ASPCAPFLAGS,
+    # STARFLAGS, McQuillan P, Equatorial V.
+    output_table = tbl
+    output_table.write(str(outputpath / outfile), format="ascii.basic")
 
 def rotation_teff_test(
     vsini, period, teff, metallicity, alpha, apogee_flags, age=2.0):
@@ -1950,7 +2038,7 @@ def read_pulsators(pulsatorfile=paths.KIC_PULSATORS):
         pulsatorfile, format="ascii.no_header", names=["KIC"])
     return pulsatortable
 
-def filter_pulsators(fulltable, quiet=False, KICcol="KEPLER_INT"):
+def filter_pulsators(fulltable, quiet=False, KICcol="KIC"):
     '''Removes known Kepler pulsators from a table of Kepler objects.
 
     If the quiet keyword is disabled, then this function will print the KIC IDs
@@ -2253,14 +2341,14 @@ def compare_sini_distribution(velocities, vsinis, vsini_cutoff=5, nbins=20):
     
 
 def compare_vsini_distribution(velocities, vsinis, vsini_percent=0.1,
-                               vsini_cutoff=5, nbins=100):
+                               vsini_cutoff=5, nbins=70, maxv=70):
     '''Compare the observed vsin(i) distribution to that inferred from vrot.
 
     This will reconstruct a vsin(i) distribution using the provided velocity
     distribution. The reconstruction involves convolving with a fractional vsini
     uncertainty, and then convolving with a population of random
     inclinations.'''
-    vel_bins = np.linspace(0, 100+100/nbins, nbins+1, endpoint=False)
+    vel_bins = np.linspace(0, maxv*(1+1/nbins), nbins+1, endpoint=False)
     vel_hist, bins = np.histogram(velocities, bins=vel_bins)
     dv = vel_bins[2] - vel_bins[1]
     binvalues = (vel_bins[1:] + vel_bins[:-1])/2
@@ -2304,7 +2392,7 @@ def compare_vsini_distribution(velocities, vsinis, vsini_percent=0.1,
              c=modelcolor)
     ax1.step(vel_bins[:-1], vel_hist, where="post", lw=1, label="Vrot", 
              c=rotcolor)
-    ax1.set_xlim(0, 100)
+    ax1.set_xlim(0, vel_bins[-1])
     ax1.set_ylabel("N (vsini)")
     ax1.legend(loc="upper right")
     ax1.text(0.3, 0.8, "{0:d} Total".format(len(velocities)),
@@ -2458,6 +2546,22 @@ def compare_inferred_flicker_loggs(
         plt.plot([xvalue[i]]*2, [kic_logg[i], dsep_logg[i]], ls=':', c=lc)
     plt.ylabel("Log(g)")
     hr.invert_y_axis()
+
+def compare_Huber_APOGEE_loggs(
+    apogee_logg, huber_logg, huber_logg_low, huber_logg_high):
+    '''Compare APOGEE log(g) to Huber log(g) with uncertainties.
+
+    Will basically make a One-to-one plot with the asymmetric Huber
+    uncertainties taken into account, to see if objects that scatter into the
+    dwarf regime are uncertain subgiants.'''
+    plt.errorbar(
+        apogee_logg, huber_logg, yerr=[-huber_logg_low, huber_logg_high],
+        fmt="go")
+    plt.plot([2, 5], [2, 5], 'k-')
+    plt.plot([2, 5], [4.2, 4.2], 'b--')
+    plt.plot([4.2, 4.2], [2, 5], 'b--')
+    plt.xlabel("Uncalibrated APOGEE log(g)")
+    plt.ylabel("Huber log(g)")
 
 
 def EBs_missed_by_Rafa(rafa_ebs, missed_ebs, xcol, ycol, xlabel="", ylabel=""):
@@ -2896,9 +3000,14 @@ def mark_DLSB_indices(apogee_ids, dlsb_db=DLSB_PATH):
     return np.where(dlsb_indices)
 
 def filter_double_lined_spectroscopic_binaries(
-    apocat, apid_col="APOGEE_ID", dlsb_db=DLSB_PATH):
+    apocat, apid_col="APOGEE_ID", dlsb_db=DLSB_PATH, verbose=False):
     '''Remove Double-Lined Spectroscopic Binaries by APOGEE_ID'''
     dlsb_indices = mark_DLSB_indices(apocat[apid_col], dlsb_db=dlsb_db)
+    # Print out the found DLSBs
+    if verbose:
+        dlsb_names = apocat[apid_col][dlsb_indices]
+        for dlsb in dlsb_names:
+            print("{0} is a known DLSB.".format(dlsb))
     filtered_cat = apocat[au.get_complement_indices(dlsb_indices, len(apocat))]
     add_cut_metadata(
         filtered_cat, "Removed DLSBs: see {0} for list".format(dlsb_db))

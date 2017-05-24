@@ -59,7 +59,6 @@ def select_targets_before_magcut():
     mcq_observing = catalog.join_by_2MASS_key(
         mcq_observing, apogee, "tm_designation", "tm_designation", 
         join_type="left", conflict_suffixes=("_KIC", "_APOGEE"))
-    return mcq_observing
     del(apogee)
     
     # Remove APOGEE giants
@@ -142,6 +141,97 @@ def select_observing_targets(ntargets=50, tbins=3, pbins=3, Vcut=14):
     prioritytable.meta = mcq_observing.meta
 
     return prioritytable
+
+def select_SLSB_target():
+    '''Selects the single-lined spectroscopic binary to observe.'''
+    mcq = catin.mcquillan_with_stelparms()
+
+    mcq_observing = select_tidally_synchronized_binaries(
+        mcq, pcut=5, lowperiod=1, lowtemp=4850, hightemp=5600, logg=3.5,
+        teffcol="teff", pcol="Prot", loggcol="logg")
+
+    mcq_observing = catalog.filter_pulsators(mcq_observing, KICcol="KIC")
+
+    # In this case I only want APOGEE targets. So join_type="inner"
+    apogee = catin.mcquillan_dr14_overlap()
+    mcq_observing = catalog.join_by_2MASS_key(
+        mcq_observing, apogee, "tm_designation", "tm_designation", 
+        join_type="inner", conflict_suffixes=("_KIC", "_APOGEE"))
+    del(apogee)
+    
+    # Remove APOGEE giants
+    autodwarfs = mcq_observing["LOGG"] < 0
+    mcq_observing["LOGG"][mcq_observing["LOGG"] < 0] = 9999.0
+    mcq_observing = catalog.perform_logg_cut(
+        mcq_observing, lowlogg=3.5, loggcol="LOGG")
+    mcq_observing["LOGG"][mcq_observing["LOGG"] == 9999.0] = -9999.0
+
+    # Remove double-lined spectroscopic binaries.
+    mcq_observing = catalog.filter_double_lined_spectroscopic_binaries(
+        mcq_observing)
+
+    # Return random targets with RV scatter > 0.5 km/s.
+    mcq_observing = catalog.perform_vscatter_cut(mcq_observing, 0.5) 
+
+    # Perform a magnitude cut.
+    mcq_phot = catin.mcquillan_photometry()
+    mcq_observing = au.join_by_id(mcq_observing, mcq_phot, "kepid", "KIC")
+    del(mcq_phot)
+    missing_Vs = mcq_observing["V"].mask
+    JK_interp = sed.color_to_color_DSEP_interpolator(
+        "J-Ks", "V-H", {"V": 1, "J": 1, "H": 1, "Ks": 1}, age=2, init_mass=0.9)
+    missing_JKs = (mcq_observing['jmag'][missing_Vs] -
+                   mcq_observing["kmag"][missing_Vs]).filled()
+    mcq_observing["V"][missing_Vs] = (
+        JK_interp(missing_JKs) + mcq_observing["hmag"][missing_Vs])
+
+    return mcq_observing
+    
+def select_DLSB_target():
+    '''Selects the double-lined spectroscopic binary to observe.'''
+    mcq = catin.mcquillan_with_stelparms()
+
+    mcq_observing = select_tidally_synchronized_binaries(
+        mcq, pcut=5, lowperiod=1, lowtemp=4850, hightemp=5600, logg=3.5,
+        teffcol="teff", pcol="Prot", loggcol="logg")
+
+    mcq_observing = catalog.filter_pulsators(mcq_observing, KICcol="KIC")
+
+    # In this case I only want APOGEE targets. So join_type="inner"
+    apogee = catin.mcquillan_dr14_overlap()
+    mcq_observing = catalog.join_by_2MASS_key(
+        mcq_observing, apogee, "tm_designation", "tm_designation", 
+        join_type="inner", conflict_suffixes=("_KIC", "_APOGEE"))
+    del(apogee)
+    
+    # Remove APOGEE giants
+    autodwarfs = mcq_observing["LOGG"] < 0
+    mcq_observing["LOGG"][mcq_observing["LOGG"] < 0] = 9999.0
+    mcq_observing = catalog.perform_logg_cut(
+        mcq_observing, lowlogg=3.5, loggcol="LOGG")
+    mcq_observing["LOGG"][mcq_observing["LOGG"] == 9999.0] = -9999.0
+
+    # Remove double-lined spectroscopic binaries.
+    dlsb_indices = catalog.mark_DLSB_indices(mcq_observing["APOGEE_ID"])
+    mcq_observing = mcq_observing[dlsb_indices]
+
+    # Return random targets with RV scatter > 0.5 km/s.
+    mcq_observing = catalog.perform_vscatter_cut(mcq_observing, 0.5) 
+
+    # Perform a magnitude cut.
+    mcq_phot = catin.mcquillan_photometry()
+    mcq_observing = au.join_by_id(mcq_observing, mcq_phot, "kepid", "KIC")
+    del(mcq_phot)
+    missing_Vs = mcq_observing["V"].mask
+    JK_interp = sed.color_to_color_DSEP_interpolator(
+        "J-Ks", "V-H", {"V": 1, "J": 1, "H": 1, "Ks": 1}, age=2, init_mass=0.9)
+    missing_JKs = (mcq_observing['jmag'][missing_Vs] -
+                   mcq_observing["kmag"][missing_Vs]).filled()
+    mcq_observing["V"][missing_Vs] = (
+        JK_interp(missing_JKs) + mcq_observing["hmag"][missing_Vs])
+
+    return mcq_observing
+    
 
 def sample_biases(prioritytable):
     '''Make figures to explore biases in sample.
