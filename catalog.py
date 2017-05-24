@@ -298,6 +298,14 @@ def write_KIC_Vizier_upload_list(kics, outputfile, outputpath=paths.HEAD_DIR):
         outputpath=outputpath)
     kic_table.write(str(outputpath / outputfile), format="ascii.no_header")
 
+def write_SIMBAD_identifier_list(
+    identifiers, outputfile, outputpath=paths.HEAD_DIR):
+    '''Write a list that can be uploaded to SIMBAD as a list of identifiers.'''
+    ident_table = Table([identifiers], names=["Ident"])
+    write_columns_for_input(
+        ident_table, outputfile, 99999, "ascii.no_header",
+        output_columns=["Ident"], outputpath=outputpath)
+
 def write_MAST_files(outputtable, kiccol="KIC", outputpath=paths.HEAD_DIR,
                      output_filename="Kepler_MAST.txt"):
     '''Writes KICs so that they are able to be read by the MAST target form.

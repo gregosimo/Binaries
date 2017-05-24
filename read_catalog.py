@@ -5,6 +5,7 @@ from scipy.io import readsav
 import numpy as np
 import numpy.core.defchararray as npstr
 import astropy_util as au
+import statop as stat
 
 import path_config as paths
 import catalog
@@ -478,6 +479,9 @@ def read_Stauffer_Pleiades(vsini_file=paths.STAUFFER_VSINI_PATH):
         ('---', '0'), ('', '0')])
     separate_limit(tbl, ["vsini"], eqdelim="")
     return tbl
+
+def read_SIMBAD_2MASS_IDs(simbadfile, output_path=paths.HEAD_DIR,
+                          ident_col="identifier")
 
 def separate_limit(table, limcols, updelim="<", lowdelim=">", eqdelim="=",
                    coltemplate="{0} lim"):
