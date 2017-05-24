@@ -55,6 +55,8 @@ TGAS_MCQUILLAN_APOGEE_TIDSYNC_PATH = (
 FLICKER_LOGG = HEAD_DIR / "flicker_loggs.txt"
 BRUNTT_PATH = HEAD_DIR / "Bruntt_vsini.vot"
 
+STAUFFER_VSINI_PATH = HEAD_DIR / "Stauffer_Hartmann_Table1.txt"
+
 THESIS_PATH = HEAD_DIR / "Thesis"
 PROPOSAL_PATH = THESIS_PATH / "Proposals"
 APOGEE_ANCILLARY_TARGETS_TABLE = PROPOSAL_PATH / "ancillary_targets.txt"
