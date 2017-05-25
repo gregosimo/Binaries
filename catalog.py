@@ -25,6 +25,7 @@ import requests
 # from apogee.tools import bitmask
 
 import astropy_util as au
+import statop as stat
 import hrplots as hr
 import binarycalcs as bc
 import path_config as paths
@@ -1543,6 +1544,28 @@ def compare_rapid_rotator_period_vsini(
         c='r', marker="o", ls="", label="Definite rapid vsini rotators")
     plt.ylabel("Vsini Period / Photometric Period")
     plt.yscale("log")
+
+def plot_Stauffer_APOGEE_vsini_comparison():
+    '''Compare the vsini values from Stauffer & Hartmann to APOGEE.
+
+    The vsini values are from select targets from the Pleiades.'''
+    targets = catin.Stauffer_APOGEE_overlap()
+    good_targets = good_aspcap_fits(targets)
+    nondetections = np.logical_and(
+        good_targets["vsini lim"] == stat.LOWER, good_targets["VSINI"] < 7)
+    detected_targets = good_targets[~nondetections]
+
+    Stauffer_errors = (detected_targets["vsini"] / 2 / 
+                       (1 + detected_targets["R"])).filled(0)
+    apogee_errors = 0.1 * detected_targets["VSINI"]
+
+    plt.errorbar(detected_targets["vsini"], detected_targets["VSINI"],
+                 apogee_errors, Stauffer_errors, 'b*')
+    plt.plot([0, 25], [0, 25])
+    plt.plot([0, 10, 10], [7, 7, 0], 'r--')
+    plt.xlabel("Stauffer & Hartmann VSINI")
+    plt.ylabel("APOGEE VSINI")
+    plt.title("Good VSINI comparison")
 
 def rapid_rotation_vsini_comparison_histogram(
         vsini, period, radii, xvalues, rapidperiod=5, xlim=None, nbins=10):

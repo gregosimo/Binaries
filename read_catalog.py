@@ -185,24 +185,34 @@ def read_TGAS_McQuillan_APOGEE_overlap_tidsync(
     tgas_table = Table.read(str(path), format="fits")
     return tgas_table
 
-def read_dr14_allVisit(allvisitpath=paths.DR14_ALLVISIT_PATH, kepleropt=True):
+def read_dr14_allVisit(allvisitpath=paths.DR14_ALLVISIT_PATH, opt="kepler"):
     '''Read the DR14 allVisit file.
 
-    This function reads the l31c.1 version of the allVisit file. If the
-    Kepleropt keyword is given, then only the objects in the RA range of Keler
-    will be read, which should greatly reduce the memory requirements. Only the
-    summary data table will be read, which should contain everthing necessary
-    for the APOGEE pipeline.
+    This function reads the l31c.1 version of the allVisit file. The table can 
+    be optimized for either Kepler targets or Pleiades targets by specifying 
+    opt="kepler" or "pleiades".  Optimization means that only the objects in 
+    the RA range corresponding to either the Kepler field or the Pleiades will 
+    be loaded, which will significantly reduce memory usage. Only the summary 
+    data table will be read, which should contain everthing necessary for the 
+    APOGEE pipeline.
     
-    WARNING: If kepleropt is disabled, then the extremely large table may cause
-    python to crash if it can't fit in memory.'''
+    WARNING: If opt is set to "", then full table will take 
+    several hours to fit into memory.
+    '''
 
-    if kepleropt:
+    if opt:
         allvisit_hdus = fits.open(str(allvisitpath), memmap=True)
         allvisit_indices = allvisit_hdus[2]
-        index_start = allvisit_indices.data[279]
-        index_end = allvisit_indices.data[302]
-        # This will only have targets in the Kepler RA range.
+        if opt.lower() == "kepler":
+            index_start = allstar_indices.data[279]
+            index_end = allstar_indices.data[302]
+        elif opt.lower() == "pleiades":
+            index_start = allstar_indices.data[55]
+            index_end = allstar_indices.data[58]
+        else:
+            raise ValueError(
+                "Don't understand optmization: {0}".format(opt))
+        # This will only have targets in the optimized RA range.
         allvisit_kepler = allvisit_hdus[1].data[index_start:index_end]
         allvisit_hdus.close()
         # Convert from recarray to Table
@@ -213,23 +223,32 @@ def read_dr14_allVisit(allvisitpath=paths.DR14_ALLVISIT_PATH, kepleropt=True):
 
     return allvisit
 
-def read_dr14_allStar(allstarpath=paths.DR14_ALLSTAR_PATH, kepleropt=True):
+def read_dr14_allStar(allstarpath=paths.DR14_ALLSTAR_PATH, opt="kepler"):
     '''Reads the allStar file for DR14.
     
-    Reads in the allStar table for DR14. If the Kepleropt keyword is given,
-    then only the objects in the RA range of Kepler will be read, which should
-    greatly reduce the memory requirements. Only the Summary data table will be
-    read in, which should contain everything necessary for the APOGEE pipeline.
+    Reads in the allStar table for DR14. The table can be optimized for either
+    Kepler targets or Pleiades targets by specifying opt="kepler" or "pleiades". 
+    Optimization means that only the objects in the RA range corresponding to 
+    either the Kepler field or the Pleiades will be loaded, which will 
+    significantly reduce memory usage. Only the Summary data table will be read 
+    in, which should contain everything necessary for the APOGEE pipeline.
 
-    WARNING: If kepleropt is disabled, then extremely large table will take 
+    WARNING: If opt is set to "", then full table will take 
     several hours to fit into memory.
     '''
-    if kepleropt:
+    if opt:
             allstar_hdus = fits.open(str(allstarpath), memmap=True)
             allstar_indices = allstar_hdus[2]
-            index_start = allstar_indices.data[279]
-            index_end = allstar_indices.data[302]
-            # This will only have targets in the Kepler RA range.
+            if opt.lower() == "kepler":
+                index_start = allstar_indices.data[279]
+                index_end = allstar_indices.data[302]
+            elif opt.lower() == "pleiades":
+                index_start = allstar_indices.data[55]
+                index_end = allstar_indices.data[58]
+            else:
+                raise ValueError(
+                    "Don't understand optmization: {0}".format(opt))
+            # This will only have targets in the optimized RA range.
             allstar_kepler = allstar_hdus[1].data[index_start:index_end]
             allstar_hdus.close()
             # Convert from recarray to Table
@@ -345,7 +364,7 @@ def bruntt_dr14_overlap(
     kiccat = read_KIC_DR25_catalog()
     brunttkic = au.join_by_id(bruntt, kiccat, "KIC", "kepid", join_type="left",
                               conflict_suffixes=("_Bruntt", "_Huber"))
-    apo = read_dr14_allStar(apopath, kepleropt=True)
+    apo = read_dr14_allStar(apopath, opt="kepler")
     fullcat = catalog.join_by_2MASS_key(
         brunttkic, apo, "tm_designation", "APOGEE_ID", 
         conflict_suffixes=("_Bruntt", "_APOGEE"))
@@ -362,6 +381,24 @@ def mcquillan_ebs(
 
     mcq_ebs = au.join_by_id(ebs, mcq, "KIC", "KIC")
     return mcq_ebs
+
+def Stauffer_APOGEE_overlap(
+    stauffer_path=paths.STAUFFER_VSINI_PATH, apopath=paths.DR14_ALLSTAR_PATH):
+    '''Read targets observed by both Stauffer & Hartmann (1987) and APOGEE.'''
+    apo = read_dr14_allStar(apopath, opt="pleiades")
+    stauffer = read_Stauffer_Pleiades(stauffer_path)
+    simbad_translation = read_SIMBAD_file("simbad_Stauffer_2MASS_ids.txt")
+    tmass_names = np.array([j[:23] for j in simbad_translation["identifier"]])
+    translation_table = Table([simbad_translation["typed ident"], tmass_names],
+                              names=("ident", "2mass"))
+    stauffer_translate = au.join_by_id(
+        stauffer, translation_table, "Star", "ident", join_type="left")
+    joined_table = catalog.join_by_2MASS_key(
+        apo, stauffer_translate, "APOGEE_ID", "2mass", join_type="inner")
+
+    return joined_table
+
+
 
 ######################
 # Processed Catalogs #
@@ -480,8 +517,12 @@ def read_Stauffer_Pleiades(vsini_file=paths.STAUFFER_VSINI_PATH):
     separate_limit(tbl, ["vsini"], eqdelim="")
     return tbl
 
-def read_SIMBAD_2MASS_IDs(simbadfile, output_path=paths.HEAD_DIR,
-                          ident_col="identifier")
+def read_SIMBAD_file(simbadfile, output_path=paths.HEAD_DIR):
+    '''Read in a SIMBAD table and extract the 2MASS IDs.'''
+    tbl = Table.read(
+        str(output_path / simbadfile), format="ascii.basic", comment="", 
+        guess=False, delimiter="|", data_start=2, data_end=101)
+    return tbl
 
 def separate_limit(table, limcols, updelim="<", lowdelim=">", eqdelim="=",
                    coltemplate="{0} lim"):
