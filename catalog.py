@@ -770,8 +770,8 @@ def targets_in_APOGEE_fields(
 
     Returns the subset of kic_targets which can be found in the given APOGEE
     fields. The APOGEE fields that each target can be found in will be in the
-    column given by field_col.'''
-    all_apogee_fields = catin.read_APOGEE_KASC_fields()
+    column given by aield_col.'''
+    all_apogee_fields = read_APOGEE_KASC_fields()
     found_apogee_fields = unique(au.extract_subtable_from_column(
         all_apogee_fields, "NAME", apogee_fields), keys="NAME")
     field_coords = SkyCoord(
