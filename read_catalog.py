@@ -481,7 +481,8 @@ def read_Stauffer_Pleiades(vsini_file=paths.STAUFFER_VSINI_PATH):
     return tbl
 
 def read_SIMBAD_2MASS_IDs(simbadfile, output_path=paths.HEAD_DIR,
-                          ident_col="identifier")
+                          ident_col="identifier"):
+    pass
 
 def separate_limit(table, limcols, updelim="<", lowdelim=">", eqdelim="=",
                    coltemplate="{0} lim"):
