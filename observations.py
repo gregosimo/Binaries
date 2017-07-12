@@ -53,7 +53,12 @@ def select_targets_before_magcut():
         mcq, pcut=5, lowperiod=1, lowtemp=4850, hightemp=5600, logg=3.5,
         teffcol="teff", pcol="Prot", loggcol="logg")
 
+    preprocess_size = len(mcq_observing)
+    print("Sample after major cuts: {0:d}".format(preprocess_size))
+
     mcq_observing = catalog.filter_pulsators(mcq_observing, KICcol="KIC")
+    pulsators_removed = len(mcq_observing)
+    print("Sample after removing pulsators: {0:d}".format(pulsators_removed))
 
     apogee = catin.mcquillan_dr14_overlap()
     mcq_observing = catalog.join_by_2MASS_key(
@@ -67,6 +72,8 @@ def select_targets_before_magcut():
     mcq_observing = catalog.perform_logg_cut(
         mcq_observing, lowlogg=3.5, loggcol="LOGG")
     mcq_observing["LOGG"][mcq_observing["LOGG"] == 9999.0] = -9999.0
+    giants_removed = len(mcq_observing)
+    print("Sample after removing APOGEE Giants: {0:d}".format(giants_removed))
 
     # Remove objects which are already observed to be RV variable
     mcq_observing["VSCATTER"] = mcq_observing["VSCATTER"].filled(-9999.0)
@@ -74,6 +81,8 @@ def select_targets_before_magcut():
         mcq_observing, highv=1, vcol="VSCATTER")
     mcq_observing["VSCATTER"] = np.ma.masked_values(mcq_observing["VSCATTER"],
                                                  -9999.0)
+    giants_removed = len(mcq_observing)
+    print("Sample after removing APOGEE giants: " + giants_removed)
     
     # Remove objects which have been observed enough to indicate non
     # RV-variability.
