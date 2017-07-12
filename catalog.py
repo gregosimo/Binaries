@@ -1315,10 +1315,10 @@ def compare_rotation_velocity_radius(
         infvel[valid_dwarf_indices], valid_vsini[valid_dwarf_indices],
         xerr=[-downvel[valid_dwarf_indices], upvel[valid_dwarf_indices]],
         yerr=0.1*valid_vsini[valid_dwarf_indices], fmt='ro', label="Dwarfs")
-    ax1.plot([0, 40], [0, 40], 'k-')
-    ax1.plot([0, 40], [7, 7], 'r--', label="Detection Limit")
+    ax1.plot([0, 70], [0, 70], 'k-')
+    ax1.plot([0, 100], [7, 7], 'r--', label="Detection Limit")
     plt.sca(ax1)
-    plt.legend(loc="upper left")
+    plt.legend(loc="upper right")
     ax1.set_xlabel("Inferred equatorial velocity (km/s)")
     ax1.set_ylabel("V sini (km/s)")
 
@@ -1335,7 +1335,7 @@ def compare_rotation_velocity_radius(
         yerr=0.1*inferred_radii[valid_dwarf_indices],
         xerr=[-valid_raderr_below[valid_dwarf_indices],
               valid_raderr_above[valid_dwarf_indices]], fmt='ro')
-    ax2.plot([0, 3.5], [0, 3.5], 'k-')
+    ax2.plot([0, 4.0], [0, 4.0], 'k-')
     ax2.set_xlabel("Radius (Rsun)")
     ax2.set_ylabel("Inferred R sini (Rsun)")
 
