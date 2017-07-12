@@ -398,6 +398,15 @@ def Stauffer_APOGEE_overlap(
 
     return joined_table
 
+@au.shortcut_file(paths.SHORTCUT_APOGEE_KIC)
+def dr14_with_KIC_stelparms(apopath=paths.DR14_ALLSTAR_PATH,
+                            kicpath=paths.KIC_CATALOG):
+    '''Read in Kepler DR14 targets with Huber stellar parameters.'''
+    apo = read_dr14_allStar(apopath, opt="kepler")
+    kiccat = read_KIC_DR25_catalog()
+    apokic = catalog.join_by_2MASS_key(
+        apo, kiccat, "APOGEE_ID", "tm_designation")
+    return apokic
 
 
 ######################
