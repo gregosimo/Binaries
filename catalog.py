@@ -2966,8 +2966,8 @@ def bad_ASPCAP_indices(aspcapflags, warn=False):
     '''
     bad_indices = npstr.find(aspcapflags, "STAR_BAD") > 0
     if warn:
-        bad_indices = np.logical_and(bad_indices, npstr.find(
-            aspcapflags, "STAR_WARN") > 0)
+        bad_indices = np.logical_or(bad_indices, npstr.find(
+            aspcapflags, "STAR_WARN") >= 0)
 
     return bad_indices
 
