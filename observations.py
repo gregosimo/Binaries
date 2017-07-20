@@ -81,8 +81,10 @@ def select_targets_before_magcut():
     mcq_observing = catalog.perform_cut(mcq_observing, "NVISITS", highval=4)
     mcq_observing["NVISITS"] = np.ma.masked_values(mcq_observing["NVISITS"], 0)
 
+    print(len(mcq_observing))
     # Also remove eclipsing binaries.
     mcq_observing = catalog.remove_Kepler_EBs(mcq_observing, mainkiccol="kepid")
+    print(len(mcq_observing))
 
     return mcq_observing
 
@@ -105,6 +107,7 @@ def select_observing_targets(ntargets=50, tbins=3, pbins=3, Vcut=14):
     mcq_observing = au.join_by_id(mcq_observing, mcq_phot, "kepid", "KIC")
     del(mcq_phot)
     missing_Vs = mcq_observing["V"].mask
+    print("{0} missing in HE catalog.".format(np.count_nonzero(missing_Vs)))
     JK_interp = sed.color_to_color_DSEP_interpolator(
         "J-Ks", "V-H", {"V": 1, "J": 1, "H": 1, "Ks": 1}, age=2, init_mass=0.9)
     missing_JKs = (mcq_observing['jmag'][missing_Vs] -

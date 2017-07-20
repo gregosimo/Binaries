@@ -480,9 +480,6 @@ def read_Stauffer_Pleiades(vsini_file=paths.STAUFFER_VSINI_PATH):
     separate_limit(tbl, ["vsini"], eqdelim="")
     return tbl
 
-def read_SIMBAD_2MASS_IDs(simbadfile, output_path=paths.HEAD_DIR,
-                          ident_col="identifier"):
-
 def separate_limit(table, limcols, updelim="<", lowdelim=">", eqdelim="=",
                    coltemplate="{0} lim"):
     '''Takes limcols from a table and splits them into limit columns.
