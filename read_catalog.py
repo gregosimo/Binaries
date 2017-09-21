@@ -342,6 +342,20 @@ def mcquillan_dr14_overlap(
     mcq_dr14 = catalog.join_by_2MASS_key(mcq_col, dr14, "tm_designation", "APOGEE_ID")
     return mcq_dr14
 
+@au.shortcut_file(paths.SHORTCUT_MCQUILLAN_DR14_KIC)
+def mcquillan_dr14_overlap_with_stelparms(
+    mcq_path=paths.MCQUILLAN_CATALOG, apopath=paths.DR14_ALLSTAR_PATH,
+    kicpath=paths.KIC_CATALOG):
+    '''Read in the McQuillan/APOGEE overlap with KIC parameters.'''
+    dr14_stelparms = dr14_with_KIC_stelparms(apopath, kicpath)
+    mcq = read_McQuillan_catalog(mcq_path)
+    del(mcq["Teff"])
+    del(mcq["log_g_"])
+    del(mcq["Mass"])
+    fullcat = au.join_by_id(mcq, dr14_stelparms, "KIC", "kepid")
+    return fullcat
+
+
 @au.shortcut_file(paths.SHORTCUT_MCQUILLAN_EHK)
 def mcquillan_photometry(
     mcq_path=paths.MCQUILLAN_CATALOG, photo_path=paths.EHK_PATH):
@@ -525,6 +539,10 @@ def read_Stauffer_Pleiades(vsini_file=paths.STAUFFER_VSINI_PATH):
         ('---', '0'), ('', '0')])
     separate_limit(tbl, ["vsini"], eqdelim="")
     return tbl
+
+def read_SIMBAD_2MASS_IDs(simbadfile, output_path=paths.HEAD_DIR,
+                          ident_col="identifier"):
+    pass
 
 def read_SIMBAD_file(simbadfile, output_path=paths.HEAD_DIR):
     '''Read in a SIMBAD table and extract the 2MASS IDs.'''

@@ -1319,7 +1319,7 @@ def compare_rotation_velocity_radius(
     ax1.plot([0, 80], [0, 80], 'k-')
     ax1.plot([0, 80], [7, 7], 'r--', label="Detection Limit")
     plt.sca(ax1)
-    plt.legend(loc="upper left")
+    plt.legend(loc="upper right")
     ax1.set_xlabel("Inferred equatorial velocity (km/s)")
     ax1.set_ylabel("V sini (km/s)")
 
@@ -1336,7 +1336,7 @@ def compare_rotation_velocity_radius(
         yerr=0.1*inferred_radii[valid_dwarf_indices],
         xerr=[-valid_raderr_below[valid_dwarf_indices],
               valid_raderr_above[valid_dwarf_indices]], fmt='ro')
-    ax2.plot([0, 3.5], [0, 3.5], 'k-')
+    ax2.plot([0, 4.0], [0, 4.0], 'k-')
     ax2.set_xlabel("Radius (Rsun)")
     ax2.set_ylabel("Inferred R sini (Rsun)")
 
@@ -3142,8 +3142,8 @@ def bad_ASPCAP_indices(aspcapflags, warn=False):
     '''
     bad_indices = npstr.find(aspcapflags, "STAR_BAD") > 0
     if warn:
-        bad_indices = np.logical_and(bad_indices, npstr.find(
-            aspcapflags, "STAR_WARN") > 0)
+        bad_indices = np.logical_or(bad_indices, npstr.find(
+            aspcapflags, "STAR_WARN") >= 0)
 
     return bad_indices
 

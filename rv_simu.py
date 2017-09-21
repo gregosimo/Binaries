@@ -48,6 +48,40 @@ def random_sample_RV_curves(
     return RV_results
 
 @u.quantity_input
+def MDM_sample_RV_curves(
+        obs_per_day, obs_interval: u.hour, period: u.day, num_nights,
+        nschedules=1):
+    '''Creates a light curve simulating nocturnal observations.
+
+    This will simulate some number of observations per day. While the
+    observations are evenly spaced through the night, there is a stochastic
+    offset. The observations will be taken in a period of time given by
+    obs_interval, which should be the length of time for which the Kepler field
+    is observable. The light curve will also be given a random offset in phase,
+    which is calculated by randomly selecting a number less than the period.
+    The total number of nights will be specified by num_nights.
+
+    The number of potential observations to be realized is given by nschedules.
+    If nschedules=100, then 100 different potential curves will be made.
+
+    This does not take irregularities due to weather into account.
+    '''
+    # First make the backbond of observations. This should the grid where
+    # regularly-spaced observations will be done. They will then be scattered
+    # by adding in a random array.
+    obs_steps, dobs = np.linspace(0, obs_interval.to(u.hour).value,
+                                  obs_per_day, retstep=True)
+    obs_intervals = np.tile(obs_steps, num_nights)
+    night_count = np.repeat(np.arange(0, num_nights), obs_per_day)
+    obs_grid = (obs_intervals + 24*night_count)*u.hour
+    # Now add in the delay
+    delay = np.random.rand(nschedules) * period
+    random_fluctuations = (np.random.random_sample([nschedules, len(obs_grid)]) * 
+                           dobs * obs_grid.unit)
+    observing_times = delay[:, np.newaxis] + obs_grid + random_fluctuations
+    return observing_times
+
+@u.quantity_input
 def check_randomly_distributed_RV_efficiency(
     npoints, amplitude: u.km/u.s, period: u.day, uncertainty: u.km/u.s, 
     probsigma=5, nsamplings=1000):
@@ -65,6 +99,14 @@ def check_randomly_distributed_RV_efficiency(
     numflats = np.count_nonzero(flatcurves == True)
 
     return numflats / nsamplings
+
+@u.quantity_input
+def check_MDM_sampling(
+        obs_per_day, obs_interval: u.hour, period: u.day, num_nights,
+        nschedules=1):
+    '''Check probability of getting RV variability from daily observations.'''
+
+
 
 # In order to generalize this, there needs to be a very firm understanding on
 # what the shape of npoints is and what it represents. I don't think I'm
