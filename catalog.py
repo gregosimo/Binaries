@@ -2298,6 +2298,8 @@ def vsini_convolution_table(velbins, binvalues, mcpoints=10000):
         fullhist[i,:] = hist / mcpoints
     return fullhist
 
+def evaluate_vsini_dist
+
 def vsini_convolution_table_test(velbins, velocities):
     '''Create a table allowing velocities to be convolved on a grid.
 
@@ -2324,7 +2326,8 @@ def vsini_convolution_table_test(velbins, velocities):
     np.testing.assert_allclose(np.sum(profiles, axis=1), 1.0)
     return profiles
 
-def compare_sini_distribution(velocities, vsinis, vsini_cutoff=5, nbins=20):
+def compare_sini_distribution(velocities, vsinis, vsini_cutoff=5,
+                              vsini_percent=0.1, nbins=20, maxv=70):
     '''Compare the inferred sin(i) distribution to a random one.
 
     Derive a sin(i) distribution from a given velocity and observed vsin(i). In
@@ -2348,6 +2351,9 @@ def compare_sini_distribution(velocities, vsinis, vsini_cutoff=5, nbins=20):
 
     # Now make a cube for all data points
     convolutions = dist[:,:,np.newaxis] * (fullhist)
+
+    # Now add up all of the entries again.
+    data_dist = np.sum(convolutions, axis=1)
 
     # Now get the sini distributions for each object.
     sini_dists = convolutions / velocities[:,np.newaxis,np.newaxis]
