@@ -11,7 +11,7 @@ import numpy.core.defchararray as npstr
 import scipy
 from scipy.interpolate import interp1d
 from scipy.stats import norm, uniform, ks_2samp
-from scipy.special import gammaincc
+from scipy.special import gammaincc, erf
 import matplotlib.pyplot as plt
 from matplotlib import cm
 from matplotlib.ticker import AutoMinorLocator
@@ -2298,8 +2298,32 @@ def vsini_convolution_table(velbins, binvalues, mcpoints=10000):
         fullhist[i,:] = hist / mcpoints
     return fullhist
 
-def evaluate_vsini_dist
+def error_convolution_table(velbins, fractional_uncert=0.1):
+    '''Creates an error convolution table.
 
+    In particular, this creates a square where row i is the a Gaussian profile 
+    with center of (velbins[i+1] + velbins[i])/2 and dispersion of 
+    fractional_uncert * (velbins[i+1] + velbins[i])/2. 
+
+    The Gaussian will be truncated at cutoff, and all probability less than the
+    cutoff value will be distributed as uniform. Right now, cutoff needs to
+    coincide with a value in velbins.
+    '''
+    dv = velbins[1] - velbins[0]
+    centers = (velbins[:-1] + velbins[1:])/2
+    disp = fractional_uncert * centers
+
+    # I don't want things to be approximate for the uncertainties. So I'll use
+    # a more accurate expression for the area between the bins.
+    normalized_bins = (velbins - centers[:,np.newaxis]) / (
+        np.sqrt(2) * disp[:,np.newaxis])
+    erfs = erf(normalized_bins)
+    gaussian_table = (erfs[:,1:] - erfs[:,:-1])/2
+
+    return gaussian_table
+
+
+    
 def vsini_convolution_table_test(velbins, velocities):
     '''Create a table allowing velocities to be convolved on a grid.
 
@@ -2311,6 +2335,14 @@ def vsini_convolution_table_test(velbins, velocities):
     # histogram by simply integrating in each bin.
     # Transform velocity bins to sin(i) bins. 
     scaled_vels = velbins / velocities[:,np.newaxis]
+    profiles = np.nan_to_num(
+        np.sqrt(1-scaled_vels[:,:-1]**2) - np.sqrt(1-scaled_vels[:,1:]**2))
+    # Determine the values in the bins where v/vc > 1
+    edge_indices = np.argmin(scaled_vels < 1, axis=1)-1
+    # I need data indices to take advantage of the advanced indexing.
+    data_indices = np.arange(len(velocities))
+    profiles[data_indices, edge_indices] = np.sqrt(
+        1-scaled_vels[data_indices, edge_indices]**2)
     # This is the table of histograms. profiles[i,:] will be the histogram of
     # the ith profile. The sum along the 2nd axis should be 1. However, the
     # boundaries will be incorrect without further corrections.
@@ -2326,31 +2358,34 @@ def vsini_convolution_table_test(velbins, velocities):
     np.testing.assert_allclose(np.sum(profiles, axis=1), 1.0)
     return profiles
 
-def compare_sini_distribution(velocities, vsinis, vsini_cutoff=5,
-                              vsini_percent=0.1, nbins=20, maxv=70):
+def compare_sini_distribution(velocities, vsinis, vsini_cutoff=7, nbins=20,
+                              frac_uncertainty=0.1):
     '''Compare the inferred sin(i) distribution to a random one.
 
     Derive a sin(i) distribution from a given velocity and observed vsin(i). In
     order to decrease the amount of noise, objects with velocities less than
     vsini_cutoff will be ignored.'''
     # This will be the same as before. Except non-detections will be removed.
-    vel_bins = np.linspace(0, 100+100/nbins, nbins+1, endpoint=False)
+    vel_bins = np.linspace(0, 100, nbins+1, endpoint=True)
     vel_hist, bins = np.histogram(velocities, bins=vel_bins)
     dv = vel_bins[2] - vel_bins[1]
     binvalues = (vel_bins[1:] + vel_bins[:-1])/2
 
-    dispersions = np.reshape(vsini_percent * velocities, (len(velocities), 1))
-    # I'll do one data point now, but more will be on the way.
-    dist = 1/np.sqrt(2*np.pi*dispersions**2) * np.exp(-(
-        binvalues - velocities[:,np.newaxis])**2 / (2 * dispersions**2))*dv
-    print("Assuming VSINI uncertainties are 10%. Check this.")
-    # Now make a data square that contains sin(i) convolution profiles for all
-    # velocity bin values.
-    numpoints = 30000
-    fullhist = vsini_convolution_table(vel_bins, binvalues, mcpoints=numpoints)
+    # First I want the noiseless vsin(i) distribution.
+    scaled_vels = vel_bins / velocities[:,np.newaxis]
+    profiles = (np.sqrt(1-scaled_vels[:,:-1]**2) -
+                np.sqrt(1-scaled_vels[:,1:]**2)).filled(0.0)
+    # Determine the values in the bins where v/vc > 1
+    edge_indices = np.argmin(scaled_vels < 1, axis=1)-1
+    # I need data indices to take advantage of the advanced indexing.
+    data_indices = np.arange(len(velocities))
+    profiles[data_indices, edge_indices] = np.sqrt(
+        1-scaled_vels[data_indices, edge_indices]**2)
 
-    # Now make a cube for all data points
-    convolutions = dist[:,:,np.newaxis] * (fullhist)
+    # Now convolve with noise
+    noise_array = error_convolution_table(vel_bins, frac_uncertainty)
+    convolved_profile = profiles[:, np.newaxis, :] * noise_array
+    summed_profile = np.sum(convolved_profile, axis=1)
 
     # Now add up all of the entries again.
     data_dist = np.sum(convolutions, axis=1)
@@ -2476,6 +2511,143 @@ def compare_vsini_distribution(velocities, vsinis, vsini_percent=0.1,
     prob = gammaincc(0.5*dof, 0.5*lucy_Ysq)
     print("Calculated Chi-squared with {1:d} dof: {0:f}".format(lucy_Ysq, dof))
     print("Probability of data is {0:.4f}".format(prob))
+
+def temperature_diff_vsini_comparison(
+    hot_velocities, hot_vsinis, cool_velocities, cool_vsinis,
+    vsini_percent=0.1, vsini_cutoff=7, nbins=100, maxv=100):
+    '''Compare the vsini/period distributions for hot and cool stars.'''
+    vel_bins = np.linspace(0, maxv*(1+1/nbins), nbins+1, endpoint=False)
+    hot_vel_hist, bins = np.histogram(hot_velocities, bins=vel_bins)
+    cool_vel_hist, bins = np.histogram(cool_velocities, bins=vel_bins)
+    dv = vel_bins[2] - vel_bins[1]
+    binvalues = (vel_bins[1:] + vel_bins[:-1])/2
+
+    hot_dispersions = np.reshape(vsini_percent * hot_velocities, 
+                                 (len(hot_velocities), 1))
+    cool_dispersions = np.reshape(vsini_percent * cool_velocities, 
+                                 (len(cool_velocities), 1))
+    # I'll do one data point now, but more will be on the way.
+    hot_dist = (1/np.sqrt(2*np.pi*hot_dispersions**2) * 
+                np.exp(-(binvalues - hot_velocities[:,np.newaxis])**2 / 
+                       (2 * hot_dispersions**2))*dv)
+    cool_dist = (1/np.sqrt(2*np.pi*cool_dispersions**2) * 
+                np.exp(-(binvalues - cool_velocities[:,np.newaxis])**2 / 
+                       (2 * cool_dispersions**2))*dv)
+    # Now make a data square that contains sin(i) convolution profiles for all
+    # velocity bin values.
+    fullhist = vsini_convolution_table_test(vel_bins, binvalues)
+
+    # Now make a cube for all data points
+    hot_convolutions = hot_dist[:,:,np.newaxis] * (fullhist)
+    cool_convolutions = cool_dist[:,:,np.newaxis] * (fullhist)
+
+    # Now add up all of the entries
+    hot_data_dist = np.sum(hot_convolutions, axis=1)
+    cool_data_dist = np.sum(cool_convolutions, axis=1)
+
+    # And now all of the data points
+    hot_vsini_dist = np.sum(hot_data_dist, axis=0)
+    cool_vsini_dist = np.sum(cool_data_dist, axis=0)
+
+    # Pick out the upper limits.
+    upper_index = np.argmin(binvalues<vsini_cutoff)
+    hot_num_upper = np.sum(hot_vsini_dist[:upper_index])
+    cool_num_upper = np.sum(cool_vsini_dist[:upper_index])
+    hot_vsini_dist[:upper_index] = 0
+    cool_vsini_dist[:upper_index] = 0
+    # I want to display the raw numbers in text.
+    
+    # Done modeling. Now do vsinis.
+    hot_vsini_hist, bins = np.histogram(hot_vsinis, bins=vel_bins)
+    cool_vsini_hist, bins = np.histogram(cool_vsinis, bins=vel_bins)
+    hot_num_upper_vsinis = np.sum(hot_vsini_hist[:upper_index])
+    cool_num_upper_vsinis = np.sum(cool_vsini_hist[:upper_index])
+    hot_vsini_hist[:upper_index] = 0
+    cool_vsini_hist[:upper_index] = 0
+
+    fig, (ax1, ax2) = plt.subplots(2, 1, sharex=True)
+    # Plot the pdf
+    hotcolor = "#377eb8"
+    coolcolor = "#e41a1c"
+    ax1.step(vel_bins[:-1], hot_vsini_hist, where="post", lw=4, 
+             label="Hot ASPCAP vsini", c=hotcolor, ls="-")
+    ax1.step(vel_bins[:-1], hot_vsini_dist, where="post", lw=3, 
+             label="Hot model vsini", c=hotcolor, ls="--")
+    ax1.step(vel_bins[:-1], hot_vel_hist, where="post", lw=1, label="Hot Vrot", 
+             c=hotcolor, ls="-")
+    ax1.step(vel_bins[:-1], cool_vsini_hist, where="post", lw=4, 
+             label="Cool ASPCAP vsini", c=coolcolor, ls="-")
+    ax1.step(vel_bins[:-1], cool_vsini_dist, where="post", lw=3, 
+             label="Cool model vsini", c=coolcolor, ls="--")
+    ax1.step(vel_bins[:-1], cool_vel_hist, where="post", lw=1, label="Cool Vrot", 
+             c=coolcolor, ls="-")
+    ax1.set_xlim(0, vel_bins[-1])
+    ax1.set_ylabel("N (vsini)")
+    ax1.legend(loc="upper right")
+    ax1.text(0.3, 0.8, "{0:d} Total Hot".format(len(hot_velocities)),
+             transform=ax1.transAxes, color=hotcolor)
+    ax1.text(0.3, 0.7, "{0:d} Total Cool".format(len(cool_velocities)),
+             transform=ax1.transAxes, color=coolcolor)
+
+    # Plot the cdf
+    # This is just moving around the upper limits for display purposes.
+    hot_vsini_dist[0] = hot_num_upper
+    hot_vsini_hist[0] = hot_num_upper_vsinis
+    hot_dist_cum = np.cumsum(hot_vsini_dist)
+    hot_dist_df = hot_dist_cum / hot_dist_cum[-1]
+    hot_hist_cum = np.cumsum(hot_vsini_hist)
+    hot_hist_df = hot_hist_cum / hot_hist_cum[-1]
+    ax2.step(vel_bins[:-1], hot_dist_df, where="post", lw=3, label="Hot Model", 
+             c=hotcolor, ls="--")
+    ax2.step(vel_bins[:-1], hot_hist_df, where="post", lw=2, label="Hot ASPCAP", 
+             c=hotcolor, ls="-")
+    cool_vsini_dist[0] = cool_num_upper
+    cool_vsini_hist[0] = cool_num_upper_vsinis
+    cool_dist_cum = np.cumsum(cool_vsini_dist)
+    cool_dist_df = cool_dist_cum / cool_dist_cum[-1]
+    cool_hist_cum = np.cumsum(cool_vsini_hist)
+    cool_hist_df = cool_hist_cum / cool_hist_cum[-1]
+    ax2.step(vel_bins[:-1], cool_dist_df, where="post", lw=3, label="Cool Model", 
+             c=coolcolor, ls="--")
+    ax2.step(vel_bins[:-1], cool_hist_df, where="post", lw=2, label="Cool ASPCAP", 
+             c=coolcolor, ls="-")
+    ax2.xaxis.set_minor_locator(AutoMinorLocator())
+    ax2.set_xlabel("V sin(i) (km/s)")
+    ax2.set_ylabel("f (< vsini)")
+    ax2.set_ylim(0, 1)
+
+    # Calculate the significance.
+    # I am using a chi-squared test (Numerical Recipes pg 731) since I have
+    # what should be a distribution compared to a binned dataset.
+    hot_nonzero_indices = np.where(hot_vsini_dist > 0)
+    cool_nonzero_indices = np.where(cool_vsini_dist > 0)
+    hot_reduced_dist = hot_vsini_dist[hot_nonzero_indices]
+    hot_reduced_hist = hot_vsini_hist[hot_nonzero_indices]
+    hot_chisq = np.sum((hot_reduced_hist - hot_reduced_dist)**2 / hot_reduced_dist)
+    hot_dof = len(hot_reduced_dist) - 1
+    # Since most of the bins are empty or close to empty, this is a way to
+    # compensate for that (Numerical Recipes pg 734)
+    hot_lucy_Ysq = hot_dof + np.sqrt(
+        2*hot_dof / (2 * hot_dof + np.sum(1/hot_reduced_dist))) * (hot_chisq -
+                                                                   hot_dof)
+    hot_prob = gammaincc(0.5*hot_dof, 0.5*hot_lucy_Ysq)
+    print("Calculated Chi-squared with {1:d} dof: {0:f}".format(hot_lucy_Ysq,
+                                                                hot_dof))
+    print("Probability of data is {0:.4f}".format(hot_prob))
+
+    cool_reduced_dist = cool_vsini_dist[cool_nonzero_indices]
+    cool_reduced_hist = cool_vsini_hist[cool_nonzero_indices]
+    cool_chisq = np.sum((cool_reduced_hist - cool_reduced_dist)**2 / cool_reduced_dist)
+    cool_dof = len(cool_reduced_dist) - 1
+    # Since most of the bins are empty or close to empty, this is a way to
+    # compensate for that (Numerical Recipes pg 734)
+    cool_lucy_Ysq = cool_dof + np.sqrt(
+        2*cool_dof / (2 * cool_dof + np.sum(1/cool_reduced_dist))) * (cool_chisq -
+                                                                   cool_dof)
+    cool_prob = gammaincc(0.5*cool_dof, 0.5*cool_lucy_Ysq)
+    print("Calculated Chi-squared with {1:d} dof: {0:f}".format(cool_lucy_Ysq,
+                                                                cool_dof))
+    print("Probability of data is {0:.4f}".format(cool_prob))
 
 def cool_dwarf_subgiants_comparison(
     dwarf_teff, dwarf_logg, dwarf_vsini, subgiant_teff, subgiant_logg,
