@@ -14,25 +14,6 @@ import sed
 import path_config as paths
 import hrplots as hr
 
-def select_tidally_synchronized_binaries(
-    table, pcut=5, lowtemp=4850, hightemp=5600, lowperiod=1, logg=3.5, 
-    teffcol="Teff", pcol="Prot", loggcol="logg"):
-    '''Cuts out the objects that are potentially TSBs.
-
-    This function provides a standardized way to select a sample of Tidally
-    Synchronized Binaries according to the prescription of Jen van Saders. This
-    function may evolve as TSB selection criteria improve; however, for a
-    standard, transparent selection, this will do.
-
-    The current criteria are that TSBs have orbital periods of around 5 days,
-    and effective temperatures between 5700 and 4600 K.
-    '''
-    period_cut = catalog.perform_period_cut(
-        table, lowperiod=lowperiod, highperiod=pcut, periodcol=pcol)
-    temp_cut = catalog.perform_teff_cut(period_cut, lowtemp, hightemp, teffcol)
-    loggcut = catalog.perform_logg_cut(temp_cut, lowlogg=logg, loggcol=loggcol)
-
-    return loggcut
 
 @au.shortcut_file(paths.SHORTCUT_MDM_NOMAGCUT)
 def select_targets_before_magcut():
@@ -49,7 +30,7 @@ def select_targets_before_magcut():
     '''
     mcq = catin.mcquillan_with_stelparms()
 
-    mcq_observing = select_tidally_synchronized_binaries(
+    mcq_observing = catalog.select_tidally_synchronized_binaries(
         mcq, pcut=5, lowperiod=1, lowtemp=4850, hightemp=5600, logg=3.5,
         teffcol="teff", pcol="Prot", loggcol="logg")
 
@@ -158,7 +139,7 @@ def select_SLSB_target():
     '''Selects the single-lined spectroscopic binary to observe.'''
     mcq = catin.mcquillan_with_stelparms()
 
-    mcq_observing = select_tidally_synchronized_binaries(
+    mcq_observing = catalog.select_tidally_synchronized_binaries(
         mcq, pcut=5, lowperiod=1, lowtemp=4850, hightemp=5600, logg=3.5,
         teffcol="teff", pcol="Prot", loggcol="logg")
 
@@ -203,7 +184,7 @@ def select_DLSB_target():
     '''Selects the double-lined spectroscopic binary to observe.'''
     mcq = catin.mcquillan_with_stelparms()
 
-    mcq_observing = select_tidally_synchronized_binaries(
+    mcq_observing = catalog.select_tidally_synchronized_binaries(
         mcq, pcut=5, lowperiod=1, lowtemp=4850, hightemp=5600, logg=3.5,
         teffcol="teff", pcol="Prot", loggcol="logg")
 

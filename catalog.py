@@ -193,6 +193,25 @@ def select_joinable_apogee_columns(
     shrunk_table = apotable[new_cols]
     return shrunk_table
 
+def select_tidally_synchronized_binaries(
+    table, pcut=5, lowtemp=4850, hightemp=5600, lowperiod=1, logg=3.5, 
+    teffcol="Teff", pcol="Prot", loggcol="logg"):
+    '''Cuts out the objects that are potentially TSBs.
+
+    This function provides a standardized way to select a sample of Tidally
+    Synchronized Binaries according to the prescription of Jen van Saders. This
+    function may evolve as TSB selection criteria improve; however, for a
+    standard, transparent selection, this will do.
+
+    The current criteria are that TSBs have orbital periods of around 5 days,
+    and effective temperatures between 5700 and 4600 K.
+    '''
+    period_cut = perform_period_cut(
+        table, lowperiod=lowperiod, highperiod=pcut, periodcol=pcol)
+    temp_cut = perform_teff_cut(period_cut, lowtemp, hightemp, teffcol)
+    loggcut = perform_logg_cut(temp_cut, lowlogg=logg, loggcol=loggcol)
+
+    return loggcut
 
 ###############################################################################
 # Writing to databases #
@@ -761,6 +780,25 @@ def apogee_kepler_field(apogee_allvisit, apogee_allstar):
         joined_table["RA"] > 277.5, joined_table["RA"] < 305), 
         joined_table["DEC"] > 33.75), joined_table["DEC"] < 44.5)
     return kepler_field
+
+def APOGEE_Ancillary_table(outputpath=paths.APOGEE_ANCILLARY_TARGETS_TABLE):
+    '''Completely write the APOGEE Ancillary Table to a file.
+
+    First read in the McQuillan Targets.
+    Take only tidally-synchronized binary candidates.
+    Get PM information from UCAC-4.
+    Write out all of the necessary information to the file.
+    '''
+    mcq = catin.mcquillan_with_stelparms()
+    tidsync = select_tidally_synchronized_binaries(
+        mcq, pcut=5, lowperiod=1, teffcol="teff")
+    ancillary_fields = ["K04_083+13", "K06_078+16", "K07_075+17"]
+    fieldtargs = targets_in_APOGEE_fields(ancillary_fields, tidsync)
+    ucactable = catin.read_UCAC4_Mcquillan_Tidsync()
+    mcq_ucac = au.join_by_id(fieldtargs, ucactable, "KIC", "KIC")
+    write_APOGEE_proposal_table(mcq_ucac)
+    
+
 # Also want function that takes list of apogee fields and kic binaries and only
 # returns the ones that are in the given fields.
 def targets_in_APOGEE_fields(
