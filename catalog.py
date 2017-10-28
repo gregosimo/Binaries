@@ -1357,7 +1357,7 @@ def compare_rotation_velocity_radius(
     ax1.plot([0, 80], [0, 80], 'k-')
     ax1.plot([0, 80], [7, 7], 'r--', label="Detection Limit")
     plt.sca(ax1)
-    plt.legend(loc="upper right")
+#    plt.legend(loc="upper right")
     ax1.set_xlabel("Inferred equatorial velocity (km/s)")
     ax1.set_ylabel("V sini (km/s)")
 
@@ -2068,6 +2068,15 @@ def perform_vscatter_cut(fullsample, lowv=None, highv=None, vcol="VSCATTER"):
     This function filters the full table according to measured RV variability.
     By default, VSCATTER is used, but other values can be specified according
     to vcol.'''
+
+    return perform_cut(fullsample, vcol, lowv, highv)
+
+def perform_vsini_cut(fullsample, lowv=None, highv=None, vcol="VSINI"):
+    '''Perform a vsini cut on the sample.
+
+    This function filters the full table according to the measured vsini. By
+    default, the VSINI column is used, but other columns can be specified
+    according to vcol.'''
 
     return perform_cut(fullsample, vcol, lowv, highv)
 
