@@ -2,6 +2,7 @@ import os
 
 import numpy as np
 import matplotlib.pyplot as plt
+from astropy.table import Table
 
 import observations as obs
 import path_config as paths
@@ -19,7 +20,47 @@ def build_filepath(toplevel, filename, suffix="png"):
     '''Generate a full path to save a filename.'''
 
     fullpath = toplevel / ".".join((filename, suffix))
-    return fullpath
+    return str(fullpath)
+
+def create_observing_sample_table(
+        dest=build_filepath(TABLE_PATH, "obsprops", "tex")):
+    '''Create the observing table with relevant parameters.
+
+    For this table, the relevant parameters are the Huber Teff and log(g), the
+    McQuillan period, and the EHK V-band magnitude.'''
+    init_sample = obs.select_observing_targets(30)
+    final_sample = catalog.perform_period_cut(init_sample, lowperiod=1.1)
+
+    sample_names = final_sample["KIC_A"]
+    sample_teff = final_sample["teff"]
+    sample_logg = final_sample["logg"]
+    sample_period = final_sample["Prot"]
+    sample_V = final_sample["V"]
+
+    endcomments = r"""
+For each Kepler target, the \(T_{eff}\) and \(\log (g)\) values are taken from 
+the Kepler Stellar Parameter Pipeline (see text). The rotation periods are from 
+\citet{McQuillan14}, and V-band magnitudes are from the \citet{Everett12} survey 
+of the Kepler field."""
+
+    obsdict = {"tabletype": "table*", "tablealign": "htb", 
+               "col_align": "r c c c c", 
+               "caption": "Observing Sample Properties\\label{tab:obsprops}",
+               "preamble": "", "header_start": "", "data_start": "\\tableline",
+               "data_end": "", "tablefoot": endcomments, 
+               "units": {"teff": "K", "logg": "cm s\(^2\)", "Prot": "day", 
+                         "V": "mag"}
+               }
+
+    output_table = Table(
+        [sample_names, sample_teff, sample_logg, sample_period, sample_V], 
+        names=("KIC", r"\(T_{eff}\)", r"\(\log (g)\)", r"\(P_{rot}\)", "V"))
+    output_table.sort("KIC")
+
+    column_format = {r"\(\log (g)\)": ".2f", r"\(P_{rot}\)": ".2f", "V": ".1f"}
+
+    output_table.write(dest, format="latex", latexdict=obsdict,
+                       formats=column_format)
 
 def create_sample_HR_diagram(dest=build_filepath(FIGURE_PATH, "sample")):
     '''HR diagram showing the location of the observing sample.
