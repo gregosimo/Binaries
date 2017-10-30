@@ -1330,7 +1330,7 @@ def compare_rotation_velocity_radius(
 
     Create a double-paneled figure that plots the same data in velocity space
     and radius space for clarity of understanding.'''
-    f, (ax1, ax2) = plt.subplots(1, 2)
+    f, (ax1, ax2, ax3) = plt.subplots(1, 3)
 
     valid_indices = vsini > 7
     valid_vsini = vsini[valid_indices]
@@ -1377,6 +1377,40 @@ def compare_rotation_velocity_radius(
     ax2.plot([0, 4.0], [0, 4.0], 'k-')
     ax2.set_xlabel("Radius (Rsun)")
     ax2.set_ylabel("Inferred R sini (Rsun)")
+
+    inferred_period = vsini_to_period(valid_vsini, valid_radii)[1]
+    # Dealing with errors is difficult because the vsini and radius errors have
+    # a unspecified interplay, especially since radius is asymmetric. Instead
+    # of trying to calculate some form, I'll take the maximum of either the
+    # vsini error or the radius error.
+    radius_fractional_errors = ((valid_raderr_above + valid_raderr_below) / 
+                                valid_radii)
+    vsini_fractional_errors = 0.1
+    inferred_period_err_up = np.where(
+        radius_fractional_errors >= vsini_fractional_errors, 
+        vsini_to_period(
+            valid_vsini, valid_radii + valid_raderr_above)[1] - inferred_period, 
+        vsini_fractional_errors / 2.0 * valid_vsini)
+    inferred_period_err_down = np.where(
+        radius_fractional_errors >= vsini_fractional_errors, 
+        vsini_to_period(
+            valid_vsini, valid_radii + valid_raderr_below)[1] - inferred_period, 
+        -vsini_fractional_errors / 2.0 * valid_vsini)
+    ax3.errorbar(
+        valid_period[valid_subgiant_indices],
+        inferred_period[valid_subgiant_indices],
+        yerr=[-inferred_period_err_down[valid_subgiant_indices],
+              inferred_period_err_up[valid_subgiant_indices]], fmt='b*')
+    ax3.errorbar(
+        valid_period[valid_dwarf_indices],
+        inferred_period[valid_dwarf_indices],
+        yerr=[-inferred_period_err_down[valid_dwarf_indices],
+              inferred_period_err_up[valid_dwarf_indices]], fmt='ro')
+
+    ax3.plot([0, 5.0], [0, 5.0], 'k-')
+    ax3.set_xlabel("McQuillan Period (day)")
+    ax3.set_ylabel("Inferred P / sin(i) (day)")
+                                      
 
 def write_asteroseismic_rotation_table(
         table, output_filename, title,  apid_col="APOGEE_ID", KICcol="KIC", 
