@@ -1390,12 +1390,14 @@ def compare_rotation_velocity_radius(
         radius_fractional_errors >= vsini_fractional_errors, 
         vsini_to_period(
             valid_vsini, valid_radii + valid_raderr_above)[1] - inferred_period, 
-        vsini_fractional_errors / 2.0 * valid_vsini)
+        vsini_to_period(
+            valid_vsini*(1-vsini_fractional_errors), valid_radii)[1] - inferred_period)
     inferred_period_err_down = np.where(
         radius_fractional_errors >= vsini_fractional_errors, 
         vsini_to_period(
             valid_vsini, valid_radii + valid_raderr_below)[1] - inferred_period, 
-        -vsini_fractional_errors / 2.0 * valid_vsini)
+        vsini_to_period(
+            valid_vsini*(1+vsini_fractional_errors), valid_radii)[1] - inferred_period)
     ax3.errorbar(
         valid_period[valid_subgiant_indices],
         inferred_period[valid_subgiant_indices],
@@ -1407,7 +1409,7 @@ def compare_rotation_velocity_radius(
         yerr=[-inferred_period_err_down[valid_dwarf_indices],
               inferred_period_err_up[valid_dwarf_indices]], fmt='ro')
 
-    ax3.plot([0, 5.0], [0, 5.0], 'k-')
+    ax3.plot([0, 15.0], [0, 15.0], 'k-')
     ax3.set_xlabel("McQuillan Period (day)")
     ax3.set_ylabel("Inferred P / sin(i) (day)")
                                       
@@ -3303,4 +3305,82 @@ def filter_double_lined_spectroscopic_binaries(
         filtered_cat, "Removed DLSBs: see {0} for list".format(dlsb_db))
     return filtered_cat
 
+
+################################################################################
+# Problematic Photometric Periods #
+################################################################################
+
+def select_bad_photometric_periods():
+    '''Select spectroscopic rapid rotators with poor photometric agreement.
+
+    Select cool stars with known spectroscopic rapid rotation. Then select out
+    the ones with very discrepant photometric periods.
+    '''
+    apo = catin.read_APOKASC_catalog()
+    good_apo = filter_bad_ASPCAP_fits(apo)
+    mcq = catin.mcquillan_with_stelparms()
+    mcq_apo = au.join_by_id(good_apo, mcq, "KEPLER_INT", "KIC")
+
+    mcq_apo_cool = perform_teff_cut(mcq_apo, hightemp=5500, teffcol="teff")
+    mcq_apo_dwarf = perform_logg_cut(mcq_apo_cool, lowlogg=4.0, loggcol="logg")
+
+    mcq_apo_vdetect = perform_vsini_cut(mcq_apo_dwarf, lowv=10)
+
+    high_vsini = period_to_velocities(1, mcq_apo_vdetect["radius"])
+    low_vsini = period_to_velocities(5, mcq_apo_vdetect["radius"])
+    mcq_apo_highv = mcq_apo_vdetect[np.where(np.logical_and(
+        mcq_apo_vdetect["VSINI"] < high_vsini, 
+        mcq_apo_vdetect["VSINI"] > low_vsini))]
+
+    veq = period_to_velocities(mcq_apo_highv["Prot"], mcq_apo_highv["radius"])
+    bad_periods = mcq_apo_highv[mcq_apo_highv["VSINI"] > 2 * veq]
+    bad_periods_nodlsb = filter_double_lined_spectroscopic_binaries(
+        bad_periods, apid_col="2MASS_ID")
+    return bad_periods_nodlsb
+
+def write_bad_photometric_periods(
+        dest=paths.HEAD_DIR / "vsini_rapid_with_bad_P.txt"):
+    '''Write spectroscopic rapid rotators with poor photometric agreement.
+
+    Select cool stars with known spectroscopic rapid rotation. Then
+    specifically select the ones with very discrepant photometric periods. Also
+    write comments explicitly detailing how the sample was derived.
+    '''
+    bad = select_bad_photometric_periods()
+    veq = period_to_velocities(bad["Prot"], bad["radius"])
+    output_table = Table(
+        [bad["KIC"], bad["2MASS_ID"], bad["teff"], bad["logg"], bad["radius"], 
+         bad["TEFF_COR"], bad["LOGG_FIT"], bad["VSINI"], bad["Prot"], veq,
+         bad["ASPCAPFLAGS"]],
+        names=("KIC", "APOGEE_ID", "Huber Teff", "Huber Logg", "Huber Radius", 
+               "APOGEE Teff", "APOGEE Logg", "VSINI", "Prot", "Veq", 
+               "ASPCAPFLAGS"))
+    output_table.meta["comments"] = [
+        "This sample represents spectroscopic rapid rotators which have",
+        "photometric periods which are highly inconsistent with the measured",
+        "vsini.",
+        "",
+        "This sample was generated jointly from the APOKASC catalog v4.2.3",
+        "and McQuillan et al (2014). The criteria to select were:",
+        "",
+        "  1. Select objects with Huber Teff < 5500 K.",
+        "  2. Select objects with Huber logg > 4.0.",
+        "  3. Select robust vsini detections (VSINI > 10 km)",
+        "  4. Select objects consistent with rapid rotation:",
+        "       (2 pi R)/(1 day) > VSINI > (2 pi R)/(5 day)",
+        "       with R being the Huber radius.",
+        "  5. Select objects with discrepant periods:",
+        "       VSINI > 2 * (2 pi R)/Prot",
+        "       Since (2 pi R) / Prot = edge-on equatorial velocity, any",
+        "         measurement with VSINI > Veq is unphysical. The extra",
+        "         factor of 2 is allowing for radius and alias uncertainties",
+        "  6. Remove double-lined spectroscopic binaries.",
+        "       This is achieved by checking the APOGEE spectra for the",
+        "       remaining objects.",
+        ""]
+
+    format_dict = {"Veq": ".3f"}
+
+    output_table.write(str(dest), format="ascii.fixed_width",
+                       formats=format_dict)
 
