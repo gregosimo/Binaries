@@ -11,7 +11,7 @@ import path_config as paths
 import catalog
 
 ###############################################################################
-# Reading catalogs #
+# Reading Kepler/APOGEE catalogs #
 ###############################################################################
 
 @au.memoized
@@ -56,19 +56,6 @@ def read_KIC_DR25_catalog(kicpath=paths.KIC_CATALOG):
     fix_table_coordinates_units(kiccat, "ra", "dec")
     return kiccat
 
-def fix_table_coordinates_units(tbl, ra_col, dec_col):
-    '''Fixes the units for coordinates in the table. 
-
-    For each of the coordinate columns, check that the unit entries for 
-    the coordinates are recognized by astropy.units. This has been made because
-    there are non-standard representations of units in the KIC catalog (and
-    possibly others), such as using "degrees" instead of "degree", which the
-    units framework can automatically determine.
-    '''
-    if tbl[ra_col].unit == "degrees":
-        tbl[ra_col].unit = u.degree
-    if tbl[dec_col].unit == "degrees":
-        tbl[dec_col].unit = u.degree
 
 def read_van_Saders_file(vspath=paths.VAN_SADERS_SDSS):
     '''Read the APOGEE dwarf targets from Jen's catalog.'''
@@ -86,15 +73,6 @@ def read_van_Saders_file(vspath=paths.VAN_SADERS_SDSS):
             datafile[name] = np.reshape(data_array, len(data_array))
     datafile["COMMENTS"] = vsidl["comments"]
     return datafile
-
-def read_van_Saders_catalog(
-    vspath=paths.VAN_SADERS_SDSS, mastpath=paths.VAN_SADERS_MAST):
-    '''Table with relevant quantities for Jen's sample.
-
-    This table will essentially be curated in detail to ensure that the
-    returned catalog has the relevant and desired quantities.
-    '''
-    pass
 
 def read_van_Saders_Kepler(vspath=paths.VAN_SADERS_MAST):
     '''Read MAST output for Jen's sample.'''
@@ -283,9 +261,9 @@ def read_flicker_loggs(loggpath=paths.FLICKER_LOGG):
     return flicker_loggs
 
 
-###################
+###############################################################################
 # Joined catalogs #
-###################
+##############################################################################
 #
 # These functions get catalogs which I use often, and are smaller than the
 # individual catalogs put together. Caching these instead of the full catalogs 
@@ -417,15 +395,25 @@ def dr14_with_KIC_stelparms(apopath=paths.DR14_ALLSTAR_PATH,
                             kicpath=paths.KIC_CATALOG):
     '''Read in Kepler DR14 targets with Huber stellar parameters.'''
     apo = read_dr14_allStar(apopath, opt="kepler")
-    kiccat = read_KIC_DR25_catalog()
+    kiccat = read_KIC_DR25_catalog(kicpath)
     apokic = catalog.join_by_2MASS_key(
         apo, kiccat, "APOGEE_ID", "tm_designation")
     return apokic
 
+#@au.shortcut_file(paths.SHORTCUT_APOKASC_KIC)
+@au.memoized
+def APOKASC_with_KIC_stelparms(apopath=paths.APOKASC_PATH,
+                               kicpath=paths.KIC_CATALOG):
+    '''Read in the latest APOKASC catalog with Huber stellar parameters.'''
+    apo = read_APOKASC_catalog(apopath)
+    kiccat = read_KIC_DR25_catalog(kicpath)
+    apokic = au.join_by_id(apo, kiccat, "KEPLER_INT", "kepid")
+    return apokic
 
-######################
+
+################################################################################
 # Processed Catalogs #
-######################
+################################################################################
 # These catalogs are to easily reproduce commonly-used catalogs. They will be
 # in a state of flux depending on what "commonly-used" entails, and if more
 # processing will need to occur. These catalogs are to ensure
@@ -473,9 +461,12 @@ def asteroseismic_sample():
     return good_mcq_apokasc_dr14
     
 
-######################
+###############################################################################
 # Ancillary Catalogs #
-######################
+###############################################################################
+
+
+# Eclipsing Binaries
 
 def read_villanova_EBs(EBpath=paths.EB_PATH):
     '''Reads in the Villanova Keler EB catalog.'''
@@ -509,10 +500,14 @@ def read_synchronized_EB_details(syncpath=paths.SYNC_EB_PATH):
     ebcat.remove_rows(np.argwhere(ebcat["KIC"] == 7622486).flatten())
     return ebcat
 
+# KOIs
+
 def read_KOI_list_Mcquillan(koipath=paths.KOI_PATH):
     '''Read the list of KOIs as of Feb 16, 2017.'''
     kois = Table.read(koipath, format="ascii.csv", data_start=1, data_end=4800, comment="#")
     return kois
+
+# KepVIM catalog
 
 def read_KepVIM_catalog(
     KepVIMpath="/home/regulus/simonian/Binaries/KepVIM.fits"):
@@ -523,6 +518,8 @@ def read_KepVIM_catalog(
     kepvim = Table.read(KepVIMpath, format="fits")
     return kepvim
 
+# Bruntt et al (2013)
+
 def read_Bruntt_catalog(brunttpath=paths.BRUNTT_PATH):
     '''Read in the stellar parameter table from Bruntt et al. (2013).
 
@@ -532,6 +529,8 @@ def read_Bruntt_catalog(brunttpath=paths.BRUNTT_PATH):
     bruntt = Table.read(brunttpath, format="votable")
     return bruntt
 
+# Stauffer & Hartmann (1987)
+
 def read_Stauffer_Pleiades(vsini_file=paths.STAUFFER_VSINI_PATH):
     '''Read the vsinis from Table one of Stauffer & Hartmann 1987.'''
 
@@ -540,9 +539,11 @@ def read_Stauffer_Pleiades(vsini_file=paths.STAUFFER_VSINI_PATH):
     separate_limit(tbl, ["vsini"], eqdelim="")
     return tbl
 
-def read_SIMBAD_2MASS_IDs(simbadfile, output_path=paths.HEAD_DIR,
-                          ident_col="identifier"):
-    pass
+#################
+# Service Files #
+#################
+
+# SIMBAD
 
 def read_SIMBAD_file(simbadfile, output_path=paths.HEAD_DIR):
     '''Read in a SIMBAD table and extract the 2MASS IDs.'''
@@ -550,6 +551,15 @@ def read_SIMBAD_file(simbadfile, output_path=paths.HEAD_DIR):
         str(output_path / simbadfile), format="ascii.basic", comment="", 
         guess=False, delimiter="|", data_start=2, data_end=101)
     return tbl
+
+def read_UKIRT_file(resultfile):
+    '''Reads in a file from UKIRT.'''
+    results = read_split_file(resultfile, "ascii.commented_header")
+    return results
+
+###############################################################################
+# Utilities #
+###############################################################################
 
 def separate_limit(table, limcols, updelim="<", lowdelim=">", eqdelim="=",
                    coltemplate="{0} lim"):
@@ -605,3 +615,61 @@ def split_limit_col(initcol, updelim="<", lowdelim=">", eqdelim="=",
         pass
 
     return newcol, limcol
+
+def fix_table_coordinates_units(tbl, ra_col, dec_col):
+    '''Fixes the units for coordinates in the table. 
+
+    For each of the coordinate columns, check that the unit entries for 
+    the coordinates are recognized by astropy.units. This has been made because
+    there are non-standard representations of units in the KIC catalog (and
+    possibly others), such as using "degrees" instead of "degree", which the
+    units framework can automatically determine.
+    '''
+    if tbl[ra_col].unit == "degrees":
+        tbl[ra_col].unit = u.degree
+    if tbl[dec_col].unit == "degrees":
+        tbl[dec_col].unit = u.degree
+
+def read_split_file(filepath, table_format):
+    '''Reads a file that has been split into multiple parts.
+
+    This function essentially re-reads a table which has been split according
+    to the large_table_multiple_files_split function. However, it uses the
+    existing files in the directory instead of predicting using table
+    information. For example, if filepath is /path/to/foo.txt, this will find
+    foo.txt, if it exists, or foo.0.txt, foo.1.txt, foo.2.txt, etc. and read
+    them all in if it doesn't.
+
+    Since the input table isn't used, this means that when writing split files,
+    care has to be taken to delete all previous queries made with them.
+    '''
+    try:
+        inputtable = Table.read(str(filepath), format=table_format)
+    except FileNotFoundError as f:
+        inputfiles = find_split_files(filepath)
+        table_pieces = []
+        for inputfile in inputfiles:
+            table_piece = Table.read(inputfile, format=table_format)
+            table_pieces.append(table_piece)
+        try:
+            inputtable = vstack(table_pieces)
+        # This means that inputfiles was empty.
+        except TypeError:
+            raise f
+        
+    return inputtable
+
+def find_split_files(filepath):
+    '''Finds the extant filenames which filepath would have if it were split.
+
+    Given a filepath, returns a list of filepaths that match the basename being
+    split in the path parent. For example, if the pathpath is /path/to/foo.txt, 
+    it will return a list file paths called foo.0.txt foo.1.txt, foo.2.txt if 
+    they reside in /path/to/.
+    '''
+    folder = filepath.parent
+    filename = filepath.name
+    base, ext = split_filename(filename)
+    glob_pattern = format_split_filename(base, "*", ext)
+    files = folder.glob(glob_pattern)
+    return files
