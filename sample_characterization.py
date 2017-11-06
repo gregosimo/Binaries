@@ -1,0 +1,137 @@
+"""
+A set of routines to understand samples.
+
+These functions help understand the distribution of samples with teff, rotation
+period, vsini, and other quantities. These functions are grouped according to
+different types of quantities they help understand:
+
+Functions to determine the underlying temperature distribution:
+
+number_binned_by_temperature:
+    Generate the binned distribution of the sample with temperature
+
+number_histogram:
+    Plot the binned distribution of a sample with temperature
+
+cumulative_number_histogram:
+    Plot the cumulative binned distribution of a sample with temperature
+
+Functions investigating the rapid rotation distribution with temperature
+
+McQuillan_plot:
+    Make a plot like McQuillan with Teff on the x-axis and Period on the
+    y-axis.
+
+rapid_fraction_histogram:
+    Plot the fraction of rapid rotators with temperature
+
+rapid_fraction_multiple_limits:
+    Show how the temperature distribution changes with period.
+
+
+"""
+import numpy as np
+import matplotlib.pyplot as plt
+
+import catalog
+import hrplots as hr
+
+################################################################################
+# Generate binned distributions #
+################################################################################
+
+def number_binned_by_temperature(
+    mcquillan, hightemp=6500, lowtemp=3000, dtemp=50, teffcol="Teff"):
+    '''Return array with number as a function of temperature.'''
+    # Add dtemp because hist wants the rightmost edge.
+    tempbins = np.arange(lowtemp, hightemp+dtemp, dtemp)
+    hist, binedges = np.histogram(
+        mcquillan[teffcol], bins=tempbins, range=(lowtemp, hightemp))
+    return (hist, binedges)
+
+################################################################################
+# Plot binned distributions #
+################################################################################
+
+
+def number_histogram(
+    mcquillan, hightemp=6500, lowtemp=3000, dtemp=50, teffcol="Teff", label=""):
+    '''Plot a histogram of the number of McQuillan objects in temperature bins.
+
+    Uses the matplotlib hist function to make the histogram plot.'''
+    tempbins = np.arange(lowtemp, hightemp+dtemp, dtemp)
+    plt.hist(mcquillan[teffcol], bins=tempbins, range=(lowtemp, hightemp),
+             histtype="step", label=label)
+    hr.invert_x_axis()
+    plt.xlabel("Teff (K)")
+    plt.ylabel("Number in Teff bin")
+
+def cumulative_number_histogram(
+    mcquillan, hightemp=6500, lowtemp=3000, dtemp=50, teffcol="Teff", label=""):
+    '''Plots a cumulative histogram of number based on temperature.'''
+    tempbins = np.arange(lowtemp, hightemp+dtemp, dtemp)
+    plt.hist(mcquillan[teffcol], bins=tempbins, range=(lowtemp, hightemp),
+             cumulative=True, histtype="step", label=label)
+    hr.invert_x_axis()
+    plt.xlabel("Teff (K)")
+    plt.ylabel("Number cooler than Teff bin")
+
+################################################################################
+# Rotation Distribution #
+################################################################################
+
+def McQuillan_plot(sample, Teff_colname="Teff", Prot_colname="Prot", color="c",
+                   marker=".", label="", ms=2.0):
+    '''Creates a plot like in McQuillan.
+
+    Takes the sample in McQuillan and plots the rotation period, given in
+    Prot_colname, versus the temperature given in Teff_colname. The rotation
+    period is plotted on a log scale.'''
+    plt.semilogy(
+        sample[Teff_colname], sample[Prot_colname], color=color, 
+        marker=marker, label=label, ms=ms, linestyle="")
+    hr.invert_x_axis()
+    plt.xlabel("Teff (K)")
+    plt.ylabel("Prot (day)")
+
+###############################################################################
+# Rapid rotation fraction #
+###############################################################################
+
+def rapid_fraction_histogram(
+    mcquillan, hightemp=6500, lowtemp=3000, dtemp=50, maxper=5, teffcol="Teff",
+    periodcol="Prot", label=""):
+    '''Plot a histogram of the fraction of rapid rotators in McQuillan sample.
+    '''
+    totalhist, totbins = number_binned_by_temperature(
+        mcquillan, hightemp=hightemp, lowtemp=lowtemp, dtemp=dtemp,
+        teffcol=teffcol)
+    rapid_mcquillan = catalog.perform_period_cut(
+        mcquillan, highperiod=maxper, periodcol=periodcol)
+    print("Rapid Rotator Number: " + rapid_mcquillan)
+    rapidhist, rapidbins = number_binned_by_temperature(
+        rapid_mcquillan, hightemp=hightemp, lowtemp=lowtemp, dtemp=dtemp,
+        teffcol=teffcol)
+    plt.step(totbins[:-1], rapidhist/totalhist, where="post", label=label)
+    plt.xlim(plt.xlim()[::-1])
+    plt.xlabel("Teff (K)")
+    plt.ylabel("Fraction of Rapid Rotators in Teff bin")
+    plt.title("Fraction of rotators with P < {0} day".format(maxper))
+
+def rapid_fraction_multiple_limits(
+    mcquillan, hightemp=6500, lowtemp=3000, dtemp=50, maxper=5, dper=1, 
+    teffcol="Teff", periodcol="Prot"):
+    '''Plot histograms of rapid rotator fraction for different max periods.
+
+    Bin the McQuillan sample by temperature, and then note the fraction of
+    rapid rotators in each temerature bin for different criteria for rapid
+    rotation. The maximum period for rapid rotators will start at maxper, and
+    decrement by dper until reaching zero.'''
+    period_boundaries = np.arange(maxper, 0, -dper)
+    for bound in period_boundaries:
+        perlabel = "P < {0} day".format(bound)
+        rapid_fraction_histogram(
+            mcquillan, hightemp=hightemp, lowtemp=lowtemp, dtemp=dtemp, 
+            maxper=bound, teffcol=teffcol, periodcol=periodcol, label=perlabel)
+    plt.title("Rapid Rotator Fraction up to {0} day".format(maxper))
+    plt.legend(loc="upper center")
