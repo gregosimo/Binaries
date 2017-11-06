@@ -1,8 +1,10 @@
 import os
 
 import numpy as np
+import numpy.core.defchararray as npstr
 import matplotlib.pyplot as plt
 from astropy.table import Table
+from astropy.io import ascii
 
 import observations as obs
 import path_config as paths
@@ -25,7 +27,7 @@ def build_filepath(toplevel, filename, suffix="png"):
 def get_sample():
     '''Get the final sample of the observing targets.'''
     final_sample = Table.read(
-        paths.HEAD_DIR, "Obs_list.txt", format="ascii.fixed_width")
+        paths.HEAD_DIR / "Obs_list.txt", format="ascii.fixed_width")
     return final_sample
 
 def create_observing_sample_table(
@@ -36,7 +38,7 @@ def create_observing_sample_table(
     McQuillan period, and the EHK V-band magnitude.'''
     sample = get_sample()
 
-    sample_names = sample["KIC"]
+    sample_names = sample["KIC_A"]
     sample_teff = sample["teff"]
     sample_logg = sample["logg"]
     sample_period = sample["Prot"]
@@ -73,17 +75,22 @@ def create_APOGEE_table(dest=build_filepath(TABLE_PATH, "apotab", "tex")):
 
     This table will contain APOGEE-determined Teff, logg, vsini, and
     vscatter.'''
-    sample = get_sample()
+    full_sample = get_sample()
+    good_sample = catalog.filter_bad_ASPCAP_fits(full_sample)
+    sample = good_sample[~npstr.endswith(good_sample["APOGEE_ID"], "N/A")]
 
-    kic_name = sample["KIC"]
+    kic_name = sample["KIC_A"]
     apo_apid = sample["APOGEE_ID"]
     apo_teff = sample["TEFF"]
-    apo_logg = sample["FPARAM"][:,1]
+    apo_logg = sample["LOGG_FIT"]
     apo_vsini = sample["VSINI"]
     apo_vscatter = sample["VSCATTER"]
+    apo_nvisits = npstr.replace(sample["NVISITS"], "--", "1")
 
-    endcomments = r"""APOGEE parameters are from DR14. \log (g) are uncorrected
-    \log(g) values from FERRE."""
+
+    endcomments = r"""APOGEE parameters are only those with good fits from DR14. 
+    \log (g) are uncorrected values from FERRE. Missing VScatter objects are
+    those with only one visit. """
 
     obsdict = {"tabletype": "table*", "tablealign": "htb", 
                "col_align": "r r c c c c", 
@@ -93,10 +100,17 @@ def create_APOGEE_table(dest=build_filepath(TABLE_PATH, "apotab", "tex")):
                }
 
     output_table = Table(
-        [kic_name, apo_apid, apo_teff, apo_logg, apo_vsini, apo_vscatter],
-        names=("KIC", r"APOGEE \(T_{eff}\)", r"APOGEE \(\log (g)\)", 
-               r"v \sin i", "VScatter")) 
-    column_format = {r"\(\log (g)\)": ".2f", r"\(P_{rot}\)": ".2f", "V": ".1f"}
+        [kic_name, apo_apid, apo_teff, apo_logg, apo_vsini, apo_vscatter,
+         apo_nvisits],
+        names=("KIC", "APOGEE ID",  r"APOGEE \(T_{eff}\)", r"APOGEE \(\log (g)\)", 
+               r"v \sin i", "VScatter", "Num. Visits")) 
+    column_format = {r"APOGEE \(\log (g)\)": ".2f", r"v \sin i": ".1f",
+                     "VScatter": ".2f"}
+
+    output_table.write(
+        dest, format="latex", latexdict=obsdict, formats=column_format, 
+        fill_values=[
+            ('-9999.0', '--', r"v \sin i"), ('0.00', '--', 'VScatter')])
 
 def create_sample_HR_diagram(dest=build_filepath(FIGURE_PATH, "sample")):
     '''HR diagram showing the location of the observing sample.
