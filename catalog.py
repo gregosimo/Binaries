@@ -39,55 +39,17 @@ NUM_KEPLER_QUARTERS = 17
 
 APOGEE_NULL = -9999.0
 
-def read_split_file(filepath, table_format):
-    '''Reads a file that has been split into multiple parts.
+################################################################################
+# Online catalog interactions #
+################################################################################
 
-    This function essentially re-reads a table which has been split according
-    to the large_table_multiple_files_split function. However, it uses the
-    existing files in the directory instead of predicting using table
-    information. For example, if filepath is /path/to/foo.txt, this will find
-    foo.txt, if it exists, or foo.0.txt, foo.1.txt, foo.2.txt, etc. and read
-    them all in if it doesn't.
+################################################################################
+# Table Manipulation #
+################################################################################
 
-    Since the input table isn't used, this means that when writing split files,
-    care has to be taken to delete all previous queries made with them.
-    '''
-    try:
-        inputtable = Table.read(str(filepath), format=table_format)
-    except FileNotFoundError as f:
-        inputfiles = find_split_files(filepath)
-        table_pieces = []
-        for inputfile in inputfiles:
-            table_piece = Table.read(inputfile, format=table_format)
-            table_pieces.append(table_piece)
-        try:
-            inputtable = vstack(table_pieces)
-        # This means that inputfiles was empty.
-        except TypeError:
-            raise f
-        
-    return inputtable
-
-def find_split_files(filepath):
-    '''Finds the extant filenames which filepath would have if it were split.
-
-    Given a filepath, returns a list of filepaths that match the basename being
-    split in the path parent. For example, if the pathpath is /path/to/foo.txt, 
-    it will return a list file paths called foo.0.txt foo.1.txt, foo.2.txt if 
-    they reside in /path/to/.
-    '''
-    folder = filepath.parent
-    filename = filepath.name
-    base, ext = split_filename(filename)
-    glob_pattern = format_split_filename(base, "*", ext)
-    files = folder.glob(glob_pattern)
-    return files
-
-def read_UKIRT_file(resultfile):
-    '''Reads in a file from UKIRT.'''
-    results = read_split_file(resultfile, "ascii.commented_header")
-    return results
-
+#############
+# 2MASS IDs #
+#############
 
 def join_by_2MASS_key(tbl1, tbl2, tm1, tm2, join_type="inner",
                       skip_missing=True, conflict_suffixes=("_A", "_B")):
@@ -159,11 +121,32 @@ def join_by_2MASS_key(tbl1, tbl2, tm1, tm2, join_type="inner",
     # renaming tbl2 instead of deleting it.
     return new_table
 
+def KIC_to_APOGEE_2MASS_designation(kic_desig):
+    '''Function to convert KIC 2MASS designations to be APOGEE ones.
+
+    The KIC designations are in the form of 2MASS J##########, while the apogee
+    ones are 2M##########.'''
+    apo_desig = npstr.replace(kic_desig, "2MASS J", "2M")
+    return apo_desig
+
+#####################
+# Kepler Photometry #
+#####################
+
+def add_Everett_photometry(inputtable, racol, deccol):
+    '''Adds UBV photometry from the EHK survey to table.
+
+    Read in the EHK photometry and append that to the columns in inputtable.
+    The table names will be the same as those in the photometry file.'''
+    photcatalog = catin.read_EHK_catalog()
+    newcat = au.join_by_ra_dec(
+        inputtable, photcatalog, racol, deccol, "RA", "Dec", join_type="left")
+
+    return newcat
+
 ###############################################################################
 # Catalog Curation
 ###############################################################################
-
-# def van_Saders_relevant_table(
 
 def select_samples_for_Rafa(
     kic_catalog=None, hightemp=5500, lowtemp=0, loggcut=3.5, teffcol="teff",
@@ -182,16 +165,7 @@ def select_samples_for_Rafa(
     rafacat = giantcut
     return rafacat
 
-def select_joinable_apogee_columns(
-    apotable, exclude_cols=[
-        "STABLERV_CHI2", "STABLERV_RCHI2", "CHI2_THRESHOLD",
-        "STABLERV_CHI2_PROB", "PARAM", "FPARAM", "PARAM_COV", "FPARAM_COV",
-        "PARAMFLAG", "FELEM", "FELEM_ERR", "X_H", "X_H_ERR", "X_M", "X_M_ERR",
-        "ELEM_CHI2", "ELEMFLAG", "VISIT_PK", "ALL_VISIT_PK", "FPARAM_CLASS",
-        "CHI2_CLASS"]):
-    new_cols = [x for x in apotable.colnames if x not in exclude_cols]
-    shrunk_table = apotable[new_cols]
-    return shrunk_table
+# Default methodology to select tidally-synchronized binaries.
 
 def select_tidally_synchronized_binaries(
     table, pcut=5, lowtemp=4850, hightemp=5600, lowperiod=1, logg=3.5, 
@@ -212,6 +186,87 @@ def select_tidally_synchronized_binaries(
     loggcut = perform_logg_cut(temp_cut, lowlogg=logg, loggcol=loggcol)
 
     return loggcut
+
+#################
+# Split Catalog #
+#################
+
+def split(fullsample, col, splitpoints, invert_inequality=False):
+    """Split the full sample based on values in col.
+
+    This function partitions fullsample into tables with points in splitpoints
+    serving as boundaries of the partitions. A tuple of size one larger than
+    splitpoints will be returned which contain values where
+    fullsample[col] < min(splitpoints), min(splitpoints) <= fullsample[col] <
+    min-1(splitpoints), ... , max-1(splitpoints) <= fullsample[col] <
+    max(splitpoints), fullsample[col] > max(splitpoints). 
+
+    If invert_inequality is specified, then the picked values with follow low <
+    fullsamplecol <= high.
+    """
+    colvalues = fullsample[col]
+
+    try:
+        ordered_splitpoints = sorted(splitpoints)
+    except TypeError:
+        # In this case there is only one object.
+        ordered_splitpoints = [splitpoints]
+
+    objlist = []
+    # Invert_inequality basically transforms < to <= and >= to >
+    if not invert_inequality:
+        # First make the lowest table.
+        objlist.append(fullsample[colvalues < ordered_splitpoints[0]])
+        # Then make intermediate tables.
+        for low, high in zip(ordered_splitpoints[:-1], ordered_splitpoints[1:]):
+            objlist.append(fullsample[np.logical_and(
+                colvalues >= low, colvalues < high)])
+        # Now make the highest table.
+        objlist.append(fullsample[colvalues >= ordered_splitpoints[-1]])
+    else:
+        objlist.append(fullsample[colvalues <= ordered_splitpoints[0]])
+        for low, high in zip(ordered_splitpoints[:-1], ordered_splitpoints[1:]):
+            objlist.append(fullsample[np.logical_and(
+                colvalues > low, colvalues <= high)])
+        objlist.append(fullsample[colvalues > ordered_splitpoints[-1]])
+
+    return tuple(objlist)
+
+def split_logg(fullsamp, loggs, loggcol="logg", invert_inequality=False):
+    '''Split sample into logg bins.'''
+    return split(fullsamp, loggcol, loggs, invert_inequality)
+
+def split_teff(fullsamp, teffs, teffcol="teff", invert_inequality=False):
+    '''Split sample into teff bins.'''
+    return split(fullsamp, teffcol, teffs, invert_inequality)
+
+def split_period(fullsamp, periods, periodcol="Prot", invert_inequality=False):
+    '''Split sample into period bins.'''
+    return split(fullsamp, periodcol, periods, invert_inequality)
+
+def split_vscatter(fullsamp, vels, vscattercol="VSCATTER",
+                   invert_inequality=False):
+    '''Split sample into vscatter parts.'''
+    return split(fullsamp, vscattercol, vels, invert_inequality)
+
+def split_vsini(fullsamp, vels, vsinicol="VSINI", invert_inequality=False):
+    '''Split sample into vsini parts.'''
+    return split(fullsamp, vsinicol, vels, invert_inequality)
+    
+##################
+# APOGEE filters #
+##################
+
+def filter_invalid_APOGEE_entries(apotable, colname, maskvalue=APOGEE_NULL):
+    '''Remove rows from apotable where column values are the mask values.
+
+    This will filter apotable where only the rows that do not have the mask
+    value in the column will be returned.'''
+    filtered_table = au.filter_column_from_subtable(apotable, colname, 
+                                                    [maskvalue])
+    add_cut_metadata(filtered_table,
+        "Removed masked entries in {0}".format(colname))
+    return filtered_table
 
 ###############################################################################
 # Writing to databases #
@@ -415,7 +470,7 @@ def write_Villanova_EB_upload_list(
     kic_targets = kiccat[[kiccol]]
     kic_targets.write(str(output), format=writefmt, comment=False)
 
-
+# Interact with the SDSS database
 
 def visit_table(obj_ids, loc_ids):
     '''Gets a table with all observations.
@@ -434,115 +489,50 @@ def visit_table(obj_ids, loc_ids):
     fulltable = vstack(observation_table_list)
     return fulltable
 
-def calc_NOBS(object_table, visit_table, obs_col="NOBS"):
-    '''Add a NOBS column to the object table using the visit table.
+def get_APOGEE_visit_info(twomass_id, loc_id):
+    '''Gets information for each visit of an APOGEE object.
+    
+    This function will scrape the SDSS3 web site in order to get this
+    information. Currently it only gets the MJD of an observation and a
+    relative velocity, but more can be added if need be.'''
+    mjds = []
+    vrels = []
+    # Get ASPCAP page content.
+    aspcap_resp = requests.post(
+        SDSS3_URL+"/irSpectrumDetail", data={"apogeeid": twomass_id, "locid":
+        loc_id, "commiss": 0, "show_aspcap": True})
+    # If the page loads successfully, then populate MJD and Vrel. If not, then
+    # return an empty table.
+    if aspcap_resp.status_code < 300:
+        # Find hyperlinks to individual visits.
+        aspcapsoup = BeautifulSoup(aspcap_resp.content, "html.parser")
+        visit_tags = aspcapsoup.find(
+            string="Visit Spectra").parent.find_all_next(
+                "a", href=re.compile("irSpectrum"))
+        visit_urls = [SDSS3_URL + tag["href"] for tag in visit_tags]
+        # Get MJD and vrel from individual pages.
+        for url in visit_urls:
+            visit_resp = requests.get(url)
+            visitsoup = BeautifulSoup(visit_resp.content, "html.parser")
+            visit_mjd = extract_mjd(visitsoup)
+            mjds.append(visit_mjd)
+            try:
+                visit_vrel = extract_vrel(visitsoup)
+            except TypeError:
+                visit_vrel = np.nan
+            vrels.append(visit_vrel)
 
-    This function is used to attach an NOBS column to the object table. NOBS is
-    a useful quantity which may be included in future versions of APOKASC, but
-    currently is not. Visit_table should be the outut of the visit_table
-    function with the obj_id column from the object table.
-    '''
-    nobs = NOBS_array(object_table, visit_table)
-    object_table[obs_col] = nobs
+    # Return table with 2MASS_ID, MJD and vrel.
+    table_names = ("2MASS_ID", "MJD", "V_LSR")
+    object_table = Table(
+        [[twomass_id]*len(mjds), mjds, vrels], names=table_names,
+        dtype=(np.str, np.int, np.float))
 
-def NOBS_array(object_table, visit_table):
-    '''Creates an array that calculates the number of observaions from visits.
+    return object_table
 
-    Calculate the number of observations that were given to each object in the
-    object table using the visit history from the visit table.
-    '''
-    ids = object_table["2MASS_ID"]  # ID array used for looking up indices.
-    nobs = np.zeros(object_table["2MASS_ID"].shape) # Holds NOBS
-    visit_groups = visit_table.group_by("2MASS_ID")
-    for object_visits in visit_groups.groups:
-        object_index = np.where(ids == object_visits["2MASS_ID"][0])
-        nobs[object_index] = len(object_visits)
 
-    return nobs
 
-def add_Everett_photometry(inputtable, racol, deccol):
-    '''Adds UBV photometry from the EHK survey to table.
 
-    Read in the EHK photometry and append that to the columns in inputtable.
-    The table names will be the same as those in the photometry file.'''
-    photcatalog = catin.read_EHK_catalog()
-    newcat = join_by_ra_dec(inputtable, photcatalog, racol, deccol)
-
-def number_binned_by_temperature(
-    mcquillan, hightemp=6500, lowtemp=3000, dtemp=50, teffcol="Teff"):
-    '''Return array with number as a function of temperature.'''
-    # Add dtemp because hist wants the rightmost edge.
-    tempbins = np.arange(lowtemp, hightemp+dtemp, dtemp)
-    hist, binedges = np.histogram(
-        mcquillan[teffcol], bins=tempbins, range=(lowtemp, hightemp))
-    return (hist, binedges)
-
-def cumulative_number_binned_by_temperature(
-    mcquillan, hightemp=6500, lowtemp=3000, dtemp=50, teffcol="Teff"):
-    '''Plots a cumulative histogram of number based on temperature.'''
-    tempbins = np.arange(lowtemp, hightemp+dtemp, dtemp)
-    plt.hist(mcquillan[teffcol], bins=tempbins, range=(lowtemp, hightemp),
-             cumulative=True, histtype="step")
-    plt.xlim(plt.xlim()[::-1])
-    plt.xlabel("Teff (K)")
-    plt.ylabel("Number of cooler than Teff")
-
-def plot_number_bin(hist, binedges):
-    '''Plot the number objects in each temperature bin.'''
-    bincenters = (binedges[:-1] + binedges[1:])/2
-    plt.plot(bincenters, hist)
-    plt.xlabel("Teff (K)")
-    plt.ylabel("Number of McQuillan objects in Temp bin")
-
-def number_histogram(
-    mcquillan, hightemp=6500, lowtemp=3000, dtemp=50, teffcol="Teff"):
-    '''Plot a histogram of the number of McQuillan objects in temperature bins.
-
-    Uses the matplotlib hist function to make the histogram plot.'''
-    tempbins = np.arange(lowtemp, hightemp+dtemp, dtemp)
-    plt.hist(mcquillan[teffcol], bins=tempbins, range=(lowtemp, hightemp),
-             histtype="step")
-    plt.xlim(plt.xlim()[::-1])
-    plt.xlabel("Teff (K)")
-    plt.ylabel("Number of McQuillan objects in Teff bin")
-
-def rapid_fraction_histogram(
-    mcquillan, hightemp=6500, lowtemp=3000, dtemp=50, maxper=5, teffcol="Teff",
-    periodcol="Prot", label=""):
-    '''Plot a histogram of the fraction of rapid rotators in McQuillan sample.
-    '''
-    totalhist, totbins = number_binned_by_temperature(
-        mcquillan, hightemp=hightemp, lowtemp=lowtemp, dtemp=dtemp,
-        teffcol=teffcol)
-    rapid_mcquillan = perform_period_cut(
-        mcquillan, highperiod=maxper, periodcol=periodcol)
-    print("Rapid Rotator Number: " + rapid_mcquillan)
-    rapidhist, rapidbins = number_binned_by_temperature(
-        rapid_mcquillan, hightemp=hightemp, lowtemp=lowtemp, dtemp=dtemp,
-        teffcol=teffcol)
-    plt.step(totbins[:-1], rapidhist/totalhist, where="post", label=label)
-    plt.xlim(plt.xlim()[::-1])
-    plt.xlabel("Teff (K)")
-    plt.ylabel("Fraction of Rapid Rotators in Teff bin")
-    plt.title("Fraction of rotators with P < {0} day".format(maxper))
-
-def rapid_fraction_multiple_limits(
-    mcquillan, hightemp=6500, lowtemp=3000, dtemp=50, maxper=5, dper=1, 
-    teffcol="Teff", periodcol="Prot"):
-    '''Plot histograms of rapid rotator fraction for different max periods.
-
-    Bin the McQuillan sample by temperature, and then note the fraction of
-    rapid rotators in each temerature bin for different criteria for rapid
-    rotation. The maximum period for rapid rotators will start at maxper, and
-    decrement by dper until reaching zero.'''
-    period_boundaries = np.arange(maxper, 0, -dper)
-    for bound in period_boundaries:
-        perlabel = "P < {0} day".format(bound)
-        rapid_fraction_histogram(
-            mcquillan, hightemp=hightemp, lowtemp=lowtemp, dtemp=dtemp, 
-            maxper=bound, teffcol=teffcol, periodcol=periodcol, label=perlabel)
-    plt.title("Rapid Rotator Fraction up to {0} day".format(maxper))
-    plt.legend(loc="upper center")
 
 ###############################################################################
 # APOGEE Figures #
@@ -552,8 +542,6 @@ ASPCAP_STAR_BAD = 2**23
 ASPCAP_STAR_WARN = 2**7
 ASPCAP_VSINI_WARN = 2**14
 NO_ASPCAP_RESULT = 2**31
-
-
 
 def plot_by_ASPCAP_quality(x, y, aspcapflags, **kwargs):
     '''Distinguish between ASPCAP quality for plotting quantities.
@@ -649,365 +637,9 @@ def plot_by_ASPCAP_quality(x, y, aspcapflags, **kwargs):
         bad_kwargs["xerr"] = bad_xerr
         plt.errorbar(bad_x, bad_y, **bad_kwargs)
 
-def velocity_evolution(variable, nonvariable):
-    '''Automatically generate the velocity evolution of potential binaries.
-    
-    This function will plot RV-variable objects in red and RV-nonvariable
-    objects in blue.'''
-
-    sampcolors = ["r", "b"]
-
-    tablelist = []
-    for samp, col in zip([variable, nonvariable], sampcolors):
-        for obj in samp:
-            obj_id = obj["2MASS_ID"]
-            obj_loc_id = obj["LOC_ID"]
-            eisit_table = get_APOGEE_visit_info(obj_id, obj_loc_id)
-            visit_dates = visit_table["MJD"]
-            visit_velocities = visit_table["V_LSR"]
-            
-            visit_table["2MASS_ID"] = obj_id
-            tablelist.append(visit_table)
-
-            plt.plot(
-                visit_dates-visit_dates[0], visit_velocities, col+"-", 
-                label=obj_id)
-
-    plt.legend()
-    plt.xlabel("MJD - First MJD")
-    plt.ylabel("V_LSR (km/s)")
-
-    fulltable = vstack(tablelist)
-    return fulltable
-    
-def apogee_vsini_distribution(period, radius, vsini, vsini_floor=5):
-    '''Plot the distribution of vsinis for an APOGEE sample.
-
-    Will determine sini by calculating vsini * P / (2 * pi * R). For objects
-    with vsini < vsini_floor, they will be treated as upper limits (ignored in
-    this case).'''
-    invalid_vsini_indices = vsini < 0
-    vsini_limit_indices = np.logical_and(vsini >= 0, vsini <= vsini_floor)
-    vsini_detections = np.logical_not(np.logical_or(
-        invalid_vsini_indices, vsini_limit_indices))
-    num_invalid = np.count_nonzero(invalid_vsini_indices)
-    num_limits = np.count_nonzero(vsini_limit_indices)
-    valid_period = period[np.where(vsini_detections)]
-    valid_radius = radius[np.where(vsini_detections)]
-    valid_vsini = vsini[np.where(vsini_detections)]
-    print("Invalid vsinis: {0:d}".format(num_invalid))
-    print("Vsini nondetections: {0:d}".format(num_limits))
-
-
-    eq_vel = period_to_velocities(valid_period, valid_radius)
-
-    impossible_vsini = valid_vsini > eq_vel
-    photometric_cont = valid_vsini < eq_vel / 2
-    contaminants = np.logical_or(impossible_vsini, photometric_cont)
-    num_cont = np.count_nonzero(contaminants)
-    print("Contaminants: {0:d}/{1:d}".format(num_cont, len(contaminants)))
-
-    uncontam_eqvel = eq_vel[np.where(np.logical_not(contaminants))]
-    uncontam_vsini = valid_vsini[np.where(np.logical_not(contaminants))]
-
-    sini = valid_vsini / eq_vel
-
-    plt.hist(sini, bins=15, range=(0, 1.5))
-    plt.xlabel("Sin (i)")
-    plt.ylabel("N")
-
-def filter_invalid_APOGEE_entries(apotable, colname, maskvalue=APOGEE_NULL):
-    '''Remove rows from apotable where column values are the mask values.
-
-    This will filter apotable where only the rows that do not have the mask
-    value in the column will be returned.'''
-    filtered_table = au.filter_column_from_subtable(apotable, colname, 
-                                                    [maskvalue])
-    add_cut_metadata(filtered_table,
-        "Removed masked entries in {0}".format(colname))
-    return filtered_table
-
-def get_APOGEE_visit_info(twomass_id, loc_id):
-    '''Gets information for each visit of an APOGEE object.
-    
-    This function will scrape the SDSS3 web site in order to get this
-    information. Currently it only gets the MJD of an observation and a
-    relative velocity, but more can be added if need be.'''
-    mjds = []
-    vrels = []
-    # Get ASPCAP page content.
-    aspcap_resp = requests.post(
-        SDSS3_URL+"/irSpectrumDetail", data={"apogeeid": twomass_id, "locid":
-        loc_id, "commiss": 0, "show_aspcap": True})
-    # If the page loads successfully, then populate MJD and Vrel. If not, then
-    # return an empty table.
-    if aspcap_resp.status_code < 300:
-        # Find hyperlinks to individual visits.
-        aspcapsoup = BeautifulSoup(aspcap_resp.content, "html.parser")
-        visit_tags = aspcapsoup.find(
-            string="Visit Spectra").parent.find_all_next(
-                "a", href=re.compile("irSpectrum"))
-        visit_urls = [SDSS3_URL + tag["href"] for tag in visit_tags]
-        # Get MJD and vrel from individual pages.
-        for url in visit_urls:
-            visit_resp = requests.get(url)
-            visitsoup = BeautifulSoup(visit_resp.content, "html.parser")
-            visit_mjd = extract_mjd(visitsoup)
-            mjds.append(visit_mjd)
-            try:
-                visit_vrel = extract_vrel(visitsoup)
-            except TypeError:
-                visit_vrel = np.nan
-            vrels.append(visit_vrel)
-
-    # Return table with 2MASS_ID, MJD and vrel.
-    table_names = ("2MASS_ID", "MJD", "V_LSR")
-    object_table = Table(
-        [[twomass_id]*len(mjds), mjds, vrels], names=table_names,
-        dtype=(np.str, np.int, np.float))
-
-    return object_table
-
-def apogee_kepler_field(apogee_allvisit, apogee_allstar):
-    '''Take the APOGEE allVisit file and pick out targets in the kepler field.
-
-    This function essentially performs the same location cut as the query in
-    read_APOGEE_dwarfs.
-    '''
-    joined_table = au.join_by_id(
-        apogee_allvisit, apogee_allstar, "apogee_id", "apogee_id")
-    kepler_field = np.logical_and(np.logical_and(np.logical_and(
-        joined_table["RA"] > 277.5, joined_table["RA"] < 305), 
-        joined_table["DEC"] > 33.75), joined_table["DEC"] < 44.5)
-    return kepler_field
-
-def APOGEE_Ancillary_table(outputpath=paths.APOGEE_ANCILLARY_TARGETS_TABLE):
-    '''Completely write the APOGEE Ancillary Table to a file.
-
-    First read in the McQuillan Targets.
-    Take only tidally-synchronized binary candidates.
-    Get PM information from UCAC-4.
-    Write out all of the necessary information to the file.
-    '''
-    mcq = catin.mcquillan_with_stelparms()
-    tidsync = select_tidally_synchronized_binaries(
-        mcq, pcut=5, lowperiod=1, teffcol="teff")
-    ancillary_fields = ["K04_083+13", "K06_078+16", "K07_075+17"]
-    fieldtargs = targets_in_APOGEE_fields(ancillary_fields, tidsync)
-    ucactable = catin.read_UCAC4_Mcquillan_Tidsync()
-    mcq_ucac = au.join_by_id(fieldtargs, ucactable, "KIC", "KIC")
-    write_APOGEE_proposal_table(mcq_ucac)
-    
-
-# Also want function that takes list of apogee fields and kic binaries and only
-# returns the ones that are in the given fields.
-def targets_in_APOGEE_fields(
-    apogee_fields, kic_targets, kic_racol="ra", kic_raunit=u.deg, 
-    kic_deccol="dec", kic_decunit=u.deg, field_col="APOGEE_Field"):
-    '''Determine which KIC targets lie within the given APOGEE fields.
-
-    Returns the subset of kic_targets which can be found in the given APOGEE
-    fields. The APOGEE fields that each target can be found in will be in the
-    column given by aield_col.'''
-    all_apogee_fields = read_APOGEE_KASC_fields()
-    found_apogee_fields = unique(au.extract_subtable_from_column(
-        all_apogee_fields, "NAME", apogee_fields), keys="NAME")
-    field_coords = SkyCoord(
-        l=found_apogee_fields["Lon"]*u.deg, b=found_apogee_fields["Lat"]*u.deg, 
-        frame="galactic")
-    
-    try:
-        object_coords = SkyCoord(
-            kic_targets[kic_racol], kic_targets[kic_deccol], frame="icrs")
-    except u.UnitsError:
-        object_coords = SkyCoord(
-            kic_targets[kic_racol], kic_targets[kic_deccol], frame="icrs",
-            unit=(kic_raunit, kic_decunit))
-    target_fields = APOGEE_plates(
-        object_coords, found_apogee_fields["NAME"], field_coords)
-    found_target_indices = np.where(target_fields != "")
-    apogee_kics = kic_targets[found_target_indices]
-    apogee_kics[field_col] = target_fields[found_target_indices]
-    return apogee_kics
-
-def write_APOGEE_proposal_table(
-    field_targets, outputpath=paths.APOGEE_ANCILLARY_TARGETS_TABLE, 
-    apogee_field_col="APOGEE_Field", twomass_col="tm_designation", ra_col="ra", 
-    dec_col="dec", coord_source="KIC", hmag_col="hmag", hmag_source="2MASS", 
-    pmra_col="pmRA", pm_cosdec_applied=True, pmdec_col="pmDE", 
-    pm_source="UCAC-4", apokasc_visits=3, koi_visits=4, apokasc_SN=13, 
-    koi_SN=100):
-    '''Write the target table for the APOGEE Ancillary science proposal.
-
-    TYPE 1 PROPOSALS: Provide a table with the following information for each target, one target per line and sorted by field:
-
-    APOGEE-2 or MaNGA field name (e.g., "008-02", or "K12_074+15", see https://trac.sdss.org/wiki/APOGEE2/TargetingPlan for APOGEE-2 field names, and ​https://data.sdss.org/sas/mangawork/manga/target/tiles/v2_3/tilecenters_alladjusted.fits for MaNGA tile centers/names)
-    target name (2MASS ID if available; if no 2MASS ID is available, proposers must provide an alternate name and separately describe the targeting/analysis plan for such targets, which present challenges for the APOGEE-2 targeting/reduction pipelines, and will most likely deliver spectra with marginal S/N);
-    J2000.0 target coordinates (RA,Dec) in the format 00:00:00.0 +01:00:00
-    Source of coordinates ("Gaia", "2MASS" etc.)
-    H-band fiber magnitude (e.g., "10.5")
-    source for H-band photometry (e.g., "2MASS"; "VVV")
-    proper motion measurements, in units of mas/yr;
-    source for proper motion measurements (e.g., "UCAC-4")
-    minimum number of visits requested for target (e.g., "3")
-    total requested S/N (e.g., "100") 
-    '''
-    # This is the seed output table.
-    output_table = field_targets[[apogee_field_col, hmag_col]]
-
-    # Format the 2MASS ID correctly
-    output_table[twomass_col] = npstr.replace(field_targets[twomass_col],
-                                              "2MASS J", "2M")
-
-    # Now include Coordinates
-    target_coordinates = SkyCoord(
-        ra=field_targets[ra_col], dec=field_targets[dec_col])
-    ra_strings = target_coordinates.ra.to_string(
-        unit="hour", sep=":", precision=1)
-    dec_strings = target_coordinates.dec.to_string(
-        decimal=False, sep=":", alwayssign=True, precision=0)
-    coord_strings = npstr.add(ra_strings, npstr.add(" ", dec_strings))
-    output_table["Coords"] = coord_strings
-
-    # H-band magnitude
-    output_table[hmag_col].unit = None
-
-    # Proper motions
-    output_table[r"$\mu_\alpha \cos \delta$"] = np.ma.masked_invalid(
-        field_targets[pmra_col])
-    output_table[r"$\mu_\delta$"] = np.ma.masked_invalid(
-        field_targets[pmdec_col])
-
-    # Visits and S/N
-    KASC_sources = np.logical_or(
-        field_targets[apogee_field_col] == "K16_075+11",
-        field_targets[apogee_field_col] == "K20_073+09")
-    KOI_sources = ~KASC_sources
-    minvisits = np.zeros(len(field_targets), dtype=np.int)
-    minvisits[KASC_sources] = apokasc_visits
-    minvisits[KOI_sources] = koi_visits
-    output_table["Min. visits"] = minvisits
-
-    requestedSN = np.zeros(len(field_targets))
-    requestedSN[KASC_sources] = apokasc_SN
-    requestedSN[KOI_sources] = koi_SN
-    output_table["Req. S/N"] = requestedSN
-
-    ordered_output = output_table[[
-        apogee_field_col, twomass_col, "Coords", hmag_col, 
-        r"$\mu_\alpha \cos \delta$", r"$\mu_\delta$", 
-        "Min. visits", "Req. S/N"]]
-    ordered_output.sort(apogee_field_col)
-
-    # Comments about the dataset.
-    ordered_output.meta["comments"] = [
-    "Coords are from the KIC.",
-    "H-band magnitudes are from 2MASS.",
-    "Proper motions are from UCAC-4."]
-
-    names = ["APOGEE field", "2MASS ID", "Coords", "H", "PM_RA", "PM_DE", 
-             "Visits", "Req. S/N"]
-    # Unfortunately, the LaTeX writer isn't able to handle longtable correctly.
-    # Therefore, I want to write the file to a StringIO object and replace the
-    # instances of tabular with those of longtable.
-    ordered_output.write(
-        str(outputpath), format="ascii.fixed_width", names=names)
-
-def KIC_to_APOGEE_2MASS_designation(kic_desig):
-    '''Function to convert KIC 2MASS designations to be APOGEE ones.
-
-    The KIC designations are in the form of 2MASS J##########, while the apogee
-    ones are 2M##########.'''
-    apo_desig = npstr.replace(kic_desig, "2MASS J", "2M")
-    return apo_desig
-
-def read_APOGEE_KOI_fields(koifields=paths.APOGEE_KOI_FIELDS):
-    '''Get a table which contains information on the APOGEE KOI fields.'''
-    colnames = ["NAME", "Lon", "Lat", "DESIGN", "NVISITS", "TYPE",
-                "HEMISPHERE"]
-    return Table.read(str(koifields), format="ascii.basic", comment="!",
-                      names=colnames, guess=False)
-
-def read_APOGEE_KASC_fields(kascfields=paths.APOGEE_KASC_FIELDS):
-    '''Get a table which contains information on the APOGEE KOI fields.'''
-    colnames = ["NAME", "Lon", "Lat", "DESIGN", "NVISITS", "TYPE",
-                "HEMISPHERE"]
-    kasc_table = Table.read(str(kascfields), format="ascii.basic", comment="!",
-                      names=colnames, guess=False)
-    return kasc_table
-
-def observable_on_plate(objcoords, fieldcoord, CENTER_EXCLUSION=1.5*u.arcmin,
-                        FOV=1.5*u.degree):
-    '''Returns whether an object is observable on an APOGEE plate.
-
-    The center coordinate of the plate should be given in platecoord while the
-    coordinate of a group of objects should be given as objcoords. The field of 
-    view [1] should be (7\pi) degrees [2]. Each plate also has a central 
-    exclusion region due to the center posts of 1.5 arcminutes [3].
-
-    [1] There are currently three sources for the field of view. The first is the
-    APOGEE web site, given in [2], with the description of the spectrograph
-    having a 2 degree field of view. there is also the APOGEE technical paper
-    by Majewski et al (2016; arXiv:1509.05420), which states that APO has a
-    field of view of 3 degrees. Lastly, there is the targeting page [3], which
-    states that the total field of view of an APOGEE plate is 7 square degrees.
-    We'll take this to be the canonical value.
-
-    [2] http://www.sdss.org/instruments/apogee_spectrograph/
-
-    [3] http://www.sdss.org/dr13/irspec/targets/
-
-    [4] https://trac.sdss.org/wiki/APOGEE2/PlateDesign/ExclusionRadius
-    '''
-    separations = fieldcoord.separation(objcoords)
-    observable = np.logical_and(separations < FOV, separations >
-                                CENTER_EXCLUSION)
-    return observable
-
-def APOGEE_plates(objectcoords, fieldIDs, fieldcoords):
-    '''Return the APOGEE plates which the objects can be observed on.
-
-    The object and plate coordinates should be in a SkyCoords object. The names
-    of the plates should also be supplied in plateIDs.
-
-    This function will return a string array with field names for objects
-    located within an APOGEE field, or blank values if not found within an
-    APOGEE field.
-    '''
-    object_fields = np.full_like(objectcoords, "", dtype=fieldIDs.dtype)
-    ufieldIDs, unique_field_indices = np.unique(fieldIDs, return_index=True)
-    # Find a relatively reasonable way to verify that unique fieldIDs
-    # correspond to unique fieldcoords, and no surprises will occur. This same
-    # treatment can't be done with unique_coord_indices because SkyCoords are
-    # not orderable.
-    # See https://github.com/numpy/numpy/issues/641
-    ufieldcoords = fieldcoords[unique_field_indices]
-    for i in range(len(ufieldIDs)):
-        observable_indices = observable_on_plate(objectcoords, ufieldcoords[i])
-        # If an object can be observed in multiple fields, I'd like to know.
-        assert(np.all(object_fields[observable_indices] == ""))
-        object_fields[observable_indices] = ufieldIDs[i]
-    return object_fields
-
-def APOGEE_plate_count(fieldIDs, field_array):
-    '''Count the number of objects observed in each field.
-
-    Find the number of objects which were found in each APOGEE field. This 
-    function uses the output of the APOGEE_plates function in this module to
-    count the number of objects in each field. The fields of interest should be 
-    provided in fieldIDs.
-
-    This function returns a dictionary mapping the fieldID to the number of
-    objects in that field.
-    '''
-    fieldcounts = {}
-    unique_fields = np.unique(fieldIDs)
-    for field in unique_fields:
-        field_indices = (field_array == field)
-        num_objects = np.count_nonzero(field_indices)
-        fieldcounts[field] = num_objects
-
-    return fieldcounts
+################################################################################
+# Web Scraping
+################################################################################
 
 def extract_mjd(soup):
     '''Extracts the MJD value from a web page.
@@ -1017,81 +649,6 @@ def extract_mjd(soup):
     mjd = int(soup.find(
         "span", style=re.compile("background-color:#CAF1D7")).string)
     return mjd
-
-def vrel_snr_plot(apodwarfs):
-    '''Plots vrelerr, SNR, and H relationship.
-
-    Makes a double-plot showing the relationship between relative velocity
-    error, signal-to-noise, and H-band magnitude. This function uses only
-    APOGEE dwarfs lying within the Kepler field.
-    '''
-    # Set up good, warn, and bad targets.
-    starflag = apodwarfs["starflag"]
-#   good_dwarfs = starflag >= 0
-    good_dwarfs = starflag & (2**4 + 2**9) != 0
-    # These are targets with one of the: BAD_PIXELS (0), VERY_BRIGHT_NEIGHBOR
-    # (3), and LOW_SNR (4) flags set.
-    # http://www.sdss.org/dr12/algorithms/bitmasks/#APOGEE_TARGET2
-    bad_dwarfs = starflag & (2**0 + 2**3 + 2**4) != 0
-    warn_dwarfs = np.logical_not(np.logical_or(good_dwarfs, bad_dwarfs))
-
-    Hband = apodwarfs["h"]
-    snr = np.ma.masked_equal(apodwarfs["snr"], -9999)
-    vel_err = np.ma.masked_equal(
-        np.ma.masked_equal(
-            apodwarfs["vrelerr"], 999999), -9999)
-
-    binned_results = scipy.stats.binned_statistic(
-        Hband[good_dwarfs], snr[good_dwarfs], "median", bins=19, range=(7,14))
-    binned_snr = binned_results[0]
-    binned_H_edges = binned_results[1]
-    binned_H_values = (binned_H_edges[:-1] + 
-                         (binned_H_edges[1]-binned_H_edges[0])/2)
-    
-    apogee_est_SNR = np.array([100, 45, 20, 10])
-    apogee_est_H = np.array([11.3, 12.2, 13.3, 14.2])
-
-    plt.subplot(2, 1, 1) 
-    plt.scatter(snr[good_dwarfs], Hband[good_dwarfs], marker='x', label="",
-                c='k')
-#   plt.plot(snr[warn_dwarfs], Hband[warn_dwarfs], 'gx', label="")
-#   plt.plot(snr[bad_dwarfs], Hband[bad_dwarfs], 'gx', label="Bad")
-    plt.plot(binned_snr, binned_H_values, 'r-', lw=3, label="Median")
-    plt.plot(apogee_est_SNR, apogee_est_H, 'r--', label="Wiki Est.")
-    plt.title("APOGEE dwarfs in Kepler field")
-    plt.ylabel("H")
-    plt.xlim(0, 100)
-    plt.ylim(14.3, 7)
-    plt.legend(loc="lower right")
-
-    binned_results = scipy.stats.binned_statistic(
-        snr[good_dwarfs], vel_err[good_dwarfs], "median", bins=19, range=(5,100))
-    binned_RV_err = binned_results[0] 
-    binned_RV_edges = binned_results[1]
-    binned_snr_values = (binned_RV_edges[:-1] + 
-                         (binned_RV_edges[1]-binned_RV_edges[0])/2)
-
-    plt.subplot(2, 1, 2) 
-    plt.scatter(snr[good_dwarfs], vel_err[good_dwarfs], marker='x',
-                c='k')
-#   plt.plot(snr[warn_dwarfs], vel_err[warn_dwarfs], 'gx')
-#   plt.plot(snr[bad_dwarfs], vel_err[bad_dwarfs], 'gx')
-    ax = plt.gca()
-    plt.ylabel("RV error (km/s)")
-    plt.xlabel("SNR (single visit)")
-    plt.xlim(0, 100)
-    ax.plot(binned_snr_values, binned_RV_err, 'r-', lw=3)
-    inax = inset_axes(ax, width="50%", height="50%", loc=1)
-    inax.scatter(snr[good_dwarfs], vel_err[good_dwarfs], marker='x',
-                 c='k')
-#   inax.plot(snr[warn_dwarfs], vel_err[warn_dwarfs], 'gx')
-#   inax.plot(snr[bad_dwarfs], vel_err[bad_dwarfs], 'gx')
-    inax.plot(binned_snr_values, binned_RV_err, 'r-', lw=3)
-    inax.set_ylim(0, 1.1)
-    inax.set_xlim(0, 100)
-
-    plt.figure()
-    plt.plot(apodwarfs[good_dwarfs]["mjd"], vel_err[good_dwarfs], "b*")
 
 def extract_vrel(soup):
     '''Extracts the radial velocity from a web page.
@@ -1104,149 +661,7 @@ def extract_vrel(soup):
         "sub", string="lsr").parent.next_sibling.next_sibling.string)
     return vrad
 
-def VIM_effect_on_McQuillan_standout_plot(
-    fullsample, rv_nonvar, rv_var, minvim=3, Teff_colname="TEFF_FIT",
-    Prot_colname="Prot", KIC_colname="KEPLER_INT"):
-    '''Creates a plot showing what the effects of VIM are with APOKASC data.'''
-    vimtable = catin.read_KepVIM_catalog()
-    quartertable = kepVIM_quarter_table(vimtable)
-    for q in range(minvim, NUM_KEPLER_QUARTERS+1):
-        plt.figure()
-        # These are the KICs of the objects which have at least q quarters of
-        # VIM detections.
-        kic_at_least_q_indices = np.unique(quartertable["KIC"][
-            quartertable["Num_Q"] >= q])
-        
-        # Get the indices of the VIM detections.
-        rv_nonvar_vim_indices = au.astropy_table_indices(
-            rv_nonvar, KIC_colname, kic_at_least_q_indices)
-        rv_var_vim_indices = au.astropy_table_indices(
-            rv_var, KIC_colname, kic_at_least_q_indices)
-        # These then are the indices of the nonVIM detections.
-        rv_nonvar_nonvim_indices = au.get_complement_indices(
-            rv_nonvar_vim_indices, len(rv_nonvar))
-        rv_var_nonvim_indices = au.get_complement_indices(
-            rv_var_vim_indices, len(rv_var))
-
-        # Now make the tables that should be plotted
-        rv_nonvar_nonvim = rv_nonvar[rv_nonvar_nonvim_indices]
-        rv_var_nonvim = rv_var[rv_var_nonvim_indices]
-        vims = vstack([rv_nonvar[rv_nonvar_vim_indices],
-                       rv_var[rv_var_vim_indices]])
-        print("Number of VIMs is {0}.".format(len(vims)))
-        McQuillan_standout_plot(
-            fullsample, rv_nonvar_nonvim, rv_var_nonvim, 
-            Teff_colname=Teff_colname, Prot_colname=Prot_colname)
-        plt.semilogy(vims[Teff_colname], vims[Prot_colname], 'm*', ms=12,
-                     label="VIM blends")
-        plt.legend(loc="lower left")
-        plt.title("Vim cutoff {0:n} Quarters".format(q))
-        return vims
-
-def McQuillan_standout_plot(
-    fullsample, rv_nonvar, rv_var, Teff_colname="TEFF_FIT",
-    Prot_colname="Prot", data_label="McQuillan/APOKASC"):
-    '''Creates a plot like McQuillan et al. but overplots RV samples.
-
-    Takes the full McQuillan sample and overplots the RV-variable and
-    RV-nonvariable samples on top in red and blue.
-    '''
-    McQuillan_plot(fullsample, Teff_colname=Teff_colname,
-                   Prot_colname=Prot_colname, color="c", marker=".",
-                   label=data_label)
-    McQuillan_plot(rv_var, Teff_colname=Teff_colname,
-                   Prot_colname=Prot_colname, color="r", marker="*",
-                   label="RV Variable", ms=12)
-    McQuillan_plot(rv_nonvar, Teff_colname=Teff_colname,
-                   Prot_colname=Prot_colname, color="b", marker="*",
-                   label="RV Nonvariable", ms=12)
-    hr.invert_x_axis()
-    plt.xlabel("Teff (K)")
-    plt.ylabel("Prot (day)")
-    plt.title("Jen van Saders-cut sample (Multiepoch)")
-    plt.legend(loc="lower left")
-
-def McQuillan_plot(sample, Teff_colname="Teff", Prot_colname="Prot", color="c",
-                   marker=".", label="", ms=2.0):
-    '''Creates a plot like in McQuillan.
-
-    Takes the sample in McQuillan and plots the rotation period, given in
-    Prot_colname, versus the temperature given in Teff_colname. The rotation
-    period is plotted on a log scale.'''
-    plt.semilogy(
-        sample[Teff_colname], sample[Prot_colname], color=color, 
-        marker=marker, label=label, ms=ms, linestyle="")
-    hr.invert_x_axis()
-    plt.xlabel("Teff (K)")
-    plt.ylabel("Prot (day)")
-
-def plot_APOGEE_KIC_teff_DSEP_KIC_radius(
-    apogee_teff, kic_teff, dsep_radius, kic_radius, apogee_logg):
-    '''Plot the radius of objects with respect to teff.'''
-    giant_indices = apogee_logg < 3.5
-    f, ((ax1, ax2), (ax3, ax4)) = plt.subplots(
-        2, 2, sharex='all', sharey='all')
-    ax1.plot(apogee_teff, dsep_radius, 'r*')
-    ax1.plot(apogee_teff[giant_indices], dsep_radius[giant_indices], 'bo',
-             label="APOGEE giants")
-    ax2.plot(kic_teff, dsep_radius, 'r*')
-    ax2.plot(kic_teff[giant_indices], dsep_radius[giant_indices], 'bo')
-    ax3.plot(apogee_teff, kic_radius, 'r*')
-    ax3.plot(apogee_teff[giant_indices], kic_radius[giant_indices], 'bo')
-    ax4.plot(kic_teff, kic_radius, 'r*')
-    ax4.plot(kic_teff[giant_indices], kic_radius[giant_indices], 'bo')
-    ax1.set_xlim((7000, 3500))
-    ax3.set_xlabel("APOGEE Teff (K)")
-    ax4.set_xlabel("KIC Teff (K)")
-    ax1.set_ylabel("DSEP radius (Rsun)")
-    ax3.set_ylabel("KIC radius (Rsun)")
-    ax1.legend()
-
-    f.suptitle("APOGEE-McQuillan Good Fits")
-
-
-def rotation_radial_velocity_variation(
-    rv_nonvar, rv_var, vsini_colname="VSINI", Prot_colname="Prot"):
-    '''Create a plot showing RV-variable/nonvariable objects.'''
-
-    plt.semilogy(rv_nonvar[vsini_colname], rv_nonvar[Prot_colname], 'b*', 
-                 ms=12, label="RV Variable")
-    plt.semilogy(rv_var[vsini_colname], rv_var[Prot_colname], 'r*', ms=12,
-                 label="RV Variable")
-    plt.xlabel("v sin i (km/s)")
-    plt.ylabel("Prot (day)")
-    plt.title("Multiepoch with rotation")
-    plt.legend(loc="upper right")
-
-def period_velocity_apogee(
-    periods, vsinis, apogee_flags):
-    '''Plot the relationship between period & vsini for rapid rotators.
-
-    This will put the rapid rotators which have been observed in APOGEE on a
-    plot relating period and vsini.'''
-    bad_indices = apogee_flags & 2**23 != 0
-    # The 2**14 is a flag called VSINI_WARN. It does not trigger the STAR_BAD
-    # or STAR_WARN flags.
-    warn_indices = np.logical_and(apogee_flags & (2**7+2**14) != 0,
-                                  np.logical_not(bad_indices))
-    good_indices = np.logical_not(np.logical_or(bad_indices, warn_indices))
-
-    plt.scatter(periods[good_indices], vsinis[good_indices], s=50, c="g",
-                marker="o", label="good")
-    plt.scatter(periods[warn_indices], vsinis[warn_indices], s=15, c="m",
-                marker="s", label="warn")
-    plt.scatter(periods[bad_indices], vsinis[bad_indices], s=15, c="r",
-                marker="D", label="bad")
-    plt.plot([1, 5], [51, 10], 'k-', label="Rsun")
-    plt.plot([1, 5], [51/2.0, 10/2.0], 'k--', label="Rsun (min)")
-    plt.plot([1, 5], [51*0.66, 10*0.66], 'b-', label="0.66 Rsun")
-    plt.plot([1, 5], [51*0.66/2.0, 10*0.66/2.0], 'b--', label="0.66 Rsun (min)")
-
-    plt.xlabel("Period (day)")
-    plt.ylabel("vsini (km/s)")
-    plt.ylim(0, 100)
-    plt.xlim(1, 5)
-#   plt.legend(loc="upper right")
+# CLEANUP
 
 def teff_velocity_apogee(
     teffs, vsinis, apogee_flags):
@@ -2107,6 +1522,7 @@ def perform_vscatter_cut(fullsample, lowv=None, highv=None, vcol="VSCATTER"):
 
     return perform_cut(fullsample, vcol, lowv, highv)
 
+# Maybe make this capable of handing arrays of lowv and highv
 def perform_vsini_cut(fullsample, lowv=None, highv=None, vcol="VSINI"):
     '''Perform a vsini cut on the sample.
 
@@ -2330,26 +1746,6 @@ def find_UKIRT_target_object(ukirt_result):
 
     target_table = Table(rows=main_target_rows, names=ukirt_result.colnames)
     return target_table
-
-def select_brightest_targets(
-    tblgrp, num=2, magcol="jAperMag3"):
-    '''Selects the brightest targets in the groups in his table.
-
-    Selects the brightest objects in each table in each group. The number of
-    brightest objects to reserve is given in num, and the column which holds
-    the magnitudes are in magcol.'''
-    for grp in tblgrp:
-        pass
-
-
-def apogee_targets_in_observed_sample(obs, apogee):
-    '''Explore the apogee targets that will be observed.
-
-    Plot the total observation sample, as well as the subsample which already
-    has APOGEE observations in an HR diagram.
-
-    Additionally, show the objects which '''
-    pass
 
 def generate_sini_distribution(npoints=10000):
     '''Generate a distribution of sin(i)s from randomly inclined orbits.
@@ -3205,11 +2601,32 @@ def kepVIM_blending_statistics(magdiffs, offsets, quarters):
 # ASPCAP #
 ###############################################################################
 
+def split_by_ASPCAP_flags(apogee_table, flag_col="ASPCAPFLAGS"):
+    '''Splits the sample according to their ASPCAP fits.
+    
+    A three-tuple will be returned, which contains the bad, warn, and good
+    indices, respectively. This particular implementation uses the ASPCAP flags
+    instead of the bitmasks because the APOKASC catalog only has the flags
+    available. Note that objects without any ASPCAP fits are classified as
+    having bad fits.'''
+    flags = apogee_table[flag_col]
+    # Pure bad indices
+    bad_indices = bad_ASPCAP_indices(flags, warn=False)
+    good_indices = np.logical_not(bad_ASPCAP_indices(flags, warn=True))
+    warn_indices = np.logical_not(np.logical_or(bad_indices, good_indices))
+    assert np.all(
+        np.logical_or(np.logical_or(good_indices, warn_indices), bad_indices) ==
+        np.ones(len(flags)))
+
+    return (apogee_table[bad_indices], apogee_table[warn_indices],
+            apogee_table[good_indices])
+
 def filter_bad_ASPCAP_fits(apogee_table, warn=False):
     '''Removes entries which have ASPCAP flags.
 
-    If an object has the STAR_BAD flag enabled, it will be removed. If the warn
-    keyword is also specified, it will also remove the STAR_WARN flag.
+    If an object has the STAR_BAD flag enabled or does not have an ASPCAP fit
+    at all, it will be removed. If the warn keyword is also specified, it will 
+    also remove the STAR_WARN flag.
     '''
     flags = apogee_table["ASPCAPFLAGS"]
     good_indices = np.logical_not(bad_ASPCAP_indices(flags, warn))
@@ -3222,10 +2639,13 @@ def filter_bad_ASPCAP_fits(apogee_table, warn=False):
 def bad_ASPCAP_indices(aspcapflags, warn=False):
     '''Picks bad ASPCAP flags from flag array.
 
-    Bad ASPCAP flags are defined as those with STAR_BAD in them. If the warn
-    keyword is given, STAR_WARN flags are also marked as bad.
+    Bad ASPCAP flags are defined as those with STAR_BAD in them or those with
+    no ASPCAP result at all. If the warn keyword is given, STAR_WARN flags are 
+    also marked as bad.
     '''
-    bad_indices = npstr.find(aspcapflags, "STAR_BAD") > 0
+    bad_indices = npstr.find(aspcapflags, "STAR_BAD") >= 0
+    bad_indices = np.logical_or(
+        bad_indices, npstr.find(aspcapflags, "NO_ASPCAP_RESULT") >= 0)
     if warn:
         bad_indices = np.logical_or(bad_indices, npstr.find(
             aspcapflags, "STAR_WARN") >= 0)
@@ -3383,4 +2803,61 @@ def write_bad_photometric_periods(
 
     output_table.write(str(dest), format="ascii.fixed_width",
                        formats=format_dict)
+
+################################################################################
+# Spectroscopic Rapid Rotator Routines #
+################################################################################
+
+def select_spectroscopic_rapid_rotators(
+        inputtable, lowp=1, highp=5, vsini_col="VSINI", rad_col="radius"):
+    '''Select spectroscopic rapid rotators.
+
+    These are objects whose vsinis lie between the period range given. Of
+    course, because of the sin(i) ambiguity, the two samples do not match
+    perfectly. There will be a few objects which scatter out of the high period
+    region of the sample due to inclination, and a few that scatter into the
+    sample from the low period region. Given that the number of short-period
+    objects ought to be less than the number of long-period objects, the number
+    scattering out should be significantly more than the number scattering in.
+    '''
+    low_vel_limits = period_to_velocities(5, inputtable[rad_col])
+    high_vel_limits = period_to_velocities(1, inputtable[rad_col])
+
+    vel_lim = inputtable[np.logical_and(
+        inputtable['VSINI'] > low_vel_limits, inputtable["VSINI"] <
+        high_vel_limits)]
+
+    return vel_lim
+
+def APOKASC_spectroscopic_rapid_rotators():
+    '''Select rapid rotators in APOKASC.
+
+    This function will go through the APOKASC catalog. It will make logg and
+    teff cuts based on Huber et al (2014) parameters instead of APOGEE
+    parameters. However, McQuillan periods won't be involved in this sample at
+    all.'''
+    apo = catin.APOKASC_with_KIC_stelparms()
+    good_apo = filter_bad_ASPCAP_fits(apo)
+
+    apo_dwarfs = perform_logg_cut(
+        good_apo, lowlogg=3.5, loggcol="logg")
+    apo_obs = perform_teff_cut(
+        apo_dwarfs, lowtemp=4800, hightemp=5600, teffcol="teff")
+    
+    apo_detect = perform_vsini_cut(apo_obs, lowv=7)
+    apo_highv = select_spectroscopic_rapid_rotators(apo_detect)
+    return apo_highv
+    apo_noeb = remove_Kepler_EBs(
+        apo_highv, McQuillan=False, mainkiccol="KEPLER_INT")
+    apo_nodlsb = filter_double_lined_spectroscopic_binaries(
+        apo_noeb, apid_col="2MASS_ID")
+
+    # Now filter out objects with V < 14
+    ehk = catin.read_EHK_catalog()
+    apo_photo = au.join_by_ra_dec(
+        apo_nodlsb, ehk, "RA", "DEC", "RA", "Dec", join_type="left")
+
+
+
+
 

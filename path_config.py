@@ -61,8 +61,8 @@ THESIS_PATH = HEAD_DIR / "Thesis"
 PROPOSAL_PATH = THESIS_PATH / "Proposals"
 APOGEE_ANCILLARY_TARGETS_TABLE = PROPOSAL_PATH / "ancillary_targets.txt"
 
-DR14_ALLVISIT_PATH = HEAD_DIR / "allVisit-l31c.1.fits"
-DR14_ALLSTAR_PATH = HEAD_DIR / "allStar-l31c.1.fits"
+DR14_ALLVISIT_PATH = HEAD_DIR / "allVisit-l31c.2.fits"
+DR14_ALLSTAR_PATH = HEAD_DIR / "allStar-l31c.2.fits"
 
 # SHORTCUT PATHS
 # These are for subsets of table that take a really long time to generate.
@@ -78,4 +78,5 @@ SHORTCUT_BRUNTT_DR14 = SHORTCUTS / "bruntt_dr14.fits"
 SHORTCUT_MCQUILLAN_EBS = SHORTCUTS / "mcq_ebs.fits"
 SHORTCUT_MDM_NOMAGCUT = SHORTCUTS / "obs_pretarget_may2017.fits"
 SHORTCUT_APOGEE_KIC = SHORTCUTS / "kic_dr14.fits"
+SHORTCUT_APOKASC_KIC = SHORTCUTS / "kic_apokasc.fits"
 SHORTCUT_MCQUILLAN_DR14_KIC = SHORTCUTS / "mcq_kic_dr14.fits"

@@ -339,9 +339,7 @@ def mcquillan_photometry(
     mcq_path=paths.MCQUILLAN_CATALOG, photo_path=paths.EHK_PATH):
     '''Reads in photometry from the EHK catalog for McQuillan targets.'''
     mcq = read_McQuillan_catalog(mcq_path)[["KIC", "_RA", "_DE"]]
-    ehk = read_EHK_catalog()
-    mcq_photo = au.join_by_ra_dec(
-        mcq, ehk, "_RA", "_DE", "RA", "Dec", join_type="left")
+    mcq_photo = catalog.add_Everett_photometry(mcq, "_RA", "_DE")
 
     return mcq_photo
 
@@ -629,6 +627,8 @@ def fix_table_coordinates_units(tbl, ra_col, dec_col):
         tbl[ra_col].unit = u.degree
     if tbl[dec_col].unit == "degrees":
         tbl[dec_col].unit = u.degree
+
+# Split files for large online database queries
 
 def read_split_file(filepath, table_format):
     '''Reads a file that has been split into multiple parts.

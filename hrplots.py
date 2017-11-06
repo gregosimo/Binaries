@@ -51,44 +51,39 @@ def logg_teff_comparison_subsample(
     '''Plot a subsample of objects against a full sample.'''
     f, axes = plt.subplots(nrows=2, ncols=2, sharex="col", sharey="row")
     
-    two_logg_teff_on_axes(
+    logg_teff_on_2x2_axes(
         f, axes, fulllogg1, fullteff1, fulllogg2, fullteff2, label1, label2, 
-        sgkw={"marker": ".", "c": "cyan"}, dwkw={"marker": ".", "c": "pink"})
-    two_logg_teff_on_axes(
+        kw={"marker": ".", "c": "grey", "ls": ""})
+    logg_teff_on_2x2_axes(
         f, axes, samplelogg1, sampleteff1, samplelogg2, sampleteff2, label1,
-        label2, sgkw={"marker": "o", "c": "b", "ms": 7}, 
-        dwkw={"marker": "o", "c": "r", "ms": 7})
+        label2, kw={"marker": "*", "c": "blue", "ls": ""})
                           
 
-def two_logg_teff_on_axes(
-    f, axes, logg1, teff1, logg2, teff2, label1, label2, 
-    sgkw={"marker": ".", "c": "b"}, dwkw={"marker": ".", "c": "r"}):
-    '''Make logg teff plots on the given 2x2 grid.'''
+def logg_teff_on_2x2_axes(
+        f, axes, logg1, teff1, logg2, teff2, label1, label2, 
+        kw={"marker": ".", "c": "b", "ls": ""}):
+    '''Make logg teff plots on the given 2x2 grid.
+    
+    The grid needs to already be generated, and the figure/axes need to be
+    passed to this function. The two measurements of logg and teff also need to
+    be passed. Lastly, axes labels indicating the source of the logg and teff
+    values for each measurements must be passed. For example, APOGEE and 
+    Huber.
+    
+    The kw argument should be a dictionary with keywords to be passed to the
+    underlying errorbar function. Formatting arguments should be included, as
+    well as uncertainties in the parameters.'''
     ((ax1, ax2), (ax3, ax4)) = axes
 
-    subgiant_indices = logg1 < 4.2
-    dwarf_indices = logg1 >= 4.2
-    logg_teff_plot(
-        teff1[subgiant_indices], logg1[subgiant_indices], axis=ax1, **sgkw)
-    logg_teff_plot(teff1[dwarf_indices], logg1[dwarf_indices], axis=ax1, **dwkw)
+    logg_teff_plot(teff1, logg1, axis=ax1, style="", **kw)
     ax1.set_xlabel("")
     ax1.set_ylabel("{0} log(g)".format(label1))
-    logg_teff_plot(teff2[subgiant_indices], logg1[subgiant_indices], axis=ax2,
-                   **sgkw)
-    logg_teff_plot(teff2[dwarf_indices], logg1[dwarf_indices], axis=ax2, **dwkw)
+    logg_teff_plot(teff2, logg1, axis=ax2, style="", **kw)
     ax2.set_xlabel("")
     ax2.set_ylabel("")
-    logg_teff_plot(teff1[subgiant_indices], logg2[subgiant_indices], axis=ax3,
-                   **sgkw)
-    logg_teff_plot(teff1[dwarf_indices], logg2[dwarf_indices], axis=ax3, **dwkw)
+    logg_teff_plot(teff1, logg2, axis=ax3, style="", **kw)
     ax3.set_xlabel("{0} Teff".format(label1))
     ax3.set_ylabel("{0} log(g)".format(label2))
-    logg_teff_plot(teff2[subgiant_indices], logg2[subgiant_indices], axis=ax4,
-                   **sgkw)
-    logg_teff_plot(teff2[dwarf_indices], logg2[dwarf_indices], axis=ax4, **dwkw)
+    logg_teff_plot(teff2, logg2, axis=ax4, style="", **kw)
     ax4.set_xlabel("{0} Teff".format(label2))
     ax4.set_ylabel("")
-    ax1.set_xlim(5500, 4000)
-    ax1.set_ylim(5.0, 2.0)
-    ax4.set_xlim(5600, 4200)
-    ax4.set_ylim(4.8, 3.5)
