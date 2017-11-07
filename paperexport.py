@@ -1,8 +1,10 @@
 import os
 
 import numpy as np
+import numpy.core.defchararray as npstr
 import matplotlib.pyplot as plt
 from astropy.table import Table
+from astropy.io import ascii
 
 import observations as obs
 import path_config as paths
@@ -22,20 +24,25 @@ def build_filepath(toplevel, filename, suffix="png"):
     fullpath = toplevel / ".".join((filename, suffix))
     return str(fullpath)
 
+def get_sample():
+    '''Get the final sample of the observing targets.'''
+    final_sample = Table.read(
+        paths.HEAD_DIR / "Obs_list.txt", format="ascii.fixed_width")
+    return final_sample
+
 def create_observing_sample_table(
         dest=build_filepath(TABLE_PATH, "obsprops", "tex")):
     '''Create the observing table with relevant parameters.
 
     For this table, the relevant parameters are the Huber Teff and log(g), the
     McQuillan period, and the EHK V-band magnitude.'''
-    init_sample = obs.select_observing_targets(30)
-    final_sample = catalog.perform_period_cut(init_sample, lowperiod=1.1)
+    sample = get_sample()
 
-    sample_names = final_sample["KIC_A"]
-    sample_teff = final_sample["teff"]
-    sample_logg = final_sample["logg"]
-    sample_period = final_sample["Prot"]
-    sample_V = final_sample["V"]
+    sample_names = sample["KIC_A"]
+    sample_teff = sample["teff"]
+    sample_logg = sample["logg"]
+    sample_period = sample["Prot"]
+    sample_V = sample["V"]
 
     endcomments = r"""
 For each Kepler target, the \(T_{eff}\) and \(\log (g)\) values are taken from 
@@ -61,6 +68,49 @@ of the Kepler field."""
 
     output_table.write(dest, format="latex", latexdict=obsdict,
                        formats=column_format)
+
+
+def create_APOGEE_table(dest=build_filepath(TABLE_PATH, "apotab", "tex")):
+    '''Create the table showing APOGEE parameters for objects that have them.
+
+    This table will contain APOGEE-determined Teff, logg, vsini, and
+    vscatter.'''
+    full_sample = get_sample()
+    good_sample = catalog.filter_bad_ASPCAP_fits(full_sample)
+    sample = good_sample[~npstr.endswith(good_sample["APOGEE_ID"], "N/A")]
+
+    kic_name = sample["KIC_A"]
+    apo_apid = sample["APOGEE_ID"]
+    apo_teff = sample["TEFF"]
+    apo_logg = sample["LOGG_FIT"]
+    apo_vsini = sample["VSINI"]
+    apo_vscatter = sample["VSCATTER"]
+    apo_nvisits = npstr.replace(sample["NVISITS"], "--", "1")
+
+
+    endcomments = r"""APOGEE parameters are only those with good fits from DR14. 
+    \log (g) are uncorrected values from FERRE. Missing VScatter objects are
+    those with only one visit. """
+
+    obsdict = {"tabletype": "table*", "tablealign": "htb", 
+               "col_align": "r r c c c c", 
+               "caption": "Targets with APOGEE observations\\label{tab:apogee}",
+               "preamble": "", "header_start": "", "data_start": "\\tableline",
+               "data_end": "", "tablefoot": endcomments
+               }
+
+    output_table = Table(
+        [kic_name, apo_apid, apo_teff, apo_logg, apo_vsini, apo_vscatter,
+         apo_nvisits],
+        names=("KIC", "APOGEE ID",  r"APOGEE \(T_{eff}\)", r"APOGEE \(\log (g)\)", 
+               r"v \sin i", "VScatter", "Num. Visits")) 
+    column_format = {r"APOGEE \(\log (g)\)": ".2f", r"v \sin i": ".1f",
+                     "VScatter": ".2f"}
+
+    output_table.write(
+        dest, format="latex", latexdict=obsdict, formats=column_format, 
+        fill_values=[
+            ('-9999.0', '--', r"v \sin i"), ('0.00', '--', 'VScatter')])
 
 def create_sample_HR_diagram(dest=build_filepath(FIGURE_PATH, "sample")):
     '''HR diagram showing the location of the observing sample.
