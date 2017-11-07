@@ -32,12 +32,16 @@ import path_config as paths
 import sed
 import browse_APOGEE_spectra as browse
 import read_catalog as catin
+import rotation_consistency as rot
 
 SDSS3_URL = "http://data.sdss3.org"
 
 NUM_KEPLER_QUARTERS = 17
 
 APOGEE_NULL = -9999.0
+
+DLSB_PATH = browse.DEFAULT_DLSB_DB
+NON_DLSB_PATH = browse.DEFAULT_NULL_DB
 
 ################################################################################
 # Online catalog interactions #
@@ -252,6 +256,38 @@ def split_vscatter(fullsamp, vels, vscattercol="VSCATTER",
 def split_vsini(fullsamp, vels, vsinicol="VSINI", invert_inequality=False):
     '''Split sample into vsini parts.'''
     return split(fullsamp, vsinicol, vels, invert_inequality)
+
+def split_spectroscopic_rapid_rotators(
+        fullsamp, radii, vsinis, highperiod=5, lowperiod=1,
+        invert_inequality=False):
+    '''Split rapid rotators spectroscopically.
+    
+    Rapid rotation is defined based on the rotation period.'''
+    fullsamp["TEMPPERIOD"] = vsini_to_period(vsinis, radii)[0]
+
+    psamples = split_period(
+        fullsamp, [lowperiod, highperiod], periodcol="TEMPPERIOD", 
+        invert_inequality=invert_inequality)
+
+    del(fullsamp["TEMPPERIOD"])
+    for samp in psamples:
+        del(samp["TEMPPERIOD"])
+
+    return psamples
+
+def split_dlsb(fullsamp, apid_col, dlsb_db=DLSB_PATH, nodl_db=NON_DLSB_PATH):
+    '''Split sample into confirmed DLSBs, non-DLSBs, and nonconfirmed.
+
+    This function will essentially look through the DLSB_DB and SLSB_DB to
+    separate out targets which are either confirmed DLSBS, confirmed non-DLSBS,
+    or objects which haven't been classified as either.'''
+    dlsb_indices = mark_DLSB_indices(fullsamp[apid_col], dlsb_db=dlsb_db)
+    nodl_indices = mark_non_DLSB_indices(fullsamp[apid_col], nodl_db=nodl_db)
+    other_indices = np.logical_not(np.logical_or(dlsb_indices, nodl_indices))
+    assert not np.any(np.logical_and(dlsb_indices, nodl_indices))
+
+    return (fullsamp[np.where(dlsb_indices)], fullsamp[np.where(nodl_indices)],
+            fullsamp[np.where(other_indices)])
     
 ##################
 # APOGEE filters #
@@ -2698,7 +2734,6 @@ def apogee_filter_quality(apotable, quality=("good", "bad", "warn"),
 ###############################################################################
 # Double-Lined Spectroscopic Binaries #
 ###############################################################################
-DLSB_PATH = browse.DEFAULT_DLSB_DB
 
 def mark_DLSB_indices(apogee_ids, dlsb_db=DLSB_PATH):
     '''Mark which apogee IDs correspond to known DLSBs.
@@ -2709,7 +2744,18 @@ def mark_DLSB_indices(apogee_ids, dlsb_db=DLSB_PATH):
     binaries.'''
     dlsbs = browse.read_DLSB_db(db_path=dlsb_db)
     dlsb_indices = au.mark_selections_in_columns(apogee_ids, dlsbs["APOGEE_ID"])
-    return np.where(dlsb_indices)
+    return dlsb_indices
+
+def mark_non_DLSB_indices(apogee_ids, nodl_db=NON_DLSB_PATH):
+    '''Mark which apogee IDs are confirmed non-DLSBs.
+
+    Creates an index array which marks the apogee_ids which are known not to be
+    double-line spectroscopic binaries. It looks at the file at nodl_db to have
+    a list of APOGEE_IDs corresponding to objects which aren't doubled-lined
+    spectroscopic binaries.'''
+    nodls = browse.read_null_db(db_path=nodl_db)
+    nodl_indices = au.mark_selections_in_columns(apogee_ids, nodls["APOGEE_ID"])
+    return nodl_indices
 
 def filter_double_lined_spectroscopic_binaries(
     apocat, apid_col="APOGEE_ID", dlsb_db=DLSB_PATH, verbose=False):

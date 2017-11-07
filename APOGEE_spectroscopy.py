@@ -1,9 +1,12 @@
 '''
 This is a script to populate the ipython namespace with all of the subsets of
 interest when checking the rotation properties of the APOGEE'''
+from functools import partial
+
 import numpy as np
 from astropy.table import vstack, Table
 import matplotlib.pyplot as plt
+import scipy
 
 import read_catalog as catin
 import catalog
@@ -52,6 +55,32 @@ del(apo_dwarfs)
 gendict["kic_dwarfs"] = ("cool_kic_dwarfs", "hot_kic_dwarfs")
 gendict["apo_dwarfs"] = ("cool_apo_dwarfs", "hot_apo_dwarfs")
 
+# Split up DLSBs
+dlsb, nodlsb, unknown_dlsb = catalog.split_dlsb(
+    cool_kic_dwarfs, apid_col="APOGEE_ID")
+del(cool_kic_dwarfs)
+gendict["cool_kic_dwarfs"] = ("dlsb", "nodlsb", "unknown_dlsb")
+
+# But let's count known and unknown non-DLSBs together.
+non_dlsb = vstack([nodlsb, unknown_dlsb])
+del(nodlsb)
+del(unknown_dlsb)
+gendict["cool_kic_dwarfs"] = ("dlsb", "non_dlsb")
+
+
+# Objects with detectable rotation.
+
+nondet_rot, det_rot = catalog.split_vsini(non_dlsb, 7)
+del(non_dlsb)
+gendict["non_dlsb"] = ("nondet_rot", "det_rot")
+
+# Objects that are rapid rotators.
+
+very_rapid, rapid, slow = catalog.split_spectroscopic_rapid_rotators(
+    det_rot, det_rot["radius"], det_rot["VSINI"])
+del(det_rot)
+gendict["det_rot"] = ("very_rapid", "rapid", "slow")
+
 def gen_samp(name):
     '''Function to generate the given sample objects which was broken down.'''
     try:
@@ -93,7 +122,9 @@ def KIC_APOGEE_Param_Diff():
 
 def rotation_dist():
     '''Plot the vsini distribution over Teff.'''
-    samp = gen_samp("cool_kic_dwarfs")
+    full_samp = gen_samp("cool_kic_dwarfs")
+    samp = full_samp[full_samp["VSINI"] > 0]
+
     linex = [min(samp["teff"]), max(samp["teff"])]
 
     plt.plot(samp["teff"], samp["VSINI"], ls="", marker="*")
@@ -101,3 +132,19 @@ def rotation_dist():
     plt.xlabel("KIC Teff")
     plt.ylabel("VSINI")
     hr.invert_x_axis()
+
+    nbins = 20
+    top_percent, edges, indices = scipy.stats.binned_statistic(
+        samp["teff"], samp["VSINI"], statistic=lambda x: np.percentile(x, 66.7), 
+        bins=nbins)
+    median_percent, edges, indices = scipy.stats.binned_statistic(
+        samp["teff"], samp["VSINI"], statistic=lambda x: np.percentile(x, 50.0), 
+        bins=nbins)
+    bottom_percent, edges, indices = scipy.stats.binned_statistic(
+        samp["teff"], samp["VSINI"], statistic=lambda x: np.percentile(x, 33.3), 
+        bins=nbins)
+    
+    midpoints = (edges[:-1]+edges[1:])/2
+    plt.errorbar(midpoints, median_percent, yerr=[
+        median_percent-bottom_percent, top_percent-median_percent], marker="o",
+                 c="r", ls="", lw=2, zorder=3)
