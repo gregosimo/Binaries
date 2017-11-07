@@ -20,9 +20,9 @@ gendict = {}
 
 dr14 = catin.dr14_with_KIC_stelparms()
 
-bad_dr14, warn_dr14, good_dr14 = catalog.split_by_ASPCAP_flags(dr14)
+bad_dr14, warn_dr14, vsini_dr14, good_dr14 = catalog.split_by_ASPCAP_flags(dr14)
 del(dr14)
-gendict["dr14"] = ("bad_dr14", "warn_dr14", "good_dr14")
+gendict["dr14"] = ("bad_dr14", "warn_dr14", "vsini_dr14", "good_dr14")
 
 # Including objects with the warn flag requires more thoughtfulness. For right
 # now, let's just look at the good targets. 
@@ -36,14 +36,21 @@ gendict["dr14"] = ("bad_dr14", "warn_dr14", "good_dr14")
 # their own column.
 good_dr14["LOGG_FIT"] = good_dr14["FPARAM"][:,1]
 
+# Separate out the asteroseismic dwarfs as early as I can to get the full
+# sample.
+ast_dwarf, non_ast_dwarf = catalog.split_asteroseismic_dwarfs(
+    good_dr14, "APOGEE_ID")
+del(good_dr14)
+gendict["good_dr14"] = ("ast_dwarf", "non_ast_dwarf")
+
 # Don't really care about giants either.
 
 kic_giants, kic_dwarfs = catalog.split_logg(
-    good_dr14, 3.5, loggcol="logg")
+    non_ast_dwarf, 3.5, loggcol="logg")
 apo_giants, apo_dwarfs = catalog.split_logg(
-    good_dr14, 3.5, loggcol="LOGG_FIT")
-del(good_dr14)
-gendict["good_dr14"] = ("kic_giants", "kic_dwarfs")
+    non_ast_dwarf, 3.5, loggcol="LOGG_FIT")
+del(non_ast_dwarf)
+gendict["non_ast_dwarf"] = ("kic_giants", "kic_dwarfs")
 
 
 # Split between hot and cool dwarfs
@@ -69,10 +76,9 @@ gendict["cool_kic_dwarfs"] = ("dlsb", "non_dlsb")
 
 
 # Objects with detectable rotation.
-
-nondet_rot, det_rot = catalog.split_vsini(non_dlsb, 7)
+bad_rot, nondet_rot, det_rot = catalog.split_vsini(non_dlsb, [-1, 7])
 del(non_dlsb)
-gendict["non_dlsb"] = ("nondet_rot", "det_rot")
+gendict["non_dlsb"] = ("bad_rot", "nondet_rot", "det_rot")
 
 # Objects that are rapid rotators.
 

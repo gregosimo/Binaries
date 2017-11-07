@@ -288,6 +288,17 @@ def split_dlsb(fullsamp, apid_col, dlsb_db=DLSB_PATH, nodl_db=NON_DLSB_PATH):
 
     return (fullsamp[np.where(dlsb_indices)], fullsamp[np.where(nodl_indices)],
             fullsamp[np.where(other_indices)])
+
+def split_asteroseismic_dwarfs(fullsamp, apid_col):
+    '''Split the asteroseismic dwarfs from the rest of the sample.
+    
+    This function uses the current APOKASC database to determine whether an
+    object is an asteroseismic dwarf or not.'''
+    apokasc = catin.read_APOKASC_catalog()[["2MASS_ID", "RADIUS_DW"]]
+    ast_dwarf = filter_invalid_APOGEE_entries(apokasc, "RADIUS_DW")
+    match_indices = au.mark_selections_in_columns(
+        fullsamp[apid_col], ast_dwarf)
+    return (fullsamp[match_indices], fullsamp[~match_indices])
     
 ##################
 # APOGEE filters #
@@ -2640,22 +2651,29 @@ def kepVIM_blending_statistics(magdiffs, offsets, quarters):
 def split_by_ASPCAP_flags(apogee_table, flag_col="ASPCAPFLAGS"):
     '''Splits the sample according to their ASPCAP fits.
     
-    A three-tuple will be returned, which contains the bad, warn, and good
-    indices, respectively. This particular implementation uses the ASPCAP flags
-    instead of the bitmasks because the APOKASC catalog only has the flags
-    available. Note that objects without any ASPCAP fits are classified as
-    having bad fits.'''
+    A four-tuple will be returned, which contains the bad, warn, vsini_warn, and 
+    good indices, respectively. This particular implementation uses the ASPCAP 
+    flags instead of the bitmasks because the APOKASC catalog only has the 
+    flags available. Note that objects without any ASPCAP fits are classified as
+    having bad fits. Objects with the VSINI_WARN flag are separated because
+    they may need to be inspected separately from the other objects.'''
     flags = apogee_table[flag_col]
     # Pure bad indices
     bad_indices = bad_ASPCAP_indices(flags, warn=False)
-    good_indices = np.logical_not(bad_ASPCAP_indices(flags, warn=True))
-    warn_indices = np.logical_not(np.logical_or(bad_indices, good_indices))
+    badwarn_indices = bad_ASPCAP_indices(flags, warn=True)
+    warn_indices = np.logical_and(
+        np.logical_not(bad_indices), badwarn_indices)
+    vsini_indices = np.logical_and(
+        np.logical_not(badwarn_indices), warn_VSINI_indices(flags))
+    good_indices = np.logical_not(np.logical_or(
+        badwarn_indices, vsini_indices))
     assert np.all(
-        np.logical_or(np.logical_or(good_indices, warn_indices), bad_indices) ==
+        np.logical_or(np.logical_or(np.logical_or(
+            good_indices, warn_indices), bad_indices), vsini_indices) ==
         np.ones(len(flags)))
 
     return (apogee_table[bad_indices], apogee_table[warn_indices],
-            apogee_table[good_indices])
+            apogee_table[vsini_indices], apogee_table[good_indices])
 
 def filter_bad_ASPCAP_fits(apogee_table, warn=False):
     '''Removes entries which have ASPCAP flags.
@@ -2687,6 +2705,12 @@ def bad_ASPCAP_indices(aspcapflags, warn=False):
             aspcapflags, "STAR_WARN") >= 0)
 
     return bad_indices
+
+def warn_VSINI_indices(aspcapflags):
+    '''Picks ASPCAP flags which indicate a VSINI warning.
+
+    These are objects which have the VSINI_WARN flag enabled.'''
+    warn_indices = npstr.find(aspcapflags, "VSINI_WARN") >= 0
 
 def good_aspcap_fits(apotable, aspcapcol="ASPCAPFLAG"):
     '''Only return the entries with good ASPCAP fits.'''
