@@ -36,56 +36,127 @@ gendict["dr14"] = ("bad_dr14", "warn_dr14", "vsini_dr14", "good_dr14")
 # their own column.
 good_dr14["LOGG_FIT"] = good_dr14["FPARAM"][:,1]
 
+# Split up the sample into those with McQuillan periods, and those without
+# McQuillan periods. There will likely be parallel analyses done for these.
+mcq, nomcq = catalog.split_McQuillan_periods(good_dr14, "kepid")
+del(good_dr14)
+gendict["good_dr14"] = ("mcq", "nomcq")
+
+###############################################################################
+# Work with McQuillan Sample #
+###############################################################################
+
 # Separate out the asteroseismic dwarfs as early as I can to get the full
 # sample.
-ast_dwarf, non_ast_dwarf = catalog.split_asteroseismic_dwarfs(
-    good_dr14, "APOGEE_ID")
-del(good_dr14)
-gendict["good_dr14"] = ("ast_dwarf", "non_ast_dwarf")
+ast_dwarf_mcq, non_ast_dwarf_mcq = catalog.split_asteroseismic_dwarfs(
+    mcq, "APOGEE_ID")
+del(mcq)
+gendict["mcq"] = ("ast_dwarf_mcq", "non_ast_dwarf_mcq")
+
 
 # Don't really care about giants either.
-
-kic_giants, kic_dwarfs = catalog.split_logg(
-    non_ast_dwarf, 3.5, loggcol="logg")
-apo_giants, apo_dwarfs = catalog.split_logg(
-    non_ast_dwarf, 3.5, loggcol="LOGG_FIT")
-del(non_ast_dwarf)
-gendict["non_ast_dwarf"] = ("kic_giants", "kic_dwarfs")
+kic_giants_mcq, kic_dwarfs_mcq = catalog.split_logg(
+    non_ast_dwarf_mcq, 3.5, loggcol="logg")
+apo_giants_mcq, apo_dwarfs_mcq = catalog.split_logg(
+    non_ast_dwarf_mcq, 3.5, loggcol="LOGG_FIT")
+del(non_ast_dwarf_mcq)
+gendict["non_ast_dwarf_mcq"] = ("kic_giants_mcq", "kic_dwarfs_mcq")
 
 
 # Split between hot and cool dwarfs
-
-cool_kic_dwarfs, hot_kic_dwarfs = catalog.split_teff(kic_dwarfs, 6500)
-cool_apo_dwarfs, hot_apo_dwarfs = catalog.split_teff(apo_dwarfs, 6500)
-del(kic_dwarfs)
-del(apo_dwarfs)
-gendict["kic_dwarfs"] = ("cool_kic_dwarfs", "hot_kic_dwarfs")
-gendict["apo_dwarfs"] = ("cool_apo_dwarfs", "hot_apo_dwarfs")
+cool_kic_dwarfs_mcq, hot_kic_dwarfs_mcq = catalog.split_teff(
+    kic_dwarfs_mcq, 6500)
+cool_apo_dwarfs_mcq, hot_apo_dwarfs_mcq = catalog.split_teff(
+    apo_dwarfs_mcq, 6500)
+del(kic_dwarfs_mcq)
+del(apo_dwarfs_mcq)
+gendict["kic_dwarfs_mcq"] = ("cool_kic_dwarfs_mcq", "hot_kic_dwarfs_mcq")
+gendict["apo_dwarfs_mcq"] = ("cool_apo_dwarfs_mcq", "hot_apo_dwarfs_mcq")
 
 # Split up DLSBs
-dlsb, nodlsb, unknown_dlsb = catalog.split_dlsb(
-    cool_kic_dwarfs, apid_col="APOGEE_ID")
-del(cool_kic_dwarfs)
-gendict["cool_kic_dwarfs"] = ("dlsb", "nodlsb", "unknown_dlsb")
+dlsb_mcq, nodlsb_mcq, unknown_dlsb_mcq = catalog.split_dlsb(
+    cool_kic_dwarfs_mcq, apid_col="APOGEE_ID")
+del(cool_kic_dwarfs_mcq)
+gendict["cool_kic_dwarfs_mcq"] = ("dlsb_mcq", "nodlsb_mcq", "unknown_dlsb_mcq")
 
 # But let's count known and unknown non-DLSBs together.
-non_dlsb = vstack([nodlsb, unknown_dlsb])
-del(nodlsb)
-del(unknown_dlsb)
-gendict["cool_kic_dwarfs"] = ("dlsb", "non_dlsb")
+non_dlsb_mcq = vstack([nodlsb_mcq, unknown_dlsb_mcq])
+del(nodlsb_mcq)
+del(unknown_dlsb_mcq)
+gendict["cool_kic_dwarfs_mcq"] = ("dlsb_mcq", "non_dlsb_mcq")
 
 
 # Objects with detectable rotation.
-bad_rot, nondet_rot, det_rot = catalog.split_vsini(non_dlsb, [-1, 7])
-del(non_dlsb)
-gendict["non_dlsb"] = ("bad_rot", "nondet_rot", "det_rot")
+bad_rot_mcq, nondet_rot_mcq, det_rot_mcq = catalog.split_vsini(
+    non_dlsb_mcq, [-1, 7])
+del(non_dlsb_mcq)
+gendict["non_dlsb_mcq"] = ("bad_rot_mcq", "nondet_rot_mcq", "det_rot_mcq")
 
 # Objects that are rapid rotators.
+very_rapid_mcq, rapid_mcq, slow_mcq = catalog.split_spectroscopic_rapid_rotators(
+    det_rot_mcq, det_rot_mcq["radius"], det_rot_mcq["VSINI"])
+del(det_rot_mcq)
+gendict["det_rot_mcq"] = ("very_rapid_mcq", "rapid_mcq", "slow_mcq")
 
-very_rapid, rapid, slow = catalog.split_spectroscopic_rapid_rotators(
-    det_rot, det_rot["radius"], det_rot["VSINI"])
-del(det_rot)
-gendict["det_rot"] = ("very_rapid", "rapid", "slow")
+###############################################################################
+# Work with non-McQuillan sample #
+###############################################################################
+
+# Separate out the asteroseismic dwarfs as early as I can to get the full
+# sample.
+ast_dwarf_nomcq, non_ast_dwarf_nomcq = catalog.split_asteroseismic_dwarfs(
+    nomcq, "APOGEE_ID")
+del(nomcq)
+gendict["nomcq"] = ("ast_dwarf_nomcq", "non_ast_dwarf_nomcq")
+
+
+# Don't really care about giants either.
+kic_giants_nomcq, kic_dwarfs_nomcq = catalog.split_logg(
+    non_ast_dwarf_nomcq, 3.5, loggcol="logg")
+apo_giants_nomcq, apo_dwarfs_nomcq = catalog.split_logg(
+    non_ast_dwarf_nomcq, 3.5, loggcol="LOGG_FIT")
+del(non_ast_dwarf_nomcq)
+gendict["non_ast_dwarf_nomcq"] = ("kic_giants_nomcq", "kic_dwarfs_nomcq")
+
+
+# Split between hot and cool dwarfs
+cool_kic_dwarfs_nomcq, hot_kic_dwarfs_nomcq = catalog.split_teff(
+    kic_dwarfs_nomcq, 6500)
+cool_apo_dwarfs_nomcq, hot_apo_dwarfs_nomcq = catalog.split_teff(
+    apo_dwarfs_nomcq, 6500)
+del(kic_dwarfs_nomcq)
+del(apo_dwarfs_nomcq)
+gendict["kic_dwarfs_nomcq"] = (
+    "cool_kic_dwarfs_nomcq", "hot_kic_dwarfs_nomcq")
+gendict["apo_dwarfs_nomcq"] = (
+    "cool_apo_dwarfs_nomcq", "hot_apo_dwarfs_nomcq")
+
+# Split up DLSBs
+dlsb_nomcq, nodlsb_nomcq, unknown_dlsb_nomcq = catalog.split_dlsb(
+    cool_kic_dwarfs_nomcq, apid_col="APOGEE_ID")
+del(cool_kic_dwarfs_nomcq)
+gendict["cool_kic_dwarfs_nomcq"] = (
+    "dlsb_nomcq", "nodlsb_nomcq", "unknown_dlsb_nomcq")
+
+# But let's count known and unknown non-DLSBs together.
+non_dlsb_nomcq = vstack([nodlsb_nomcq, unknown_dlsb_nomcq])
+del(nodlsb_nomcq)
+del(unknown_dlsb_nomcq)
+gendict["cool_kic_dwarfs_nomcq"] = ("dlsb_nomcq", "non_dlsb_nomcq")
+
+
+# Objects with detectable rotation.
+bad_rot_nomcq, nondet_rot_nomcq, det_rot_nomcq = catalog.split_vsini(
+    non_dlsb_nomcq, [-1, 7])
+del(non_dlsb_nomcq)
+gendict["non_dlsb_nomcq"] = (
+    "bad_rot_nomcq", "nondet_rot_nomcq", "det_rot_nomcq")
+
+# Objects that are rapid rotators.
+very_rapid_nomcq, rapid_nomcq, slow_nomcq = catalog.split_spectroscopic_rapid_rotators(
+    det_rot_nomcq, det_rot_nomcq["radius"], det_rot_nomcq["VSINI"])
+del(det_rot_nomcq)
+gendict["det_rot_nomcq"] = ("very_rapid_nomcq", "rapid_nomcq", "slow_nomcq")
 
 def gen_samp(name):
     '''Function to generate the given sample objects which was broken down.'''

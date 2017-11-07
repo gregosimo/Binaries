@@ -299,6 +299,17 @@ def split_asteroseismic_dwarfs(fullsamp, apid_col):
     match_indices = au.mark_selections_in_columns(
         fullsamp[apid_col], ast_dwarf)
     return (fullsamp[match_indices], fullsamp[~match_indices])
+
+def split_McQuillan_periods(fullsamp, kiccol):
+    '''Split sample to those with and without McQuillan periods.
+    
+    Note that the sample with McQuillan periods will have the McQuillan
+    information.'''
+    mcq = catin.read_McQuillan_catalog()
+    mcq_apo = au.join_by_id(fullsamp, mcq, kiccol, "KIC")
+    nonmcq_apo = au.get_complement_table(mcq_apo, fullsamp, kiccol)
+
+    return mcq_apo, nonmcq_apo
     
 ##################
 # APOGEE filters #
@@ -2711,6 +2722,7 @@ def warn_VSINI_indices(aspcapflags):
 
     These are objects which have the VSINI_WARN flag enabled.'''
     warn_indices = npstr.find(aspcapflags, "VSINI_WARN") >= 0
+    return warn_indices
 
 def good_aspcap_fits(apotable, aspcapcol="ASPCAPFLAG"):
     '''Only return the entries with good ASPCAP fits.'''
