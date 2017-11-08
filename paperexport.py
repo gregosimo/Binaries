@@ -112,6 +112,22 @@ def create_APOGEE_table(dest=build_filepath(TABLE_PATH, "apotab", "tex")):
         fill_values=[
             ('-9999.0', '--', r"v \sin i"), ('0.00', '--', 'VScatter')])
 
+def RV_var_table(dest=build_filepath(TABLE_PATH, "vartab", "tex")):
+    '''Create the table of APOGEE known RV variable objects.'''
+    sample = obs.select_RV_variable_targets()
+
+    kic_name = sample["KIC_A"]
+    teff = sample["teff"]
+    logg = sample["logg"]
+    period = sample["Prot"]
+    V = sample["V"]
+    vsini = sample["VSINI"]
+    vscatter = sample["VSCATTER"]
+    nvisits = npstr.replace(sample["NVISITS"], "--", "1")
+
+
+
+
 def create_sample_HR_diagram(dest=build_filepath(FIGURE_PATH, "sample")):
     '''HR diagram showing the location of the observing sample.
 

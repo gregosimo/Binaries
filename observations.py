@@ -78,6 +78,7 @@ def select_targets_before_magcut():
 
     return mcq_observing
 
+
 def select_observing_targets(ntargets=50, tbins=3, pbins=3, Vcut=14):
     '''Selects a sample of targets that we will try to observe for our run.
 
@@ -96,6 +97,7 @@ def select_observing_targets(ntargets=50, tbins=3, pbins=3, Vcut=14):
     mcq_phot = catin.mcquillan_photometry()
     mcq_observing = au.join_by_id(mcq_observing, mcq_phot, "kepid", "KIC")
     del(mcq_phot)
+    mcq_observing["V"] = np.ma.masked_invalid(mcq_observing["V"])
     missing_Vs = mcq_observing["V"].mask
     print("{0} missing in HE catalog.".format(np.count_nonzero(missing_Vs)))
     JK_interp = sed.color_to_color_DSEP_interpolator(
@@ -170,6 +172,7 @@ def select_SLSB_target():
     mcq_phot = catin.mcquillan_photometry()
     mcq_observing = au.join_by_id(mcq_observing, mcq_phot, "kepid", "KIC")
     del(mcq_phot)
+    mcq_observing["V"] = np.ma.masked_invalid(mcq_observing["V"])
     missing_Vs = mcq_observing["V"].mask
     JK_interp = sed.color_to_color_DSEP_interpolator(
         "J-Ks", "V-H", {"V": 1, "J": 1, "H": 1, "Ks": 1}, age=2, init_mass=0.9)
@@ -215,6 +218,7 @@ def select_DLSB_target():
     mcq_phot = catin.mcquillan_photometry()
     mcq_observing = au.join_by_id(mcq_observing, mcq_phot, "kepid", "KIC")
     del(mcq_phot)
+    mcq_observing["V"] = np.ma.masked_invalid(mcq_observing["V"])
     missing_Vs = mcq_observing["V"].mask
     JK_interp = sed.color_to_color_DSEP_interpolator(
         "J-Ks", "V-H", {"V": 1, "J": 1, "H": 1, "Ks": 1}, age=2, init_mass=0.9)
@@ -360,3 +364,128 @@ def write_jskycalc_file(names, coords, filename="MDM_list.txt",
 
     output_table.write(str(output_path / filename),
                        format="ascii.commented_header")
+
+def select_RV_variable_targets():
+    '''Select objects which were determined by APOGEE to be RV variable.'''
+
+    mcq = catin.mcquillan_with_stelparms()
+
+    mcq_observing = catalog.select_tidally_synchronized_binaries(
+        mcq, pcut=5, lowperiod=1, lowtemp=4850, hightemp=5600, logg=3.5,
+        teffcol="teff", pcol="Prot", loggcol="logg")
+
+    preprocess_size = len(mcq_observing)
+    print("Sample after major cuts: {0:d}".format(preprocess_size))
+
+    mcq_observing = catalog.filter_pulsators(mcq_observing, KICcol="KIC")
+    pulsators_removed = len(mcq_observing)
+    print("Sample after removing pulsators: {0:d}".format(pulsators_removed))
+
+    apogee = catin.mcquillan_dr14_overlap()
+    mcq_observing = catalog.join_by_2MASS_key(
+        mcq_observing, apogee, "tm_designation", "tm_designation", 
+        join_type="left", conflict_suffixes=("_KIC", "_APOGEE"))
+    del(apogee)
+    
+    # Remove APOGEE giants
+    autodwarfs = mcq_observing["LOGG"] < 0
+    mcq_observing["LOGG"][mcq_observing["LOGG"] < 0] = 9999.0
+    mcq_observing = catalog.perform_logg_cut(
+        mcq_observing, lowlogg=3.5, loggcol="LOGG")
+    mcq_observing["LOGG"][mcq_observing["LOGG"] == 9999.0] = -9999.0
+    giants_removed = len(mcq_observing)
+    print("Sample after removing APOGEE Giants: {0:d}".format(giants_removed))
+
+    # Select objects which are already observed to be RV variable
+    mcq_observing["VSCATTER"] = mcq_observing["VSCATTER"].filled(-9999.0)
+    mcq_observing = catalog.perform_vscatter_cut(
+        mcq_observing, lowv=1, vcol="VSCATTER")
+    mcq_observing["VSCATTER"] = np.ma.masked_values(mcq_observing["VSCATTER"],
+                                                 -9999.0)
+    giants_removed = len(mcq_observing)
+    print("Sample after removing APOGEE giants: " + str(giants_removed))
+    
+    # Also remove eclipsing binaries.
+    mcq_observing = catalog.remove_Kepler_EBs(mcq_observing, mainkiccol="kepid")
+    print(len(mcq_observing))
+
+    # Perform a magnitude cut.
+    mcq_phot = catin.mcquillan_photometry()
+    mcq_observing = au.join_by_id(mcq_observing, mcq_phot, "kepid", "KIC")
+    del(mcq_phot)
+    mcq_observing["V"] = np.ma.masked_invalid(mcq_observing["V"])
+    missing_Vs = mcq_observing["V"].mask
+    JK_interp = sed.color_to_color_DSEP_interpolator(
+        "J-Ks", "V-H", {"V": 1, "J": 1, "H": 1, "Ks": 1}, age=2, init_mass=0.9)
+    missing_JKs = (mcq_observing['jmag'][missing_Vs] -
+                   mcq_observing["kmag"][missing_Vs]).filled()
+    mcq_observing["V"][missing_Vs] = (
+        JK_interp(missing_JKs) + mcq_observing["hmag"][missing_Vs])
+    mcq_observing = catalog.perform_cut(mcq_observing, "V", highval=14)
+
+    return mcq_observing
+
+def select_RV_nonvariable_targets():
+    '''Select objects which were determined by APOGEE to be RV variable.'''
+
+    mcq = catin.mcquillan_with_stelparms()
+
+    mcq_observing = catalog.select_tidally_synchronized_binaries(
+        mcq, pcut=5, lowperiod=1, lowtemp=4850, hightemp=5600, logg=3.5,
+        teffcol="teff", pcol="Prot", loggcol="logg")
+
+    preprocess_size = len(mcq_observing)
+    print("Sample after major cuts: {0:d}".format(preprocess_size))
+
+    mcq_observing = catalog.filter_pulsators(mcq_observing, KICcol="KIC")
+    pulsators_removed = len(mcq_observing)
+    print("Sample after removing pulsators: {0:d}".format(pulsators_removed))
+
+    apogee = catin.mcquillan_dr14_overlap()
+    mcq_observing = catalog.join_by_2MASS_key(
+        mcq_observing, apogee, "tm_designation", "tm_designation", 
+        join_type="left", conflict_suffixes=("_KIC", "_APOGEE"))
+    del(apogee)
+    
+    # Remove APOGEE giants
+    autodwarfs = mcq_observing["LOGG"] < 0
+    mcq_observing["LOGG"][mcq_observing["LOGG"] < 0] = 9999.0
+    mcq_observing = catalog.perform_logg_cut(
+        mcq_observing, lowlogg=3.5, loggcol="LOGG")
+    mcq_observing["LOGG"][mcq_observing["LOGG"] == 9999.0] = -9999.0
+    giants_removed = len(mcq_observing)
+    print("Sample after removing APOGEE Giants: {0:d}".format(giants_removed))
+
+    # Remove objects which are already observed to be RV variable
+    mcq_observing["VSCATTER"] = mcq_observing["VSCATTER"].filled(-9999.0)
+    mcq_observing = catalog.perform_vscatter_cut(
+        mcq_observing, highv=1, vcol="VSCATTER")
+    mcq_observing["VSCATTER"] = np.ma.masked_values(mcq_observing["VSCATTER"],
+                                                 -9999.0)
+    
+    # Select objects which have been observed enough to indicate non
+    # RV-variability.
+    mcq_observing["NVISITS"] = mcq_observing["NVISITS"].filled(0)
+    mcq_observing = catalog.perform_cut(mcq_observing, "NVISITS", lowval=4)
+    mcq_observing["NVISITS"] = np.ma.masked_values(mcq_observing["NVISITS"], 0)
+    
+    # Also remove eclipsing binaries.
+    mcq_observing = catalog.remove_Kepler_EBs(mcq_observing, mainkiccol="kepid")
+    print(len(mcq_observing))
+
+    # Perform a magnitude cut.
+    mcq_phot = catin.mcquillan_photometry()
+    mcq_observing = au.join_by_id(mcq_observing, mcq_phot, "kepid", "KIC")
+    del(mcq_phot)
+    mcq_observing["V"] = np.ma.masked_invalid(mcq_observing["V"])
+    missing_Vs = mcq_observing["V"].mask
+    JK_interp = sed.color_to_color_DSEP_interpolator(
+        "J-Ks", "V-H", {"V": 1, "J": 1, "H": 1, "Ks": 1}, age=2, init_mass=0.9)
+    missing_JKs = (mcq_observing['jmag'][missing_Vs] -
+                   mcq_observing["kmag"][missing_Vs]).filled()
+    mcq_observing["V"][missing_Vs] = (
+        JK_interp(missing_JKs) + mcq_observing["hmag"][missing_Vs])
+    mcq_observing = catalog.perform_cut(mcq_observing, "V", highval=14)
+
+    return mcq_observing
+
