@@ -19,28 +19,35 @@ import hrplots as hr
 gendict = {}
 
 dr14 = catin.dr14_with_KIC_stelparms()
+print("DR14 size: {0:d}".format(len(dr14)))
 
 bad_dr14, warn_dr14, vsini_dr14, good_dr14 = catalog.split_by_ASPCAP_flags(dr14)
 del(dr14)
 gendict["dr14"] = ("bad_dr14", "warn_dr14", "vsini_dr14", "good_dr14")
+print("DR14 bad fits: {0:d}".format(len(bad_dr14)))
+print("DR14 warn fits: {0:d}".format(len(warn_dr14)))
+print("DR14 vsini_warn fits: {0:d}".format(len(vsini_dr14)))
+print("DR14 good fits: {0:d}".format(len(good_dr14)))
 
 # Including objects with the warn flag requires more thoughtfulness. For right
 # now, let's just look at the good targets. 
 
-#goodwarn_dr14 = vstack([warn_dr14, good_dr14])
-#del(good_dr14)
-#del(warn_dr14)
-#gendict["dr14"] = ("bad_dr14", "goodwarn_dr14")
+goodwarn_dr14 = vstack([warn_dr14, good_dr14])
+del(good_dr14)
+del(warn_dr14)
+gendict["dr14"] = ("bad_dr14", "goodwarn_dr14")
 
 # To make things easier from the start, I want to have the APOGEE LOGGs as
 # their own column.
-good_dr14["LOGG_FIT"] = good_dr14["FPARAM"][:,1]
+goodwarn_dr14["LOGG_FIT"] = goodwarn_dr14["FPARAM"][:,1]
 
 # Split up the sample into those with McQuillan periods, and those without
 # McQuillan periods. There will likely be parallel analyses done for these.
-mcq, nomcq = catalog.split_McQuillan_periods(good_dr14, "kepid")
-del(good_dr14)
-gendict["good_dr14"] = ("mcq", "nomcq")
+mcq, nomcq = catalog.split_McQuillan_periods(goodwarn_dr14, "kepid")
+del(goodwarn_dr14)
+gendict["goodwarn_dr14"] = ("mcq", "nomcq")
+print("Fits with McQuillan Periods: {0:d}".format(len(mcq)))
+print("Fits without McQuillan Periods: {0:d}".format(len(nomcq)))
 
 ###############################################################################
 # Work with McQuillan Sample #
@@ -52,6 +59,10 @@ ast_dwarf_mcq, non_ast_dwarf_mcq = catalog.split_asteroseismic_dwarfs(
     mcq, "APOGEE_ID")
 del(mcq)
 gendict["mcq"] = ("ast_dwarf_mcq", "non_ast_dwarf_mcq")
+print("Asteroseismic dwarfs with McQuillan Periods: {0:d}".format(
+    len(ast_dwarf_mcq)))
+print("Non-Asteroseismic dwarfs with McQuillan Periods: {0:d}".format(
+    len(ast_dwarf_mcq)))
 
 
 # Don't really care about giants either.
@@ -61,6 +72,10 @@ apo_giants_mcq, apo_dwarfs_mcq = catalog.split_logg(
     non_ast_dwarf_mcq, 3.5, loggcol="LOGG_FIT")
 del(non_ast_dwarf_mcq)
 gendict["non_ast_dwarf_mcq"] = ("kic_giants_mcq", "kic_dwarfs_mcq")
+print("Huber giants with McQuillan Periods: {0:d}".format(len(kic_giants_mcq)))
+print("Huber dwarfs with McQuillan Periods: {0:d}".format(len(kic_dwarfs_mcq)))
+print("APOGEE giants with McQuillan Periods: {0:d}".format(len(apo_giants_mcq)))
+print("APOGEE  dwarfs with McQuillan Periods: {0:d}".format(len(apo_dwarfs_mcq)))
 
 
 # Split between hot and cool dwarfs
@@ -72,6 +87,14 @@ del(kic_dwarfs_mcq)
 del(apo_dwarfs_mcq)
 gendict["kic_dwarfs_mcq"] = ("cool_kic_dwarfs_mcq", "hot_kic_dwarfs_mcq")
 gendict["apo_dwarfs_mcq"] = ("cool_apo_dwarfs_mcq", "hot_apo_dwarfs_mcq")
+print("Cool Huber dwarfs with McQuillan_Periods: {0:d}".format(
+    len(cool_kic_dwarfs_mcq)))
+print("Hot Huber dwarfs with McQuillan_Periods: {0:d}".format(
+    len(hot_kic_dwarfs_mcq)))
+print("Cool APOGEE dwarfs with McQuillan_Periods: {0:d}".format(
+    len(cool_apo_dwarfs_mcq)))
+print("Hot APOGEE dwarfs with McQuillan_Periods: {0:d}".format(
+    len(hot_apo_dwarfs_mcq)))
 
 # Split up DLSBs
 dlsb_mcq, nodlsb_mcq, unknown_dlsb_mcq = catalog.split_dlsb(
@@ -84,6 +107,10 @@ non_dlsb_mcq = vstack([nodlsb_mcq, unknown_dlsb_mcq])
 del(nodlsb_mcq)
 del(unknown_dlsb_mcq)
 gendict["cool_kic_dwarfs_mcq"] = ("dlsb_mcq", "non_dlsb_mcq")
+print("Known Double-lined Spectroscopic Binaries with McQuillan Periods:"
+      "{0:d}".format(len(dlsb_mcq)))
+print("Non/unknown Double-lined Spectroscopic Binaries with McQuillan Periods:"
+      "{0:d}".format(len(dlsb_mcq)))
 
 
 # Objects with detectable rotation.
@@ -157,6 +184,306 @@ very_rapid_nomcq, rapid_nomcq, slow_nomcq = catalog.split_spectroscopic_rapid_ro
     det_rot_nomcq, det_rot_nomcq["radius"], det_rot_nomcq["VSINI"])
 del(det_rot_nomcq)
 gendict["det_rot_nomcq"] = ("very_rapid_nomcq", "rapid_nomcq", "slow_nomcq")
+
+class DataSplitter:
+    '''A class to simplify exploring various subsets of particular datasets.
+
+    An object of this class will hold a master dataset, and will be able to
+    make cuts along various dimensions in order to explore the contents of the
+    sample within the various cuts.'''
+
+    splitgroups = {}
+    indices = {}
+
+    def __init__(self, data):
+        '''Initialize Datasplitter to have tab as the master database.
+        
+        The data argument should be an astropy table.'''
+        self.data = data
+
+    def split_by_col(self, col, splitvalues, splitnames,
+                     invert_inequality=False):
+        '''Make a simple split in the dataset using one column.
+
+        The column name used for the split should be given as col. The values
+        marking the split boundaries should be given as a sequence in
+        splitvalues. Labels for the different subsets of col should be given in
+        splitnames as a sequence. The size of splitnames should be 1 greater
+        than splitvalues. Splitvalues should sorted in ascending order for
+        splitnames to make sense.
+
+        The column will be split by vals < splitvalues[0], splitvalues[0]
+        <= vals < splitvalues[1], ..., splitvalues[-2] <= vals <
+        splitvalues[-1], vals >= splitvalues[-1]. Setting the
+        invert_inequality flag to true will change <= to < and > to >=.
+        '''
+        colvalues = self.data[col]
+        
+        try:
+            ordered_splitvalues = sorted(splitvalues)
+        except TypeError:
+            # In this case there is only one object.
+            splitvalues = [splitvalues]
+        if ordered_splitvalues != splitvalues:
+            raise ValueError("Splitvalues needs to be sorted.")
+
+        # Invert_inequality basically transforms < to <= and >= to >
+        if not invert_inequality:
+            # First make the lowest table.
+            self.indices[splitnames[0]] = colvalues < ordered_splitpoints[0]
+            # Then make intermediate tables.
+            for i, (low, high) in zip(splitvalues[:-1], splitvalues[1:]):
+                self.indices[splitnames[i+1]] = np.logical_and(
+                    colvalues >= low, colvalues < high)
+            # Now make the highest table.
+            self.indices[splitnames[-1]] = colvalues >= ordered_splitpoints[-1]
+        else:
+            # First make the lowest table.
+            self.indices[splitnames[0]] = colvalues <= ordered_splitpoints[0]
+            # Then make intermediate tables.
+            for i, (low, high) in zip(splitvalues[:-1], splitvalues[1:]):
+                self.indices[splitnames[i+1]] = np.logical_and(
+                    colvalues > low, colvalues <= high)
+            # Now make the highest table.
+            self.indices[splitnames[-1]] = colvalues > ordered_splitpoints[-1]
+
+    def subsample(namelist):
+        '''Get a specified subsample.
+
+        Subsamples are specified by passing a list of subsample names, and the
+        intersection of all of those subsamples will be returned. Note that
+        individual splits are mutually-exclusive, so if two subsamples are
+        specified within the same split, the returned table will be empty. This
+        function will try to raise ValueError when this occurs.'''
+        index_list = []
+        for name in namelist:
+            try:
+                index_list.append(self.indices[name])
+            except IndexError:
+                raise ValueError(
+                    "{0} is not a valid subsample name. Run names() to get "
+                    "currently available subsample names.".format(name))
+        subsample = self.data[au.multi_logical_and(index_list)]
+        if len(subsample) == 0:
+            self._check_namelist_for_conflicts(namelist)
+
+        return subsample
+
+    def _check_namelist_for_conflicts(namelist):
+        '''Check the namelist to find conflicting entries.'''
+        nameset = set(namelist)
+        for sg in self.splitgroups.values():
+            comboset = nameset & sg
+            if len(comboset) > 1:
+                raise ValueError("{0} are conflicting!".format(comboset))
+
+    def _check_indices_partition(self, crit):
+        '''Check that indices for a given criterion partition data.
+
+        For the given criteria for subsampling data, verify that every row
+        in the dataset is counted exactly once for all divisions. This will
+        ensure the subsets are complete, and that they are mutually exclusive.
+        '''
+        divnames = self.splitgroups[crit]
+        indices = [self.indices[div] for div in divnames]
+        # Check that every row is counted at least once.
+        assert np.all(np.sum(indices, axis=0) == 1)
+
+    def names(self):
+        '''Print out all the valid subsamples in this dataset.'''
+        for k, v in self.splitgroups.values():
+            print("{0}: {1}".format(k, v))
+
+class APOGEESplitter(DataSplitter):
+    '''Keep an organized database of various cuts on APOGEE data.'''
+
+
+    def split_logg(self, col, splitvalues, splitnames, logg_crit="logg",
+                   invert_inequality=False):
+        '''Split the data by log(g).
+
+        Since there are many different ways to measure log(g), the desired
+        column should be given as col. The values to split about should be
+        given in splitvalues, and the names of the classes should be given in
+        splitnames. The type of log(g) measurement used should be given in
+        logg_crit, for example APOGEE or Huber log(g). This will associate the
+        splitnames group with the specific log(g) measurement.
+
+        For more information on invert_inequality, see split_by_col.
+        '''
+        self.split_by_col(col, splitvalues, splitnames, invert_inequality)
+        self.splitgroups[logg_crit] = set(splitnames)
+        self._check_indices_partition(logg_crit)
+
+    def split_teff(self, col, splitvalues, splitnames, teff_crit="teff",
+                   invert_inequality=False):
+        '''Split the data by Teff.
+
+        Since there are many different ways to measure Teff, the desired
+        column should be given as col. The values to split about should be
+        given in splitvalues, and the names of the classes should be given in
+        splitnames. The type of Teff measurement used should be given in
+        teff_crit, for example APOGEE or Huber Teff. This will associate the
+        splitnames group with the specific Teff measurement.
+
+        For more information on invert_inequality, see split_by_col.
+        '''
+        self.split_by_col(col, splitvalues, splitnames, invert_inequality)
+        self.splitgroups[teff_crit] = set(splitnames)
+        self._check_indices_partition(teff_crit)
+
+    def split_period(self, col, splitvalues, splitnames, period_crit="period",
+                     invert_inequality=False):
+        '''Split the data by period.
+
+        Since there are many different ways to measure period, the desired
+        column should be given as col. The values to split about should be
+        given in splitvalues, and the names of the classes should be given in
+        splitnames. The type of period measurement used should be given in
+        period_crit, for example McQuillan period. This will associate the
+        splitnames group with the specific period measurement.
+
+        For more information on invert_inequality, see split_by_col.
+        '''
+        self.split_by_col(col, splitvalues, splitnames, invert_inequality)
+        self.splitgroups[period_crit] = set(splitnames)
+        self._check_indices_partition(period_crit)
+
+    def split_vscatter(self, splitvalues, splitnames, col="VSCATTER",
+                       vscatter_crit="VSCATTER", invert_inequality=False):
+        '''Split the data by vscatter.
+
+        Split the sample based on the boundaries given in splitvalues. The
+        names for the categories should be given in splitnames. If the vscatter
+        values are in a column other than VSCATTER, it can be specified with
+        the col keyword. If there are other sources of vscatter, then they can
+        be specified in vscatter_crit.
+
+        For more information on invert_inequality, see split_by_col.
+        '''
+        self.split_by_col(col, splitvalues, splitnames, invert_inequality)
+        self.splitgroups[vscatter_crit] = set(splitnames)
+        self._check_indices_partition(vscatter_crit)
+
+    def split_vsini(self, splitvalues, splitnames, col="VSINI",
+                    vsini_crit="VSINI", invert_inequality=False):
+        '''Split the data by vsini.
+
+        Split the sample based on the boundaries given in splitvalues. The
+        names for the categories should be given in splitnames. If the vsini
+        values are in a column other than VSINI, it can be specified with
+        the col keyword. If there are other sources of vsini, then they can
+        be labeled separately by vsini_crit.
+
+        For more information on invert_inequality, see split_by_col.
+        '''
+        self.split_by_col(col, splitvalues, splitnames, invert_inequality)
+        self.splitgroups[vsini_crit] = set(splitnames)
+        self._check_indices_partition(vsini_crit)
+
+    def split_spectroscopic_rapid_rotators(
+        self, splitperiods, splitnames, radius_col="radius", 
+        vsini_col="VSINI", rapid_crit="Spec rapid", invert_inequality=False):
+        '''Split sample based on spectroscopic measures of rapid rotation.
+
+        Split the sample by vsini consistent with equatorial velocities of
+        splitperiods. The function with translate the rotation periods to
+        equatorial velocities using the radius in order to make the cut. Note
+        that because of the inclination, some period rapid-rotators may fall
+        into the slower-rotating bins. The column containing the vsinis and
+        radius are given in vsini_col and radius_col. If there are other types
+        of cuts made, they can be labeled separately by rapid_crit
+
+        For more information on invert_inequality, see split_by_col.
+        '''
+        self.split_by_col(col, splitvalues, splitnames, invert_inequality)
+        self.splitgroups[rapid_crit] = set(splitnames)
+        self._check_indices_partition(rapid_crit)
+
+    def split_dlsb(
+        self, apid_col="APOGEE_ID", dl_names=("DLSB", "No DLSB", "Unknown"),
+        dlsb_crit="DLSB", dlsb_db=catalog.DLSB_PATH, 
+        nodl_db=catalog.NON_DLSB_PATH):
+        '''Split sample based on presence of double-lines.
+
+        Split the sample based on previous observations of double-lined
+        spectroscopic binaries. The matching is done via the APOGEE ID of the
+        targets. Databases which contain APOGEE IDs of confirmed DLSBs and
+        non-DLSBs are in dlsb_db and nodl_db. Labels for the confirmed DLSB,
+        confirmed non-DLSB, and unconfirmed classes should be given as a tuple
+        in dl_names. Other analyses of double-lined spectroscopic binaries can
+        be specified by dlsb_crit.
+        '''
+        apids = self.data[apid_col]
+        self.indices[dl_names[0]] = catalog.mark_DLSB_indices(
+            apids, dlsb_db=dlsb_db)
+        self.indices[dl_names[1]] = catalog.mark_non_DLSB_indices(
+            apids, nodl_db=nodl_db)
+        self.indices[dl_names[2]] = np.logical_not(np.logical_or(
+            self.indices[dl_names[0]], self.indices[dl_names[1]]))
+        assert not np.any(np.logical_and(
+            self.indices[dl_names[0]], self.indices[dl_names[1]]))
+        self.splitgroups[dlsb_crit] = set(dl_names)
+        self._check_indices_partition(dlsb_crit)
+
+    def split_asteroseismic_dwarfs(
+        self, astero_names=("Asteroseismic", "Non-asteroseismic"), 
+        apid_col="APOGEE_ID", astero_crit="astero"):
+        '''Separate asteroseismic dwarfs in dataset.
+
+        Separates the asteroseismic dwarfs from the dataset. The asteroseismic
+        dwarfs are currently fetched from the APOKASC catalog. Other
+        determinations of the asteroseismic dwarfs can be specified in
+        astero_crit.'''
+        apokasc = catin.read_APOKASC_catalog()[["2MASS_ID", "RADIUS_DW"]]
+        ast_dwarf = catalog.filter_invalid_APOGEE_entries(apokasc, "RADIUS_DW")
+        self.indices[astero_names[0]] = au.mark_selections_in_columns(
+            self.data[apid_col], ast_dwarf)
+        self.indices[astero_names[1]] = np.logical_not(
+            self.indices[astero_names[0]])
+        self.splitgroups[astero_crit] = set(astero_names)
+        self._check_indices_partition(astero_crit)
+
+    def split_McQuillan_periods(
+        self, mcq_names=("Mcq", "No Mcq"), kiccol="KIC", mcq_crit="Mcq"):
+        '''Separate objects with and without McQuillan periods.
+
+        Splits off objects with and without McQuillan periods. The names for
+        the two classes should be given in mcq_names. The two datasets are
+        cross-matched by KIC numbers in kiccol.
+        '''
+        mcq = catin.read_McQuillan_catalog()
+        self.indices[mcq_names[0]] = au.mark_selections_in_columns(
+            self.data[kiccol], mcq["KIC"])
+        self.indices[mcq_names[1]] = np.logical_not(self.indices[mcq_names[0]])
+        self.splitgroups[mcq_crit] = set(mcq_names)
+        self._check_indices_partition(mcq_crit)
+
+    def split_by_ASPCAP_flags(
+        self, qual_names=("Bad", "Warn", "vsini", "Good"),
+        aspcapcol="ASPCAPFLAGS", aspcap_crit="ASPCAP"):
+        '''Separate objects by ASPCAP quality flags.
+
+        Splits off objects based on the quality indicated by the ASPCAP
+        flags. The four classes are those with the STAR_BAD flag, those with
+        only the STAR_WARN flag, those with only the VSINI_WARN flag, and those
+        without any of the previous three aforementioned flags. It will look
+        for ASPCAP flags in the column given in aspcapcol. If there is more
+        than one set of aspcapflags, they can be distinguished using the
+        aspcap_crit flag.'''
+        flags = self.data[aspcapcol]
+        # Pure bad indices
+        self.indices[qual_names[0]] = catalog.bad_ASPCAP_indices(
+            flags, warn=False)
+        badwarn_indices = catalog.bad_ASPCAP_indices(flags, warn=True)
+        self.indices[qual_names[1]] = np.logical_and(
+            np.logical_not(self.indices[qual_names[0]]), badwarn_indices)
+        self.indices[qual_names[2]] = np.logical_and(
+            np.logical_not(badwarn_indices), catalog.warn_VSINI_indices(flags))
+        self.indices[qual_names[3]] = np.logical_not(np.logical_or(
+            badwarn_indices, self.indices[qual_names[2]]))
+        self.splitgroups[aspcap_crit] = set(qual_names)
+        self._check_indices_partition(aspcap_crit)
 
 def gen_samp(name):
     '''Function to generate the given sample objects which was broken down.'''
