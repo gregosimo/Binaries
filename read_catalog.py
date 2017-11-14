@@ -35,10 +35,17 @@ def read_EHK_catalog(filepath=paths.EHK_PATH):
 def read_McQuillan_catalog(filepath=paths.MCQUILLAN_CATALOG):
     '''Reads in the McQuillan catalog.
 
-    The catalog shoul be located at filepath.
+    The catalog should be located at filepath.
     '''
     mcquillancat = Table.read(filepath, format="fits")
     return mcquillancat
+
+def read_McQuillan_nondetections(filepath=paths.MCQUILLAN_NONDETECTIONS):
+    '''Read in the Mcquillan nondetection table.
+
+    The catalog should be located at filepath.'''
+    nondets = Table.read(filepath, format="fits")
+    return nondets
 
 def read_original_KIC_catalog(filepath=paths.ORIG_KIC):
     '''Read in the original KIC catalog.'''
@@ -282,6 +289,26 @@ def mcquillan_with_stelparms(
     mcquillancat = au.join_by_id(
         mcq, stellcat, "KIC", "kepid", join_type="left")
     mcquillancat.remove_columns(["Teff", "log_g_", "Mass", "_RA", "_DE", "Ref"])
+    return mcquillancat
+
+@au.shortcut_file(paths.SHORTCUT_MCQUILLAN_NONDET_STELLPARM)
+def mcquillan_nondetections_with_stelparms(
+    mcq_path=paths.MCQUILLAN_NONDETECTIONS, kic_path=paths.KIC_CATALOG):
+    '''Read the McQuillan nondetections with full KIC stellar parameters.
+
+    Read in the McQuillan nondetections along with the KIC DR25 stellar
+    parameters.
+    '''
+    mcq = read_McQuillan_nondetections(mcq_path)
+    stellcat = read_KIC_DR25_catalog(kic_path)
+    mcquillancat = au.join_by_id(
+        mcq, stellcat, "KIC", "kepid", join_type="left")
+    mcquillancat["teff"][mcquillancat["teff"].mask] = mcquillancat["Teff"][
+        mcquillancat["teff"].mask]
+    mcquillancat["logg"][mcquillancat["logg"].mask] = mcquillancat["log_g_"][
+        mcquillancat["logg"].mask]
+    mcquillancat.remove_columns(
+        ["Teff", "log_g_", "Mass", "_RA", "_DE", "Ref"])
     return mcquillancat
 
 @au.shortcut_file(paths.SHORTCUT_MCQUILLAN_FLICKER)

@@ -22,16 +22,19 @@ class DataSplitter:
     make cuts along various dimensions in order to explore the contents of the
     sample within the various cuts.'''
 
-    splitgroups = {}
-    indices = {}
-
-    def __init__(self, data, splitgroups={}, indices={}):
+    def __init__(self, data, splitgroups=None, indices=None):
         '''Initialize Datasplitter to have tab as the master database.
         
         The data argument should be an astropy table.'''
         self.data = data
-        self.splitgroups = splitgroups
-        self.indices = indices
+        if not splitgroups:
+            self.splitgroups = {}
+        else:
+            self.splitgroups = splitgroups
+        if not indices:
+            self.indices = {}
+        else:
+            self.indices = indices
 
     def split_by_col(self, col, splitvalues, splitnames,
                      invert_inequality=False):
@@ -152,27 +155,113 @@ class DataSplitter:
         an integer as the first value, and a dictionary containing the rest of
         the tree as a second value. The first value represents the total number
         of objects in the tree below.'''
-        return _partition_census_node(categories)
+        return self._traverse_partition_census(categories, len)
 
-    def _partition_census_node(self, categories, prevsamps=[]):
-        '''Perform the actual recursion that generates the tree.'''
+    def _traverse_partition_census(self, categories, datafunc, prevsamps=[]):
+        '''Traverse tree and get subsample outputs..'''
         catdict = {}
         if not categories:
             return catdict
         else:
-            currentcat = categories.pop(0)
-            samples = self.names[currentcat]
-            for sampname in currentcat:
-                cursamps = prevsampes + [sampname]
+            currentcat = categories[0]
+            samples = self.splitgroups[currentcat]
+            for sampname in samples:
+                cursamps = prevsamps + [sampname]
                 samptable = self.subsample(cursamps)
-                samplen = len(samptable)
+                samplen = datafunc(samptable)
                 catdict[sampname] = (
-                    samplen, self._partition_census_node(currentcat, cursamps))
+                    samplen, self._traverse_partition_census(
+                        categories[1:], datafunc, prevsamps=cursamps))
         return catdict
 
+def format_census_tree(census_tree, indents=""):
+    '''Write the partition census to a string.
 
+    Splits up the dataset according to the list in categories and then
+    makes a human-readable string of how objects in the categories are
+    distributed.'''
+    fullstr = ""
+    for k, v in census_tree.items():
+        if v[0] != 0:
+            curstr = "{0}+ {1}: {2:d}\n".format(indents, k, v[0])
+            nextstr = format_census_tree(v[1], indents+"| ")
+            fullstr = fullstr + curstr + nextstr
+    return fullstr
 
-class APOGEESplitter(DataSplitter):
+class StarSplitter(DataSplitter):
+    '''Split dataset with stellar properties.
+
+    Current stellar properties are: Teff and Log(g).'''
+
+    def split_logg(self, col, splitvalues, splitnames, logg_crit="logg",
+                   invert_inequality=False):
+        '''Split the data by log(g).
+
+        Since there are many different ways to measure log(g), the desired
+        column should be given as col. The values to split about should be
+        given in splitvalues, and the names of the classes should be given in
+        splitnames. The type of log(g) measurement used should be given in
+        logg_crit, for example APOGEE or Huber log(g). This will associate the
+        splitnames group with the specific log(g) measurement.
+
+        For more information on invert_inequality, see split_by_col.
+        '''
+        self.split_by_col(col, splitvalues, splitnames, invert_inequality)
+        self.splitgroups[logg_crit] = set(splitnames)
+        self._check_indices_partition(logg_crit)
+
+    def split_teff(self, col, splitvalues, splitnames, teff_crit="teff",
+                   invert_inequality=False):
+        '''Split the data by Teff.
+
+        Since there are many different ways to measure Teff, the desired
+        column should be given as col. The values to split about should be
+        given in splitvalues, and the names of the classes should be given in
+        splitnames. The type of Teff measurement used should be given in
+        teff_crit, for example APOGEE or Huber Teff. This will associate the
+        splitnames group with the specific Teff measurement.
+
+        For more information on invert_inequality, see split_by_col.
+        '''
+        self.split_by_col(col, splitvalues, splitnames, invert_inequality)
+        self.splitgroups[teff_crit] = set(splitnames)
+        self._check_indices_partition(teff_crit)
+
+class McQuillanSplitter(StarSplitter):
+    '''Keep an organized database of various cuts on McQuillan data.'''
+
+    def __init__(self, data=None):
+        '''Initialize a splitter of McQuillan data.'''
+        if not data:
+            data = catin.mcquillan_with_stelparms()
+            super().__init__(data)
+
+        self.split_logg(
+            "logg", 3.5, ["Huber giant", "Huber dwarf"], logg_crit="Huber logg")
+        self.split_teff(
+            "teff", [5500, 6500], ["Jen Cool Huber", "Cool Huber", "Hot Huber"], 
+            teff_crit="Huber Teff")
+
+        self.split_period("Prot", [1, 5], ["very rapid", "rapid", "slow"])
+
+    def split_period(self, col, splitvalues, splitnames, period_crit="period",
+                     invert_inequality=False):
+        '''Split the data by period.
+
+        Since there are many different ways to measure period, the desired
+        column should be given as col. The values to split about should be
+        given in splitvalues, and the names of the classes should be given in
+        splitnames. The type of period measurement used should be given in
+        period_crit, for example McQuillan period. This will associate the
+        splitnames group with the specific period measurement.
+
+        For more information on invert_inequality, see split_by_col.
+        '''
+        self.split_by_col(col, splitvalues, splitnames, invert_inequality)
+        self.splitgroups[period_crit] = set(splitnames)
+        self._check_indices_partition(period_crit)
+
+class APOGEESplitter(StarSplitter):
     '''Keep an organized database of various cuts on APOGEE data.'''
 
     def __init__(self, data=None):
@@ -215,56 +304,7 @@ class APOGEESplitter(DataSplitter):
         self.split_by_ASPCAP_flags()
 
 
-    def split_logg(self, col, splitvalues, splitnames, logg_crit="logg",
-                   invert_inequality=False):
-        '''Split the data by log(g).
 
-        Since there are many different ways to measure log(g), the desired
-        column should be given as col. The values to split about should be
-        given in splitvalues, and the names of the classes should be given in
-        splitnames. The type of log(g) measurement used should be given in
-        logg_crit, for example APOGEE or Huber log(g). This will associate the
-        splitnames group with the specific log(g) measurement.
-
-        For more information on invert_inequality, see split_by_col.
-        '''
-        self.split_by_col(col, splitvalues, splitnames, invert_inequality)
-        self.splitgroups[logg_crit] = set(splitnames)
-        self._check_indices_partition(logg_crit)
-
-    def split_teff(self, col, splitvalues, splitnames, teff_crit="teff",
-                   invert_inequality=False):
-        '''Split the data by Teff.
-
-        Since there are many different ways to measure Teff, the desired
-        column should be given as col. The values to split about should be
-        given in splitvalues, and the names of the classes should be given in
-        splitnames. The type of Teff measurement used should be given in
-        teff_crit, for example APOGEE or Huber Teff. This will associate the
-        splitnames group with the specific Teff measurement.
-
-        For more information on invert_inequality, see split_by_col.
-        '''
-        self.split_by_col(col, splitvalues, splitnames, invert_inequality)
-        self.splitgroups[teff_crit] = set(splitnames)
-        self._check_indices_partition(teff_crit)
-
-    def split_period(self, col, splitvalues, splitnames, period_crit="period",
-                     invert_inequality=False):
-        '''Split the data by period.
-
-        Since there are many different ways to measure period, the desired
-        column should be given as col. The values to split about should be
-        given in splitvalues, and the names of the classes should be given in
-        splitnames. The type of period measurement used should be given in
-        period_crit, for example McQuillan period. This will associate the
-        splitnames group with the specific period measurement.
-
-        For more information on invert_inequality, see split_by_col.
-        '''
-        self.split_by_col(col, splitvalues, splitnames, invert_inequality)
-        self.splitgroups[period_crit] = set(splitnames)
-        self._check_indices_partition(period_crit)
 
     def split_vscatter(self, splitvalues, splitnames, col="VSCATTER",
                        vscatter_crit="VSCATTER", invert_inequality=False):
@@ -300,12 +340,15 @@ class APOGEESplitter(DataSplitter):
 
     def split_spectroscopic_rapid_rotators(
         self, splitperiods, splitnames, radius_col="radius", 
-        vsini_col="VSINI", rapid_crit="Spec rapid", invert_inequality=False):
+        vsini_col="VSINI", det_limit=7, rapid_crit="Spec rapid", 
+        invert_inequality=False):
         '''Split sample based on spectroscopic measures of rapid rotation.
 
         Split the sample by vsini consistent with equatorial velocities of
         splitperiods. The function with translate the rotation periods to
-        equatorial velocities using the radius in order to make the cut. Note
+        equatorial velocities using the radius in order to make the cut. For
+        objects with vsini lower than the detection limit, they will be assumed
+        to be rotating at the detection limit. Note
         that because of the inclination, some period rapid-rotators may fall
         into the slower-rotating bins. The column containing the vsinis and
         radius are given in vsini_col and radius_col. If there are other types
@@ -315,10 +358,10 @@ class APOGEESplitter(DataSplitter):
         '''
         tempcol = au.generate_random_string(12)
         self.data[tempcol] = catalog.vsini_to_period(
-            self.data[vsini_col], self.data[radius_col])[0]
-        self.split_period(
-            tempcol, splitperiods, splitnames, period_crit=rapid_crit, 
-            invert_inequality=invert_inequality)
+            np.maximum(self.data[vsini_col], 7), self.data[radius_col])[0]
+        self.split_by_col(tempcol, splitperiods, splitnames, invert_inequality)
+        self.splitgroups[rapid_crit] = set(splitnames)
+        self._check_indices_partition(rapid_crit)
         del(self.data[tempcol])
         assert tempcol not in self.data.colnames
 
