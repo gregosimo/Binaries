@@ -267,6 +267,14 @@ def read_flicker_loggs(loggpath=paths.FLICKER_LOGG):
     flicker_loggs = Table.read(loggpath, format="ascii.cds")
     return flicker_loggs
 
+def read_Garcia_periods(rottable=paths.GARCIA_PERIODS):
+    '''Reads in the rotation information from Garcia et al (2014).
+
+    This table will have KICs, rotation periods, and other assorted
+    information.'''
+    rafapers = Table.read(rottable, format="fits")
+    return rafapers
+
 
 ###############################################################################
 # Joined catalogs #
@@ -337,6 +345,18 @@ def create_joined_APOKASC_McQuillan_catalog(
 
     combocat = au.join_by_id(apocat, mcquillancat, "KEPLER_INT", "KIC")
     return combocat
+
+def garcia_dr14(
+    apofile=paths.DR14_ALLSTAR_PATH, kicfile=paths.KIC_CATALOG, 
+    garciafile=paths.GARCIA_PERIODS):
+    '''Created a joined Garcia/Huber/DR14 sample.
+
+    All those objects which were observed by Garcia et al (2014) will also have
+    APOGEE DR14 parameters as well as Huber et al (2014) stellar parameters.'''
+    apokic = dr14_with_KIC_stelparms(apofile, kicfile)
+    garcia = read_Garcia_periods(garciafile)
+    garcia_apo = au.join_by_id(garcia, apokic, "KIC", "kepid")
+    return garcia_apo
 
 @au.shortcut_file(paths.SHORTCUT_MCQUILLAN_DR14)
 def mcquillan_dr14_overlap(

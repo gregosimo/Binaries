@@ -2701,33 +2701,44 @@ def filter_bad_ASPCAP_fits(apogee_table, warn=False):
         add_cut_metadata(newtable, "ASPCAP STAR_WARN removed")
     return newtable
 
-def bad_ASPCAP_indices(aspcapflags, warn=False):
-    '''Picks bad ASPCAP flags from flag array.
+def aspcap_quality_bitmask_indices(aspcapbitmask, quality):
+    '''Return indices of objects with the given quality.
 
-    Bad ASPCAP flags are defined as those with STAR_BAD in them or those with
-    no ASPCAP result at all. If the warn keyword is given, STAR_WARN flags are 
-    also marked as bad.
-    '''
-    bad_indices = npstr.find(aspcapflags, "STAR_BAD") >= 0
-    bad_indices = np.logical_or(
-        bad_indices, npstr.find(aspcapflags, "NO_ASPCAP_RESULT") >= 0)
-    if warn:
-        bad_indices = np.logical_or(bad_indices, npstr.find(
-            aspcapflags, "STAR_WARN") >= 0)
+    The quality value can be either "bad", "warn", "vsini", or "good". If the 
+    quality value is "bad", all objects with the STAR_BAD or NO_ASPCAP_RESULT 
+    flags are marked. If the quality value is "warn", all objects with the
+    STAR_WARN flag will be marked. If the quality value is "vsini", all objects
+    with the VSINI_WARN flag will be marked. And lastly, a "good" quality will
+    only select objects with none of the aforementioned flags. Note this
+    implies that flags such as VMICRO_WARN will be classified as "good".'''
+    bad_flags = ASPCAP_STAR_BAD + NO_ASPCAP_RESULT
+    warn_flags = ASPCAP_STAR_WARN
+    vsini_flags = ASPCAP_VSINI_WARN
+    bad_indices = aspcapbitmask & bad_flags != 0
+    if quality.lower() == "bad":
+        return bad_indices
+    # All bad_indices are accompanied by warn indices. So make sure that you
+    # don't double-count the bad indices.
+    warn_indices = np.logical_and(aspcapbitmask & warn_flags != 0,
+                                  np.logical_not(bad_indices))
+    if quality.lower() == "warn":
+        return warn_indices
+    vsini_indices = au.multi_logical_and(
+        aspcapbitmask & vsini_flags != 0, np.logical_not(warn_indices),
+        np.logical_not(bad_indices))
+    if quality.lower() == "vsini":
+        return vsini_indices
+    good_indices = au.multi_logical_and(
+        np.logical_not(vsini_indices), np.logical_not(warn_indices),
+        np.logical_not(bad_indices))
+    assert np.all(np.sum([bad_indices, warn_indices, vsini_indices,
+                          good_indices], axis=0) == 1)
+    if quality.lower() == "good":
+        return good_indices
+    else:
+        raise ValueError("Don't understand quality: {0}".format(quality))
 
-    return bad_indices
 
-def warn_VSINI_indices(aspcapflags):
-    '''Picks ASPCAP flags which indicate a VSINI warning.
-
-    These are objects which have the VSINI_WARN flag enabled.'''
-    warn_indices = npstr.find(aspcapflags, "VSINI_WARN") >= 0
-    return warn_indices
-
-def good_aspcap_fits(apotable, aspcapcol="ASPCAPFLAG"):
-    '''Only return the entries with good ASPCAP fits.'''
-    return apogee_filter_quality(
-        apotable, quality=("bad", "warn"), aspcapcol=aspcapcol)
 
 def apogee_filter_quality(apotable, quality=("good", "bad", "warn"), 
                           aspcapcol="ASPCAPFLAG"):
@@ -2766,6 +2777,35 @@ def apogee_filter_quality(apotable, quality=("good", "bad", "warn"),
         add_cut_metadata(remaining_table, "Removed bad ASPCAP fits")
 
     return remaining_table
+
+def bad_ASPCAP_indices(aspcapflags, warn=False):
+    '''Picks bad ASPCAP flags from flag array.
+
+    Bad ASPCAP flags are defined as those with STAR_BAD in them or those with
+    no ASPCAP result at all. If the warn keyword is given, STAR_WARN flags are 
+    also marked as bad.
+    '''
+    bad_indices = npstr.find(aspcapflags, "STAR_BAD") >= 0
+    bad_indices = np.logical_or(
+        bad_indices, npstr.find(aspcapflags, "NO_ASPCAP_RESULT") >= 0)
+    if warn:
+        bad_indices = np.logical_or(bad_indices, npstr.find(
+            aspcapflags, "STAR_WARN") >= 0)
+
+    return bad_indices
+
+def warn_VSINI_indices(aspcapflags):
+    '''Picks ASPCAP flags which indicate a VSINI warning.
+
+    These are objects which have the VSINI_WARN flag enabled.'''
+    warn_indices = npstr.find(aspcapflags, "VSINI_WARN") >= 0
+    return warn_indices
+
+def good_aspcap_fits(apotable, aspcapcol="ASPCAPFLAG"):
+    '''Only return the entries with good ASPCAP fits.'''
+    return apogee_filter_quality(
+        apotable, quality=("bad", "warn"), aspcapcol=aspcapcol)
+
 
 ###############################################################################
 # Double-Lined Spectroscopic Binaries #
