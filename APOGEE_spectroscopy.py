@@ -522,6 +522,10 @@ def rapid_rotator_fraction(
     The rapid rotators are those classified under rrcrit, and those with
     matching vsini detections are under detcrit. Other cuts on categories can
     be specified in othercrit.'''
+    rrlen = (aposplit.subsample_len([rrcrit, detcrit, "No DLSB"] + othercrit) +
+             aposplit.subsample_len(
+                 [rrcrit, detcrit, "Unknown DLSB"] + othercrit))
+    fullsamp = aposplit.subsample_len(othercrit)
 
 def binned_vsini_dist(aposplit, bingroup="Huber Bins", defparams=[
     "Huber dwarf"], normed=False):
