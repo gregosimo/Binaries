@@ -115,6 +115,18 @@ class DataSplitter:
 
         return subsample
 
+    def split_sample(self, group, otherparms=None):
+        '''Split the sample according to the group partition.
+
+        Return a dictionary containing the subgroup Additional
+        restrictions on the sample can be specified as a list with otherparms.
+        Effectively, this will be like returning subsample() for each subsample
+        in group.'''
+        samples = tuple([self.subsample(otherparms+[grp]) for grp in
+                        self.splitgroups[group]])
+        return samples
+            
+
     def _check_namelist_for_conflicts(self, namelist):
         '''Check the namelist to find conflicting entries.'''
         nameset = set(namelist)
@@ -522,10 +534,12 @@ def rapid_rotator_fraction(
     The rapid rotators are those classified under rrcrit, and those with
     matching vsini detections are under detcrit. Other cuts on categories can
     be specified in othercrit.'''
+
     rrlen = (aposplit.subsample_len([rrcrit, detcrit, "No DLSB"] + othercrit) +
              aposplit.subsample_len(
                  [rrcrit, detcrit, "Unknown DLSB"] + othercrit))
     fullsamp = aposplit.subsample_len(othercrit)
+    return rrlen, fullsamp
 
 def binned_vsini_dist(aposplit, bingroup="Huber Bins", defparams=[
     "Huber dwarf"], normed=False):
