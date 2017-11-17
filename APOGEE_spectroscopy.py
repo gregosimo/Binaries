@@ -64,7 +64,7 @@ class DataSplitter:
             # In this case there is only one object.
             splitvalues = [splitvalues]
             ordered_splitvalues = splitvalues
-        if ordered_splitvalues != splitvalues:
+        if np.any(ordered_splitvalues != splitvalues):
             raise ValueError("Splitvalues needs to be sorted.")
 
         # Invert_inequality basically transforms < to <= and >= to >
@@ -134,6 +134,27 @@ class DataSplitter:
         indices = [self.indices[div] for div in divnames]
         # Check that every row is counted at least once.
         assert np.all(np.sum(indices, axis=0) == 1)
+
+    def subsample_len(self, namelist):
+        '''Get the size of a subsample.
+
+        This function automatically gets the size of a subsample in a fast way
+        as opposed to running subsample() and getting its length.'''
+        index_list = [np.ones(len(self.data))]
+        for name in namelist:
+            try:
+                index = self.indices[name]
+            except KeyError:
+                if isinstance(namelist, str):
+                    raise ValueError("Please pass a list, not a string")
+                else:
+                    raise ValueError(
+                        "{0} is not a valid subsample name. Run names() to get "
+                        "currently available subsample names.".format(name))
+            index_list.append(index)
+        fullindex = au.multi_logical_and(*index_list)
+        indexlen = np.count_nonzero(fullindex)
+        return indexlen
 
     def names(self):
         '''Print out all the valid subsamples in this dataset.'''
@@ -290,7 +311,7 @@ class APOGEESplitter(StarSplitter):
 
         self.split_vscatter(1, ["RV Nonvar", "RV Var"])
 
-        self.split_vsini(7, ["Vsini nondet", "Vsini det"])
+        self.split_vsini([0, 7], ["No Vsini", "Vsini nondet", "Vsini det"])
 
         self.split_spectroscopic_rapid_rotators(
             [1, 5], ["Very rapid rotators", "Rapid rotators", "Slow rotators"])
@@ -358,7 +379,8 @@ class APOGEESplitter(StarSplitter):
         '''
         tempcol = au.generate_random_string(12)
         self.data[tempcol] = catalog.vsini_to_period(
-            np.maximum(self.data[vsini_col], 7), self.data[radius_col])[0]
+            np.maximum(self.data[vsini_col], det_limit), 
+            self.data[radius_col])[0]
         self.split_by_col(tempcol, splitperiods, splitnames, invert_inequality)
         self.splitgroups[rapid_crit] = set(splitnames)
         self._check_indices_partition(rapid_crit)
@@ -488,6 +510,97 @@ def KIC_APOGEE_Param_Diff():
     ax2.set_xlabel("KIC Teff")
     ax2.set_ylabel("KIC - APOGEE Log(g) Difference")
     hr.invert_x_axis(ax2)
+
+################################################################################
+# Datasplitter Functions #
+################################################################################
+
+def rapid_rotator_fraction(
+    aposplit, rrcrit="Rapid rotators", detcrit="Vsini det", othercrit=[]):
+    '''Return the number of rapid rotators and total sample.
+
+    The rapid rotators are those classified under rrcrit, and those with
+    matching vsini detections are under detcrit. Other cuts on categories can
+    be specified in othercrit.'''
+
+def binned_vsini_dist(aposplit, bingroup="Huber Bins", defparams=[
+    "Huber dwarf"], normed=False):
+    '''Plot cumulative histogram of the vsini distribution for teff bins.
+    
+    This will plot the empirical distribution function of vsini for each Teff
+    bin. It will distinguish between just the good sample and the good/warn
+    samples.'''
+    for binlabel in aposplit.splitgroups[bingroup]:
+        plt.figure()
+        # Want to exclude DLSBs, so read in the No and Unknown DLSBs.
+        # Also want to exclude bad vsinis. But keep track of how many there
+        # are.
+        good_nodlsb_highvsini = aposplit.subsample(
+            defparams + ["Good", binlabel, "No DLSB", "Vsini det"])
+        good_nodlsb_lowvsini = aposplit.subsample(
+            defparams + ["Good", binlabel, "No DLSB", "Vsini nondet"])
+        good_nodlsb_novsini_len = aposplit.subsample_len(
+            defparams + ["Good", binlabel, "No DLSB", "No Vsini"])
+        good_udlsb_highvsini = aposplit.subsample(
+            defparams + ["Good", binlabel, "Unknown DLSB", "Vsini det"])
+        good_udlsb_lowvsini = aposplit.subsample(
+            defparams + ["Good", binlabel, "Unknown DLSB", "Vsini nondet"])
+        good_udlsb_novsini_len = aposplit.subsample_len(
+            defparams + ["Good", binlabel, "Unknown DLSB", "No Vsini"])
+        good_vsinis = np.ma.concatenate(
+            [good_nodlsb_highvsini["VSINI"], good_nodlsb_lowvsini["VSINI"], 
+             good_udlsb_highvsini["VSINI"], good_udlsb_lowvsini["VSINI"]])
+        good_novsini_len = good_nodlsb_novsini_len + good_udlsb_novsini_len
+
+        warn_nodlsb_highvsini = aposplit.subsample(
+            defparams + ["Warn", binlabel, "No DLSB", "Vsini det"])
+        warn_nodlsb_lowvsini = aposplit.subsample(
+            defparams + ["Warn", binlabel, "No DLSB", "Vsini nondet"])
+        warn_nodlsb_novsini_len = aposplit.subsample_len(
+            defparams + ["Warn", binlabel, "No DLSB", "No Vsini"])
+        warn_udlsb_highvsini = aposplit.subsample(
+            defparams + ["Warn", binlabel, "Unknown DLSB", "Vsini det"])
+        warn_udlsb_lowvsini = aposplit.subsample(
+            defparams + ["Warn", binlabel, "Unknown DLSB", "Vsini nondet"])
+        warn_udlsb_novsini_len = aposplit.subsample_len(
+            defparams + ["Warn", binlabel, "Unknown DLSB", "No Vsini"])
+        goodwarn_vsinis = np.ma.concatenate(
+            [warn_nodlsb_highvsini["VSINI"], warn_nodlsb_lowvsini["VSINI"], 
+             warn_udlsb_highvsini["VSINI"], warn_udlsb_lowvsini["VSINI"], 
+             good_vsinis])
+        goodwarn_novsini_len = (
+            warn_nodlsb_novsini_len + warn_udlsb_novsini_len + good_novsini_len)
+
+        sorted_good_vsinis = np.sort(good_vsinis)
+        sorted_goodwarn_vsinis = np.sort(goodwarn_vsinis)
+
+        good_stepx = np.ma.concatenate(
+            [sorted_good_vsinis, sorted_good_vsinis[[-1]]])
+        goodwarn_stepx = np.ma.concatenate(
+            [sorted_goodwarn_vsinis, sorted_goodwarn_vsinis[[-1]]])
+        if normed:
+            good_stepy = np.linspace(0, 1, len(sorted_good_vsinis)+1)
+            goodwarn_stepy = np.linspace(0, 1, len(sorted_goodwarn_vsinis)+1)
+        else:
+            good_stepy = np.arange(len(sorted_good_vsinis)+1)
+            goodwarn_stepy = np.arange(len(sorted_goodwarn_vsinis)+1)
+
+        goodline = plt.step(good_stepx, good_stepy, label="Good")
+        goodwarnline = plt.step(goodwarn_stepx, goodwarn_stepy, 
+                                label="Good+Warn")
+        ax = plt.gca()
+        plt.text(0.79, 0.2, "{0:d} missing vsini".format(good_novsini_len),
+                 horizontalalignment="center", verticalalignment="center",
+                 transform=ax.transAxes, color=goodline[0].get_color())
+        plt.text(0.79, 0.25, "{0:d} missing vsini".format(goodwarn_novsini_len), 
+                 horizontalalignment="center", verticalalignment="center",
+                 transform=ax.transAxes, color=goodwarnline[0].get_color())
+        plt.xlabel("Vsini")
+        plt.ylabel("N(<vsini)")
+        plt.title("{0} CDF".format(binlabel))
+        plt.xlim(0, 70)
+
+        plt.legend(loc="lower right")
 
 def rotation_dist():
     '''Plot the vsini distribution over Teff.'''
