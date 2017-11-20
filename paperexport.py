@@ -126,7 +126,28 @@ def RV_var_table(dest=build_filepath(TABLE_PATH, "vartab", "tex")):
     nvisits = npstr.replace(sample["NVISITS"], "--", "1")
 
 
+    endcomments = r"""APOGEE DR14 objects with VSCATTER values greater than 1 
+    km/s. \(T_{eff}\) and \(\log (g)\) values are taken from the Kepler Stellar
+    Parameter pipeline DR25."""
 
+    obsdict = {"tabletype": "table*", "tablealign": "htb", 
+               "col_align": "r c c c c c c c", 
+               "caption": "APOGEE RV Variable objects\\label{tab:aporvvar}",
+               "preamble": "", "header_start": "", "data_start": "\\tableline",
+               "data_end": "", "tablefoot": endcomments
+               }
+
+    output_table = Table(
+        [kic_name, teff, logg, period, V, vsini, vscatter, nvisits],
+        names=("KIC", r"KIC \(T_{eff}\)", r"KIC \(\log (g)\)", r"P_{rot}", "V",
+               r"v \sin i", "VScatter", "Num. Visits")) 
+    column_format = {r"KIC \(\log (g)\)": ".2f", r"P_{rot}": ".2f", "V": ".1f",
+                     r"v \sin i": ".1f", "VScatter": ".2f"}
+
+    output_table.write(
+        dest, format="latex", latexdict=obsdict, formats=column_format, 
+        fill_values=[
+            ('-9999.0', '--', r"v \sin i"), ('0.00', '--', 'VScatter')])
 
 def create_sample_HR_diagram(dest=build_filepath(FIGURE_PATH, "sample")):
     '''HR diagram showing the location of the observing sample.
