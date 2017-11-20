@@ -99,6 +99,7 @@ class DataSplitter:
         index_list = [np.ones(len(self.data))]
         for name in namelist:
             try:
+                print(self.indices)
                 index = self.indices[name]
             except KeyError:
                 if isinstance(namelist, str):
@@ -170,8 +171,7 @@ class DataSplitter:
 
     def names(self):
         '''Print out all the valid subsamples in this dataset.'''
-        for k, v in self.splitgroups.items():
-            print("{0}: {1}".format(k, v))
+        print(str(self))
 
     def __repr__(self):
         '''Print a Python representation of the DataSplitter.'''
@@ -179,6 +179,15 @@ class DataSplitter:
             self.__class__, repr(self.data), repr(self.splitgroups), 
             repr(self.indices))
         return reprstr
+
+    def __str__(self):
+        '''Print an informative representation of the DataSplitter.
+
+        This is essentially the names() function.
+        '''
+        outstr = "\n".join(["{0}: {1}".format(k, v) for k,v in
+                            self.splitgroups.items()])
+        return outstr
 
     def generate_partition_census(self, categories):
         '''Break down the sample into subsamples with numbers.
@@ -648,3 +657,56 @@ def rotation_dist():
     plt.errorbar(midpoints, median_percent, yerr=[
         median_percent-bottom_percent, top_percent-median_percent], marker="o",
                  c="r", ls="", lw=2, zorder=3)
+
+################################################################################
+# Detection limit table #
+################################################################################
+
+def rapid_rotator_det_test_split(
+    aposplit, det_limits=range(7, 11), det_crit_format="Det limit {0:d}",
+    det_format="Det >{0:d}", nondet_format="Nondet <{0:d}", 
+    rapid_crit_format="Spec Rapid Det={0:d}", 
+    very_rapid_format="Very Rapid Det={0:d}", rapid_format="Rapid Det={0:d}",
+    slow_format="Slow Det={0:d}"):
+    '''Create categories for getting rapid rotator fractions.
+
+    The limits to be probed should be given as an iterable in det_limits. The
+    default are [7, 8, 9, 10] km/s. For each limit, the dataset will be split
+    into detections and nondetections, labeled as det_format and nondet_format.
+    The detections will be under the group name det_crit_format. Additionally,
+    the classifications will be made under the group name rapid_crit_format.
+    The very rapid, rapid, and slow rotators will be accessible under the
+    labels very_rapid_format, rapid_format, and slow_format.
+
+    Note that all of the keywords ending in _format will have the detection
+    limit value in det_limits passed to it via the format() method. This is
+    because the current DataSplitter implementation requires unique category
+    names.'''
+
+    for i in det_limits:
+        splitnames = [rotclass.format(i) for rotclass in [
+            very_rapid_format, rapid_format, slow_format]]
+        aposplit.split_vsini(
+            i, [nondet_format.format(i), det_format.format(i)],
+            vsini_crit=det_format.format(i))
+        aposplit.split_spectroscopic_rapid_rotators(
+            [1, 5], splitnames, det_limit=i, 
+            rapid_crit=rapid_crit_format.format(i))
+
+def rapid_rotator_det_test(
+    aposplit, det_limits=range(7, 11), det_format="Det >{0:d}",
+    rapid_format="Rapid Det={0:d}", othercrit=["Huber dwarf"],
+    tempgroup="Huber Teff"):
+    '''Determine the rapid rotator fraction as function of detection limit.
+
+    In each Teff bin, calculate the rapid rotator fraction using the given
+    vsini detection limits. This assumes that the necessary categories were
+    already made by rapid_rotator_det_test_split().'''
+    for teff in aposplit.splitgroups[tempgroup]:
+        for i in det_limits:
+             num, denom = rapid_rotator_fraction(
+                aposplit, rrcrit=rapid_format.format(i),
+                 detcrit=det_format.format(i), othercrit=othercrit+[teff])
+             print(("For {0} and vsini>={1:d}, {2:d} out of {3:d} ({4:d}%) "
+                    "are rapid.").format(
+                        teff, i, num, denom, num*100//denom))
