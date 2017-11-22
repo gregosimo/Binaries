@@ -156,7 +156,28 @@ def create_sample_HR_diagram(dest=build_filepath(FIGURE_PATH, "sample")):
     Then the McQuillan targets. And then there will be an inset within the Teff
     and log(g) bounds.
     '''
-    pass
+    mcq = catin.mcquillan_with_stelparms()
+    hr.logg_teff_plot(mcq["teff"], mcq["logg"], label="McQuillan Detections")
+    mcq_rapid = catalog.perform_period_cut(mcq, lowperiod=1, highperiod=5)
+    hr.logg_teff_plot(
+        mcq_rapid["teff"], mcq_rapid["logg"], 
+        color=(255/255, 255/255, 109/255), ls="None", marker="*", 
+        label="Rapid rotators", ms=8)
+    sample = get_sample()
+    newsample = sample[npstr.endswith(sample["APOGEE_ID"], "N/A")]
+    hr.logg_teff_plot(
+        newsample["teff"], newsample["logg"], color=(255/255, 109/255, 182/255),
+        ls="None", marker="o", label="Observing Sample", ms=12)
+    apogeesample = sample[~npstr.endswith(sample["APOGEE_ID"], "N/A")]
+    hr.logg_teff_plot(
+        apogeesample["teff"], apogeesample["logg"], 
+        color=(182/255, 109/255, 255/255), ls="None", marker="^", ms=12,
+        label="Sample with APOGEE")
+
+    plt.xlim(6500, 3000)
+    plt.ylim(5.5, 3.5)
+    plt.legend(loc="upper right")
+
 
 def create_sample_Prot_diagram(dest=build_filepath(FIGURE_PATH, "prot_sample")):
     '''Prot-Teff digram showing the observing sample.
