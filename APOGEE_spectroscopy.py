@@ -535,6 +535,32 @@ def KIC_APOGEE_Param_Diff():
 # Datasplitter Functions #
 ################################################################################
 
+def nondetection_fraction(
+    aposplit, detcrit="Vsini nondet", othercrit=[]):
+    '''Return the number of vsini nondetections in the sample.
+
+    The nondetections are given in the criterion of detcrit. Usually this is due
+    to some threshold in vsini. Other cuts on categories can be specified in
+    othercrit.'''
+    nondetlen = (aposplit.subsample_len([detcrit, "No DLSB"] + othercrit) +
+                 aposplit.subsample_len([detcrit, "Unknown DLSB"] + othercrit))
+    fullsamp = (aposplit.subsample_len(["No DLSB"] + othercrit) +
+                aposplit.subsample_len(["Unknown DLSB"] + othercrit))
+    return (nondetlen, fullsamp)
+
+def slow_rotator_fraction(
+    aposplit, slcrit="Slow rotators", detcrit="Vsini det", othercrit=[]):
+    '''Return the fraction of slow rotators in a sample.
+
+    The slow rotators are those with a vsini detection, but not a large enough
+    vsini to place them into the rapid rotation regime.'''
+    srlen = (aposplit.subsample_len([detcrit, slcrit, "No DLSB"] + othercrit) +
+             aposplit.subsample_len(
+                 [detcrit, slcrit, "Unknown DLSB"] + othercrit))
+    fullsamp = (aposplit.subsample_len([detcrit, "No DLSB"] + othercrit) +
+                aposplit.subsample_len([detcrit, "Unknown DLSB"] + othercrit))
+    return (srlen, fullsamp)
+
 def rapid_rotator_fraction(
     aposplit, rrcrit="Rapid rotators", detcrit="Vsini det", othercrit=[]):
     '''Return the number of rapid rotators and total sample.
@@ -546,8 +572,20 @@ def rapid_rotator_fraction(
     rrlen = (aposplit.subsample_len([rrcrit, detcrit, "No DLSB"] + othercrit) +
              aposplit.subsample_len(
                  [rrcrit, detcrit, "Unknown DLSB"] + othercrit))
-    fullsamp = aposplit.subsample_len(othercrit)
-    return rrlen, fullsamp
+    fullsamp = (aposplit.subsample_len([detcrit, "No DLSB"] + othercrit) +
+                aposplit.subsample_len([detcrit, "Unknown DLSB"] + othercrit))
+    return (rrlen, fullsamp)
+
+def mcquillan_detection_fraction(
+    aposplit, mcqcrit="Mcq", othercrit=[]):
+    '''Get the fraction of the data that has a McQuillan detection.
+
+    Returns a 2-tuple containing the number of objects in the subsample with
+    McQuillan detections, along with the total number of objects in the
+    subsample.'''
+    mcqlen = aposplit.subsample_len([mcqcrit]+othercrit)
+    fullsamp = aposplit(othercrit)
+    return (mcqlen, fullsamp)
 
 def binned_vsini_dist(aposplit, bingroup="Huber Bins", defparams=[
     "Huber dwarf"], normed=False):
