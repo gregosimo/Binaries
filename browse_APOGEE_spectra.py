@@ -166,7 +166,7 @@ if __name__ == "__main__":
     parser = argparse.ArgumentParser()
 
     parser.add_argument(
-        "--dlsb-database", action="store", nargs="?", default=DEFAULT_KICDB)
+        "--dlsb-database", action="store", nargs="?", default=DEFAULT_DLSB_DB)
     parser.add_argument(
         "--null-database", action="store", nargs="?", default=DEFAULT_NULL_DB)
     parser.add_argument("FILES", action="store", nargs=argparse.REMAINDER)

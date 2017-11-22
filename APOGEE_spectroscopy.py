@@ -99,7 +99,6 @@ class DataSplitter:
         index_list = [np.ones(len(self.data))]
         for name in namelist:
             try:
-                print(self.indices)
                 index = self.indices[name]
             except KeyError:
                 if isinstance(namelist, str):
