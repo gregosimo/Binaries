@@ -1,7 +1,8 @@
-import pytest
 import numpy as np
 
 from astropy.table import Table
+import pytest
+
 import catalog
 from APOGEE_spectroscopy import DataSplitter
 
@@ -43,7 +44,7 @@ def typical_splitter():
     b.split_a([3], ["low_a", "high_a"])
     b.split_b([6.0], ["low_b", "high_b"])
     b.split_b([6.0], ["inv_low_b", "inv_high_b"], invert_inequality=True)
-    b.split_c([1, 6], ["low_c", "mid_c", "high_c"])
+    b.split_c([2, 6], ["low_c", "mid_c", "high_c"])
     return b
 
 def test_easy_split(typical_splitter):
@@ -94,4 +95,4 @@ def test_multiple_exclusion(typical_splitter):
 def test_exclusion_conflict(typical_splitter):
     '''Test that exclusion conflicts are detected.'''
     with pytest.raises(ValueError):
-        c_combo = typical_splitter_subsample(["low_c", "~high_c"])
+        c_combo = typical_splitter.subsample(["low_c", "~high_c"])

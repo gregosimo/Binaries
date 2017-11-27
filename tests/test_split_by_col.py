@@ -1,6 +1,8 @@
 import numpy as np
 
 from astropy.table import Table
+import pytest
+
 import catalog
 from APOGEE_spectroscopy import DataSplitter
 
@@ -65,9 +67,19 @@ def test_single_split_without_list(typical_splitter):
                                                False])
     assert typical_splitter.splitgroups["a"] == {"low_a", "high_a"}
 
+def test_split_outside_range(typical_splitter):
+    '''Test a split that occurs outside of column range.'''
+    typical_splitter.split_a([-1], ["low_a", "high_a"])
+    assert np.all(
+        typical_splitter.indices["low_a"] == [
+            False, False, False, False, False])
+    assert np.all(
+        typical_splitter.indices["high_a"] == [True, True, True, True, True])
+    assert typical_splitter.splitgroups["a"] == {"low_a", "high_a"}
+
 def test_multiple_split(typical_splitter):
     '''Split the table according to multiple values.'''
-    typical_splitter.split_c([1, 6], ["low_c", "mid_c", "high_c"])
+    typical_splitter.split_c([2, 6], ["low_c", "mid_c", "high_c"])
     assert np.all(
         typical_splitter.indices["low_c"] == [True, False, False, False, True])
     assert np.all(
@@ -100,3 +112,9 @@ def test_group_replacement(typical_splitter):
         typical_splitter.indices["high_a"] == [True, True, False, False,
                                                False])
     assert typical_splitter.splitgroups["a"] == {"low_a", "high_a"}
+
+#TODO
+def test_tilde_splitname(typical_splitter):
+    '''Make sure function doesn't allow a split name to start with tilde.'''
+    with pytest.raises(ValueError):
+        typical_splitter.split_a([3], ["low_a", "~high_a"])

@@ -51,6 +51,9 @@ class DataSplitter:
         <= vals < splitvalues[1], ..., splitvalues[-2] <= vals <
         splitvalues[-1], vals >= splitvalues[-1]. Setting the
         invert_inequality flag to true will change <= to < and > to >=.
+
+        Note that due to the exclusion mechanism as part of the DataSplitter,
+        that splitnames are not allowed to begin with a tilde (~) character.
         '''
         colvalues = self.data[col]
 
@@ -66,6 +69,13 @@ class DataSplitter:
             ordered_splitvalues = splitvalues
         if np.any(ordered_splitvalues != splitvalues):
             raise ValueError("Splitvalues needs to be sorted.")
+
+        # Check to make sure that splitvalues doesn't have any strings that
+        # start with a tilde.
+        for spln in splitnames:
+            if spln.startswith("~"):
+                raise ValueError(
+                    "{0} cannot begin with ~ character.".format(spln))
 
         # Invert_inequality basically transforms < to <= and >= to >
         if not invert_inequality:
@@ -96,22 +106,29 @@ class DataSplitter:
         individual splits are mutually-exclusive, so if two subsamples are
         specified within the same split, the returned table will be empty. This
         function will try to raise ValueError when this occurs.'''
+        # Make sure the namelist doesn't have any conflicting columns.
+        self._check_namelist_for_conflicts(namelist)
+
         index_list = [np.ones(len(self.data))]
         for name in namelist:
+            exclusion = False
+            if name.startswith("~"):
+                name = name[1:]
+                exclusion = True
             try:
                 index = self.indices[name]
             except KeyError:
                 if isinstance(namelist, str):
                     raise ValueError("Please pass a list, not a string")
                 else:
-                    raise ValueError(
+                    raise KeyError(
                         "{0} is not a valid subsample name. Run names() to get "
                         "currently available subsample names.".format(name))
+            if exclusion:
+                index = np.logical_not(index)
             index_list.append(index)
         fullindex = au.multi_logical_and(*index_list)
         subsample = self.data[fullindex]
-        if len(subsample) == 0:
-            self._check_namelist_for_conflicts(namelist)
 
         return subsample
 
@@ -129,7 +146,7 @@ class DataSplitter:
 
     def _check_namelist_for_conflicts(self, namelist):
         '''Check the namelist to find conflicting entries.'''
-        nameset = set(namelist)
+        nameset = set([name.lstrip("~") for name in namelist])
         for sg in self.splitgroups.values():
             comboset = nameset & sg
             if len(comboset) > 1:
