@@ -47,6 +47,12 @@ def typical_splitter():
     b.split_c([1, 6], ["low_c", "mid_c", "high_c"])
     return b
 
+#TODO
+def test_empty_split(typical_splitter):
+    '''Make sure empty split raises an error.'''
+    with pytest.raises(ValueError):
+        typical_splitter.split_a([], ["a"])
+
 def test_single_split(typical_splitter):
     '''Split the table according to one value with default keywords.'''
     typical_splitter.split_a([3], ["low_a", "high_a"])
@@ -113,8 +119,31 @@ def test_group_replacement(typical_splitter):
                                                False])
     assert typical_splitter.splitgroups["a"] == {"low_a", "high_a"}
 
-#TODO
 def test_tilde_splitname(typical_splitter):
     '''Make sure function doesn't allow a split name to start with tilde.'''
     with pytest.raises(ValueError):
         typical_splitter.split_a([3], ["low_a", "~high_a"])
+
+#TODO
+def test_split_replacement(typical_splitter):
+    '''Test that replacing a split groups cleans up correctly.'''
+    typical_splitter.split_a([3], ["low_a", "high_a"])
+    typical_splitter.split_a([1, 4], ["low_a", "mid_a", "higher_a"])
+    assert np.all(
+        typical_splitter.indices["low_a"] == [
+            False, False, False, False, True])
+    assert np.all(
+        typical_splitter.indices["mid_a"] == [False, False, True, True, False])
+    assert np.all(
+        typical_splitter.indices["higher_a"] == [
+            True, True, False, False, False])
+    assert typical_splitter.splitgroups["a"] == {"low_a", "mid_a", "higher_a"}
+    assert "high_a" not in typical_splitter.indices
+
+#TODO
+def test_split_name_conflict(typical_splitter):
+    '''Test that conflicting names for different groups throw an error.'''
+    typical_splitter.split_a([3], ["low_a", "high_a"])
+    with pytest.raises(ValueError):
+        typical_splitter.split_b([3], ["low_b", "high_a"])
+
