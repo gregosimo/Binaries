@@ -135,3 +135,53 @@ def rapid_fraction_multiple_limits(
             maxper=bound, teffcol=teffcol, periodcol=periodcol, label=perlabel)
     plt.title("Rapid Rotator Fraction up to {0} day".format(maxper))
     plt.legend(loc="upper center")
+
+###############################################################################
+# Comparing KIC values #
+###############################################################################
+def compare_inferred_flicker_loggs(
+    flicker_logg, kic_logg, dsep_logg, apogee_logg, xvalue):
+    '''Compare the flicker, Huber, and DSEP-inferred loggs.
+
+    A plot will compare the three different values of logg. They will be
+    plotted with respect to the given xvalue. The flicker logg will be plotted 
+    with a blue diamond, kic loggs with a black diamond, and dsep loggs with a 
+    red diamond.
+    '''
+    apogee_giants = np.where(np.logical_and(
+        apogee_logg > 0, apogee_logg < 3.5))
+    plt.plot(xvalue, flicker_logg, 'bo', ms=6, label="Flicker")
+    plt.plot(xvalue, kic_logg, 'rd', label="Huber", ms=6)
+    plt.plot(xvalue, dsep_logg, 'kx', label="DSEP", ms=4)
+    plt.plot(xvalue[apogee_giants], flicker_logg[apogee_giants], 'sm',
+             label="APOGEE GIANT", ms=6)
+    for i in range(len(xvalue)):
+        fkdiff = abs(flicker_logg[i] - kic_logg[i])
+        kddiff = abs(kic_logg[i] - dsep_logg[i])
+        fddiff = abs(flicker_logg[i] - dsep_logg[i])
+        maxdiff = max([fkdiff, kddiff, fddiff])
+        print(maxdiff)
+        if fkdiff < 1:
+            lc='k'
+        else:
+            lc='r'
+        plt.plot([xvalue[i]]*2, [flicker_logg[i], kic_logg[i]], ls=':', c=lc)
+        plt.plot([xvalue[i]]*2, [kic_logg[i], dsep_logg[i]], ls=':', c=lc)
+    plt.ylabel("Log(g)")
+    hr.invert_y_axis()
+
+def compare_Huber_APOGEE_loggs(
+    apogee_logg, huber_logg, huber_logg_low, huber_logg_high):
+    '''Compare APOGEE log(g) to Huber log(g) with uncertainties.
+
+    Will basically make a One-to-one plot with the asymmetric Huber
+    uncertainties taken into account, to see if objects that scatter into the
+    dwarf regime are uncertain subgiants.'''
+    plt.errorbar(
+        apogee_logg, huber_logg, yerr=[-huber_logg_low, huber_logg_high],
+        fmt="go")
+    plt.plot([2, 5], [2, 5], 'k-')
+    plt.plot([2, 5], [4.2, 4.2], 'b--')
+    plt.plot([4.2, 4.2], [2, 5], 'b--')
+    plt.xlabel("Uncalibrated APOGEE log(g)")
+    plt.ylabel("Huber log(g)")

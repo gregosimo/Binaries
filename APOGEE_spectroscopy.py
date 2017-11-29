@@ -482,6 +482,27 @@ class APOGEESplitter(StarSplitter):
         self.splitgroups[aspcap_crit] = set(qual_names)
         self._check_indices_partition(aspcap_crit)
 
+    def split_apogee_targeting(
+        self, names=("Jen", "Non-Jen"), target_crit="Jen Targeting"):
+        '''Get the objects which fall under the correct flags.
+
+        This function will pick out those objects which have either the
+        APOGEE2_APOKASC_DWARF, APOGEE_KEPLER_COOLDWARF, and
+        APOGEE_KEPLER_SEISMO.
+        
+        The names will be specified in the names tuple.'''
+        apokasc_dwarf_flags = self.data["APOGEE2_TARGET1"] & 28 != 0
+        kepler_cool_dwarf_flags = self.data["APOGEE_TARGET2"] & 16 != 0
+        kepler_seismo_flags = self.data["APOGEE_TARGET1"] & 27 != 0
+
+        totalflags = au.multi_logical_or(
+            apokasc_dwarf_flags, kepler_cool_dwarf_flags, kepler_seismo_flags)
+
+        self.indices[names[0]] = totalflags
+        self.indices[names[1]] = np.logical_not(totalflags)
+        self.splitgroups[target_crit] = set(names)
+        self._check_indices_partition(target_crit)
+
 def initialize_APOGEE_splitter_with_bins(aposplit):
     '''Initialize the APOGEE splitter with Teff bins.'''
 

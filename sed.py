@@ -1720,6 +1720,78 @@ def teff_to_radius_DSEP_interpolator(
 
     return teff_to_radius
 
+def DSEP_dwarf_radii(teffs, metallicities, alphas, age=2.0, lowTeff=3000,
+                     highTeff=7000):
+    '''Calculate MS radii predicted from DSEP.
+    
+    Using an isochrone of a given age, calculate the radius of a star given an
+    effective temperature, metallicity, and alpha abundance.'''
+    # This may be complicated, so I wanna take it slow.
+    masked_teffs = np.ma.masked_equal(teffs, APOGEE_NULL)
+    masked_metallicities = np.ma.masked_equal(metallicities, APOGEE_NULL)
+    masked_alphas = np.ma.masked_equal(alphas, APOGEE_NULL)
+    radius_mask = au.multi_logical_or(
+        masked_teffs.mask, masked_metallicities.mask, masked_alphas.mask)
+    model_radii = np.ma.zeros(len(masked_teffs))
+    model_radii.mask = radius_mask
+
+    # These are the alpha/Fe bins that will be fed into DSEP.
+    alpha_binedges = np.arange(-0.1, 0.9, 0.2)
+    # a/Fe < -0.1 corresponds to 1, and a/Fe > 0.7 corresponds to 6.
+    alpha_bins = np.digitize(masked_alphas, alpha_binedges)+1
+    # DSEP should crash or something if the metallicity and alpha enhancement
+    # are not compatible. In particular, high alpha enhancements are only
+    # available for low metallicity stars. I want to ensure that this will be
+    # the case before running into weird DSEP bugs.
+    assert(np.all(np.logical_or(alpha_bins < 4, np.logical_and(
+        alpha_bins >= 4, masked_metallicities <= 0.0))))
+
+    rounded_metallicities = np.around(masked_metallicities, 2)
+    for i in range(len(model_radii)):
+        if not model_radii.mask[i]:
+            interp = teff_to_radius_DSEP_interpolator(
+                age=age, metallicity=rounded_metallicities[i], afe=alpha_bins[i],
+                lowT=lowTeff, highT=highTeff)
+            model_radii[i] = 10**interp(np.log10(masked_teffs[i]))
+
+    return model_radii
+
+def DSEP_logg(teffs, metallicities, alphas, age=2.0, lowTeff=3000,
+              highTeff=7000):
+    '''Calculate logg predicted from DSEP.
+
+    Using an isochrone of a given age, calculate the log(g) of a star given an
+    effective temperature, metallicity, and alpha abundance.'''
+    # This may be complicated, so I wanna take it slow.
+    masked_teffs = np.ma.masked_equal(teffs, APOGEE_NULL)
+    masked_metallicities = np.ma.masked_equal(metallicities, APOGEE_NULL)
+    masked_alphas = np.ma.masked_equal(alphas, APOGEE_NULL)
+    logg_mask = au.multi_logical_or(
+        masked_teffs.mask, masked_metallicities.mask, masked_alphas.mask)
+    model_logg = np.ma.zeros(len(masked_teffs))
+    model_logg.mask = logg_mask
+
+    # These are the alpha/Fe bins that will be fed into DSEP.
+    alpha_binedges = np.arange(-0.1, 0.9, 0.2)
+    # a/Fe < -0.1 corresponds to 1, and a/Fe > 0.7 corresponds to 6.
+    alpha_bins = np.digitize(masked_alphas, alpha_binedges)+1
+    # DSEP should crash or something if the metallicity and alpha enhancement
+    # are not compatible. In particular, high alpha enhancements are only
+    # available for low metallicity stars. I want to ensure that this will be
+    # the case before running into weird DSEP bugs.
+    assert(np.all(np.logical_or(alpha_bins < 4, np.logical_and(
+        alpha_bins >= 4, masked_metallicities <= 0.0))))
+
+    rounded_metallicities = np.around(masked_metallicities, 2)
+    for i in range(len(model_logg)):
+        if not model_logg.mask[i]:
+            interp = teff_to_logg_dwarf_DSEP_interpolator(
+                age=age, metallicity=rounded_metallicities[i], afe=alpha_bins[i],
+                lowT=lowTeff, highT=highTeff)
+            model_logg[i] = interp(np.log10(masked_teffs[i]))
+
+    return model_logg
+
 def teff_to_logg_dwarf_DSEP_interpolator(
     age=1.5, metallicity=0.0, bands=1, Y=1, afe=2, lowT=3000, highT=6000,
     bound_error=True, minlogg=4.1):

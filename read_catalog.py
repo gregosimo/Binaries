@@ -716,7 +716,7 @@ def find_split_files(filepath):
     '''
     folder = filepath.parent
     filename = filepath.name
-    base, ext = split_filename(filename)
-    glob_pattern = format_split_filename(base, "*", ext)
+    base, ext = catalog.split_filename(filename)
+    glob_pattern = catalog.format_split_filename(base, "*", ext)
     files = folder.glob(glob_pattern)
     return files
