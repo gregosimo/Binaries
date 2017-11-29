@@ -72,10 +72,7 @@ class DataSplitter:
 
         # Check to make sure that splitvalues doesn't have any strings that
         # start with a tilde.
-        for spln in splitnames:
-            if spln.startswith("~"):
-                raise ValueError(
-                    "{0} cannot begin with ~ character.".format(spln))
+        _check_namelist_for_tildes(splitnames)
 
         # Invert_inequality basically transforms < to <= and >= to >
         if not invert_inequality:
@@ -102,33 +99,12 @@ class DataSplitter:
         '''Get a specified subsample.
 
         Subsamples are specified by passing a list of subsample names, and the
-        intersection of all of those subsamples will be returned. Note that
-        individual splits are mutually-exclusive, so if two subsamples are
-        specified within the same split, the returned table will be empty. This
-        function will try to raise ValueError when this occurs.'''
-        # Make sure the namelist doesn't have any conflicting columns.
-        self._check_namelist_for_conflicts(namelist)
-
-        index_list = [np.ones(len(self.data))]
-        for name in namelist:
-            exclusion = False
-            if name.startswith("~"):
-                name = name[1:]
-                exclusion = True
-            try:
-                index = self.indices[name]
-            except KeyError:
-                if isinstance(namelist, str):
-                    raise ValueError("Please pass a list, not a string")
-                else:
-                    raise KeyError(
-                        "{0} is not a valid subsample name. Run names() to get "
-                        "currently available subsample names.".format(name))
-            if exclusion:
-                index = np.logical_not(index)
-            index_list.append(index)
-        fullindex = au.multi_logical_and(*index_list)
-        subsample = self.data[fullindex]
+        intersection of all of those subsamples will be returned. If a
+        particular should be excluded, then this can be indicated with the use
+        of a tilde (~). This function will try to raise ValueError if two of
+        the same time of names are specified..'''
+        indices = self._subsample_indices(namelist)
+        subsample = self.data[indices]
 
         return subsample
 
@@ -151,7 +127,7 @@ class DataSplitter:
             comboset = nameset & sg
             if len(comboset) > 1:
                 raise ValueError("{0} are conflicting!".format(comboset))
-
+    
     def _check_indices_partition(self, crit):
         '''Check that indices for a given criterion partition data.
 
@@ -164,25 +140,42 @@ class DataSplitter:
         # Check that every row is counted at least once.
         assert np.all(np.sum(indices, axis=0) == 1)
 
-    def subsample_len(self, namelist):
-        '''Get the size of a subsample.
+    def _subsample_indices(self, namelist):
+        '''Get the indices corresponding to the given namelist.
+    
+        Return a boolean array which returns true for all rows corresponding to
+        the intersection of requirements in namelist.'''
+        # Make sure the namelist doesn't have any conflicting columns.
+        self._check_namelist_for_conflicts(namelist)
 
-        This function automatically gets the size of a subsample in a fast way
-        as opposed to running subsample() and getting its length.'''
         index_list = [np.ones(len(self.data))]
         for name in namelist:
+            exclusion = False
+            if name.startswith("~"):
+                name = name[1:]
+                exclusion = True
             try:
                 index = self.indices[name]
             except KeyError:
                 if isinstance(namelist, str):
                     raise ValueError("Please pass a list, not a string")
                 else:
-                    raise ValueError(
+                    raise KeyError(
                         "{0} is not a valid subsample name. Run names() to get "
                         "currently available subsample names.".format(name))
+            if exclusion:
+                index = np.logical_not(index)
             index_list.append(index)
         fullindex = au.multi_logical_and(*index_list)
-        indexlen = np.count_nonzero(fullindex)
+        return fullindex
+
+    def subsample_len(self, namelist):
+        '''Get the size of a subsample.
+
+        This function automatically gets the size of a subsample in a fast way
+        as opposed to running subsample() and getting its length.'''
+        indices = self._subsample_indices(namelist)
+        indexlen = np.count_nonzero(indices)
         return indexlen
 
     def names(self):
@@ -245,6 +238,14 @@ def format_census_tree(census_tree, indents=""):
             nextstr = format_census_tree(v[1], indents+"| ")
             fullstr = fullstr + curstr + nextstr
     return fullstr
+
+def _check_namelist_for_tildes(namelist):
+    '''Make sure none of the names in namelist begin with a tilde.'''
+    for name in namelist:
+        if name.startswith("~"):
+            raise ValueError(
+                "{0} cannot be a name that starts with a tilde (~)".format(
+                    name))
 
 class StarSplitter(DataSplitter):
     '''Split dataset with stellar properties.
@@ -332,34 +333,6 @@ class APOGEESplitter(StarSplitter):
             data["LOGG_FIT"] = data["FPARAM"][:,1]
         super().__init__(data)
 
-        self.split_logg(
-            "logg", 3.5, ["Huber giant", "Huber dwarf"], logg_crit="Huber logg")
-        self.split_logg(
-            "LOGG_FIT", 3.5, ["APOGEE giant", "APOGEE dwarf"], 
-            logg_crit="APOGEE logg")
-
-        self.split_teff(
-            "teff", [5500, 6500], ["Jen Cool Huber", "Cool Huber", "Hot Huber"], 
-            teff_crit="Huber Teff")
-        self.split_teff(
-            "TEFF", [5500, 6500], 
-            ["Jen Cool APOGEE", "Cool APOGEE", "Hot APOGEE"], 
-            teff_crit="APOGEE Teff")
-
-        self.split_vscatter(1, ["RV Nonvar", "RV Var"])
-
-        self.split_vsini([0, 7], ["No Vsini", "Vsini nondet", "Vsini det"])
-
-        self.split_spectroscopic_rapid_rotators(
-            [1, 5], ["Very rapid rotators", "Rapid rotators", "Slow rotators"])
-
-        self.split_dlsb()
-
-        self.split_asteroseismic_dwarfs()
-
-        self.split_McQuillan_periods(kiccol="kepid")
-
-        self.split_by_ASPCAP_flags()
 
 
 
@@ -509,6 +482,40 @@ class APOGEESplitter(StarSplitter):
         self.splitgroups[aspcap_crit] = set(qual_names)
         self._check_indices_partition(aspcap_crit)
 
+def initialize_APOGEE_splitter_with_bins(aposplit):
+    '''Initialize the APOGEE splitter with Teff bins.'''
+
+    aposplit.split_logg(
+        "logg", [3.5, 4], ["Huber giant", "Huber subgiant", "Huber dwarf"], 
+        logg_crit="Huber logg")
+    aposplit.split_logg(
+        "LOGG_FIT", [3.5, 4], ["APOGEE giant", "APOGEE subgiant", "APOGEE dwarf"], 
+        logg_crit="APOGEE logg")
+
+    tempbins = np.linspace(3500, 6500, 6, endpoint=True)
+    tempnames = (["<{0:.0f}".format(tempbins[0])] + 
+                 ["{0:.0f}-{1:.0f}".format(temp1, temp2) for temp1, temp2 in
+                  zip(tempbins[:-1], tempbins[1:])] +
+                 [">{0:.0f}".format(tempbins[-1])])
+    aposplit.split_teff(
+        "teff", tempbins, tempnames, teff_crit="Huber Teff")
+
+    aposplit.split_vscatter(1, ["RV Nonvar", "RV Var"])
+
+    aposplit.split_vsini(
+        [0, 7, 10], ["No Vsini", "Vsini nondet", "Vsini marginal", "Vsini det"])
+
+    aposplit.split_spectroscopic_rapid_rotators(
+        [1, 5], ["Very rapid rotators", "Rapid rotators", "Slow rotators"])
+
+    aposplit.split_dlsb()
+
+    aposplit.split_asteroseismic_dwarfs()
+
+    aposplit.split_McQuillan_periods(kiccol="kepid")
+
+    aposplit.split_by_ASPCAP_flags()
+
 def gen_samp(name):
     '''Function to generate the given sample objects which was broken down.'''
     try:
@@ -553,17 +560,38 @@ def KIC_APOGEE_Param_Diff():
 ################################################################################
 
 def nondetection_fraction(
-    aposplit, detcrit="Vsini nondet", othercrit=[]):
+    aposplit, detcrit="Vsini nondet", novsinicrit="No Vsini", othercrit=[]):
     '''Return the number of vsini nondetections in the sample.
 
     The nondetections are given in the criterion of detcrit. Usually this is due
     to some threshold in vsini. Other cuts on categories can be specified in
     othercrit.'''
-    nondetlen = (aposplit.subsample_len([detcrit, "No DLSB"] + othercrit) +
-                 aposplit.subsample_len([detcrit, "Unknown DLSB"] + othercrit))
-    fullsamp = (aposplit.subsample_len(["No DLSB"] + othercrit) +
-                aposplit.subsample_len(["Unknown DLSB"] + othercrit))
+    nondetlen = (aposplit.subsample_len([detcrit] + othercrit) +
+                 aposplit.subsample_len([novsinicrit] + othercrit))
+    fullsamp = aposplit.subsample_len(othercrit)
     return (nondetlen, fullsamp)
+
+def marginal_detection_fraction(
+        aposplit, marginalcrit="Vsini marginal", othercrit=[]):
+    '''Return the number of vsini marginal detections in the sample.
+
+    The marginal detections are given in the criterion of marginalcrit. This is
+    usually some vsini cut between 7-10 km/s or so. Other cuts on categories
+    can be specified in othercrit.'''
+    marginal_len = aposplit.subsample_len([marginalcrit] + othercrit)
+    fullsamp = aposplit.subsample_len(othercrit)
+    return (marginal_len, fullsamp)
+
+def robust_detection_fraction(
+        aposplit, rapidcrit="Vsini det", othercrit=[]):
+    '''Return the number of robust vsini detections in the sample.
+
+    The robust detections are given in the criterion of rapidcrit. Usually this
+    is above some cutoff. Other cuts on categories can be specified in
+    othercrit.'''
+    robust_len = aposplit.subsample_len([rapidcrit] + othercrit)
+    fullsamp = aposplit.subsample_len(othercrit)
+    return (robust_len, fullsamp)
 
 def slow_rotator_fraction(
     aposplit, slcrit="Slow rotators", detcrit="Vsini det", othercrit=[]):
@@ -571,11 +599,8 @@ def slow_rotator_fraction(
 
     The slow rotators are those with a vsini detection, but not a large enough
     vsini to place them into the rapid rotation regime.'''
-    srlen = (aposplit.subsample_len([detcrit, slcrit, "No DLSB"] + othercrit) +
-             aposplit.subsample_len(
-                 [detcrit, slcrit, "Unknown DLSB"] + othercrit))
-    fullsamp = (aposplit.subsample_len([detcrit, "No DLSB"] + othercrit) +
-                aposplit.subsample_len([detcrit, "Unknown DLSB"] + othercrit))
+    srlen = aposplit.subsample_len([detcrit, slcrit] + othercrit) 
+    fullsamp = aposplit.subsample_len([detcrit] + othercrit)
     return (srlen, fullsamp)
 
 def rapid_rotator_fraction(
@@ -586,11 +611,8 @@ def rapid_rotator_fraction(
     matching vsini detections are under detcrit. Other cuts on categories can
     be specified in othercrit.'''
 
-    rrlen = (aposplit.subsample_len([rrcrit, detcrit, "No DLSB"] + othercrit) +
-             aposplit.subsample_len(
-                 [rrcrit, detcrit, "Unknown DLSB"] + othercrit))
-    fullsamp = (aposplit.subsample_len([detcrit, "No DLSB"] + othercrit) +
-                aposplit.subsample_len([detcrit, "Unknown DLSB"] + othercrit))
+    rrlen = aposplit.subsample_len([rrcrit, detcrit] + othercrit)
+    fullsamp = aposplit.subsample_len([detcrit] + othercrit)
     return (rrlen, fullsamp)
 
 def mcquillan_detection_fraction(
@@ -601,8 +623,9 @@ def mcquillan_detection_fraction(
     McQuillan detections, along with the total number of objects in the
     subsample.'''
     mcqlen = aposplit.subsample_len([mcqcrit]+othercrit)
-    fullsamp = aposplit(othercrit)
+    fullsamp = aposplit.subsample_len(othercrit)
     return (mcqlen, fullsamp)
+
 
 def binned_vsini_dist(aposplit, bingroup="Huber Bins", defparams=[
     "Huber dwarf"], normed=False):
