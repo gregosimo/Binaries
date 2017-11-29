@@ -289,3 +289,26 @@ def create_sample_Prot_diagram(dest=build_filepath(FIGURE_PATH, "prot_sample")):
     plt.legend(loc="upper right")
     plt.xlabel("Huber Teff")
     plt.ylabel("Mcquillan Period (day)")
+
+def pleiades_vsini_comparison(
+    dest=build_filepath(FIGURE_PATH, "pleiades_vsini")): 
+    '''Make a figure comparing vsini measurements in the Pleiades.
+
+    This function compares the vsinis as measured by Stauffer and Hartmann
+    (1987) to those by APOGEE.'''
+    targets = catin.Stauffer_APOGEE_overlap()
+    bad, warn, vsini_warn, good = split_by_ASPCAP_flags(targets)
+    good_stauffer_nondetections = (good["vsini lim"] == stat.LOWER)
+    warn_stauffer_nondetections = (warn["vsini lim"] == stat.LOWER)
+
+    Stauffer_errors = (detected_targets["vsini"] / 2 / 
+                       (1 + detected_targets["R"])).filled(0)
+    apogee_errors = 0.1 * detected_targets["VSINI"]
+
+    plt.errorbar(detected_targets["vsini"], detected_targets["VSINI"],
+                 apogee_errors, Stauffer_errors, 'b*')
+    plt.plot([0, 25], [0, 25])
+    plt.plot([0, 10, 10], [7, 7, 0], 'r--')
+    plt.xlabel("Stauffer & Hartmann VSINI")
+    plt.ylabel("APOGEE VSINI")
+    plt.title("Good VSINI comparison")
