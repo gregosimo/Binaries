@@ -13,6 +13,7 @@ import catalog
 import astropy_util as au
 import sample_characterization as samp
 import hrplots as hr
+import rotation_consistency as rot
 
 
 class DataSplitter:
@@ -388,7 +389,7 @@ class APOGEESplitter(StarSplitter):
         For more information on invert_inequality, see split_by_col.
         '''
         tempcol = au.generate_random_string(12)
-        self.data[tempcol] = catalog.vsini_to_period(
+        self.data[tempcol] = rot.vsini_to_period(
             np.maximum(self.data[vsini_col], det_limit), 
             self.data[radius_col])[0]
         self.split_by_col(tempcol, splitperiods, splitnames, invert_inequality)
@@ -442,17 +443,24 @@ class APOGEESplitter(StarSplitter):
         self._check_indices_partition(astero_crit)
 
     def split_McQuillan_periods(
-        self, mcq_names=("Mcq", "No Mcq"), kiccol="KIC", mcq_crit="Mcq"):
-        '''Separate objects with and without McQuillan periods.
+        self, mcq_names=("Mcq", "No Mcq", "Unknown Mcq"), kiccol="KIC", 
+        mcq_crit="Mcq"):
+        '''Separate detections, nondetections, and undetermined periods.
 
-        Splits off objects with and without McQuillan periods. The names for
-        the two classes should be given in mcq_names. The two datasets are
+        Splits objects in three ways: those with McQuillan periods, those
+        looked at by McQuillan, but not found to have a detected period, and
+        those which haven't been looked at by McQuillan at all. The names for
+        the three classes should be given in mcq_names. The two datasets are
         cross-matched by KIC numbers in kiccol.
         '''
         mcq = catin.read_McQuillan_catalog()
+        undet = catin.read_McQuillan_nondetections()
         self.indices[mcq_names[0]] = au.mark_selections_in_columns(
             self.data[kiccol], mcq["KIC"])
-        self.indices[mcq_names[1]] = np.logical_not(self.indices[mcq_names[0]])
+        self.indices[mcq_names[1]] = au.mark_selections_in_columns(
+            self.data[kiccol], undet["KIC"])
+        self.indices[mcq_names[2]] = np.logical_not(np.logical_or(
+            self.indices[mcq_names[0]], self.indices[mcq_names[1]]))
         self.splitgroups[mcq_crit] = set(mcq_names)
         self._check_indices_partition(mcq_crit)
 
@@ -483,25 +491,46 @@ class APOGEESplitter(StarSplitter):
         self._check_indices_partition(aspcap_crit)
 
     def split_apogee_targeting(
-        self, names=("Jen", "Non-Jen"), target_crit="Jen Targeting"):
+        self, masks=[
+            ("APOGEE2_TARGET1", 28), ("APOGEE_TARGET2", 16), 
+            ("APOGEE_TARGET1", 27)], names=(
+                "Dwarf targets", "Non-dwarf Targets"), 
+        target_crit="Jen Targeting"):
         '''Get the objects which fall under the correct flags.
 
-        This function will pick out those objects which have either the
-        APOGEE2_APOKASC_DWARF, APOGEE_KEPLER_COOLDWARF, and
-        APOGEE_KEPLER_SEISMO.
-        
-        The names will be specified in the names tuple.'''
-        apokasc_dwarf_flags = self.data["APOGEE2_TARGET1"] & 28 != 0
-        kepler_cool_dwarf_flags = self.data["APOGEE_TARGET2"] & 16 != 0
-        kepler_seismo_flags = self.data["APOGEE_TARGET1"] & 27 != 0
+        The flags specified under masks will be put in their own subdivisions.
+        Masks should be a list of 2-tuples where the first element is the
+        targeting column (e.g. APOGEE2_TARGET1), and the second element is the
+        bitmask exponent. The corresponding names should be specified as well
+        as a catch-all term for other targeted objects.'''
+        unionindices = np.zeros(len(self.data))
+        for masktup in masks:
+#            self.indices[name] = self.data[masktup[0]] & 2**masktup[1] != 0
+            newindices = self.data[masktup[0]] & 2**masktup[1] != 0
+            if masktup == ("APOGEE_TARGET1", 27):
+                newindices = np.logical_and(
+                    newindices, self.data["LOGG_FIT"] > 3.5)
+            unionindices = np.logical_or(unionindices, newindices)
+            print(np.count_nonzero(unionindices))
 
-        totalflags = au.multi_logical_or(
-            apokasc_dwarf_flags, kepler_cool_dwarf_flags, kepler_seismo_flags)
-
-        self.indices[names[0]] = totalflags
-        self.indices[names[1]] = np.logical_not(totalflags)
+        self.indices[names[0]] = unionindices
+        self.indices[names[-1]] = np.logical_not(unionindices)
         self.splitgroups[target_crit] = set(names)
         self._check_indices_partition(target_crit)
+
+    def subsample_len(self, namelist):
+        '''Get the size of a subsample.
+
+        This function automatically gets the size of a subsample in a fast way
+        as opposed to running subsample() and getting its length.
+        
+        APOGEE data specifically can have duplicate entries because of the
+        targeting. This method will make sure to only return number of unique
+        entries in the subsample.'''
+        indices = self._subsample_indices(namelist)
+        names = self.data["APOGEE_ID"][indices]
+        indexlen = len(np.unique(names))
+        return indexlen
 
 def initialize_APOGEE_splitter_with_bins(aposplit):
     '''Initialize the APOGEE splitter with Teff bins.'''
@@ -536,6 +565,8 @@ def initialize_APOGEE_splitter_with_bins(aposplit):
     aposplit.split_McQuillan_periods(kiccol="kepid")
 
     aposplit.split_by_ASPCAP_flags()
+
+    aposplit.split_apogee_targeting()
 
 def gen_samp(name):
     '''Function to generate the given sample objects which was broken down.'''
@@ -580,72 +611,6 @@ def KIC_APOGEE_Param_Diff():
 # Datasplitter Functions #
 ################################################################################
 
-def nondetection_fraction(
-    aposplit, detcrit="Vsini nondet", novsinicrit="No Vsini", othercrit=[]):
-    '''Return the number of vsini nondetections in the sample.
-
-    The nondetections are given in the criterion of detcrit. Usually this is due
-    to some threshold in vsini. Other cuts on categories can be specified in
-    othercrit.'''
-    nondetlen = (aposplit.subsample_len([detcrit] + othercrit) +
-                 aposplit.subsample_len([novsinicrit] + othercrit))
-    fullsamp = aposplit.subsample_len(othercrit)
-    return (nondetlen, fullsamp)
-
-def marginal_detection_fraction(
-        aposplit, marginalcrit="Vsini marginal", othercrit=[]):
-    '''Return the number of vsini marginal detections in the sample.
-
-    The marginal detections are given in the criterion of marginalcrit. This is
-    usually some vsini cut between 7-10 km/s or so. Other cuts on categories
-    can be specified in othercrit.'''
-    marginal_len = aposplit.subsample_len([marginalcrit] + othercrit)
-    fullsamp = aposplit.subsample_len(othercrit)
-    return (marginal_len, fullsamp)
-
-def robust_detection_fraction(
-        aposplit, rapidcrit="Vsini det", othercrit=[]):
-    '''Return the number of robust vsini detections in the sample.
-
-    The robust detections are given in the criterion of rapidcrit. Usually this
-    is above some cutoff. Other cuts on categories can be specified in
-    othercrit.'''
-    robust_len = aposplit.subsample_len([rapidcrit] + othercrit)
-    fullsamp = aposplit.subsample_len(othercrit)
-    return (robust_len, fullsamp)
-
-def slow_rotator_fraction(
-    aposplit, slcrit="Slow rotators", detcrit="Vsini det", othercrit=[]):
-    '''Return the fraction of slow rotators in a sample.
-
-    The slow rotators are those with a vsini detection, but not a large enough
-    vsini to place them into the rapid rotation regime.'''
-    srlen = aposplit.subsample_len([detcrit, slcrit] + othercrit) 
-    fullsamp = aposplit.subsample_len([detcrit] + othercrit)
-    return (srlen, fullsamp)
-
-def rapid_rotator_fraction(
-    aposplit, rrcrit="Rapid rotators", detcrit="Vsini det", othercrit=[]):
-    '''Return the number of rapid rotators and total sample.
-
-    The rapid rotators are those classified under rrcrit, and those with
-    matching vsini detections are under detcrit. Other cuts on categories can
-    be specified in othercrit.'''
-
-    rrlen = aposplit.subsample_len([rrcrit, detcrit] + othercrit)
-    fullsamp = aposplit.subsample_len([detcrit] + othercrit)
-    return (rrlen, fullsamp)
-
-def mcquillan_detection_fraction(
-    aposplit, mcqcrit="Mcq", othercrit=[]):
-    '''Get the fraction of the data that has a McQuillan detection.
-
-    Returns a 2-tuple containing the number of objects in the subsample with
-    McQuillan detections, along with the total number of objects in the
-    subsample.'''
-    mcqlen = aposplit.subsample_len([mcqcrit]+othercrit)
-    fullsamp = aposplit.subsample_len(othercrit)
-    return (mcqlen, fullsamp)
 
 
 def binned_vsini_dist(aposplit, bingroup="Huber Bins", defparams=[
