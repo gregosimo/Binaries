@@ -6,37 +6,49 @@ def display_fraction_census(
         aposplit, nondet="Vsini nondet", badvsini="Bad Vsini",
         robust_vsini="Vsini det", marginal_vsini="Vsini marginal"):
     '''Display a table showing the various levels of rapid rotation'''
-    for tefflabel in ["4100-4700", "4700-5300", "5300-5900"]:
-        if tefflabel == "5300-5900":
-            printfunc = print_good_totals
-        else:
-            printfunc = print_good_warn_totals
+#    for tefflabel in ["4100-4700", "4700-5300", "5300-5900"]:
+    for tefflabel in ["Dwarf targets"]:
+        printfunc = print_not_bad_totals
         print(tefflabel)
         print()
         loggtype = "~Huber giant"
-        othercrits = ["~DLSB", tefflabel, loggtype]
+        othercrits = ["Dwarf targets"]
         nondet_string = "Fraction of nondetections (vsini < 7 km/s): "
         printfunc(
-            aposplit, apo.nondetection_fraction, othercrits, nondet_string)
+            aposplit, nondetection_fraction, othercrits, nondet_string)
 
         marginal_string = ("Fraction of marginal detections (7 km/s <= vsini " 
                            "< 10 km/s): ")
         printfunc(
-            aposplit, apo.marginal_detection_fraction, othercrits, 
+            aposplit, marginal_detection_fraction, othercrits, 
             marginal_string)
 
         robust_string = "Fraction of robust detections (vsini >= 10 km/s): "
         printfunc(
-            aposplit, apo.robust_detection_fraction, othercrits, 
+            aposplit, robust_detection_fraction, othercrits, 
             robust_string)
 
         print()
+
+        robust_dlsb_string = "Fraction of robust non-DLSBs: "
+        printfunc(
+            aposplit, not_dlsb_fraction, othercrits+["Vsini det"], 
+            robust_dlsb_string)
+
+        marginal_dlsb_string = "Fraction of marginal non-DLSBs: "
+        printfunc(
+            aposplit, not_dlsb_fraction, othercrits+["Vsini marginal"], 
+            marginal_dlsb_string)
+
+        print()
+
+        othercrits.append("~DLSB")
 
         robust_very_rapid_fraction_string = (
             "Fraction of robust detections that are very rapid rotators "
             "(vsini >= 2piR/(1 day)): ")
         def robust_very_rapid(x, othercrit=[]):
-            return apo.rapid_rotator_fraction(
+            return rapid_rotator_fraction(
                 x, othercrit=othercrit, detcrit="Vsini det", 
                 rrcrit="Very rapid rotators")
         try:
@@ -50,7 +62,7 @@ def display_fraction_census(
             "Fraction of robust detections that are rapid rotators "
             "(2piR / (1 day) > vsini >= 2piR/(5 day)): ")
         def robust_rapid(x, othercrit=[]):
-            return apo.rapid_rotator_fraction(
+            return rapid_rotator_fraction(
                 x, othercrit=othercrit, detcrit="Vsini det")
         try:
             printfunc(
@@ -63,7 +75,7 @@ def display_fraction_census(
             "Fraction of robust detections that are slow rotators "
             "(vsini < 2piR/(5 day)): ")
         def robust_slow(x, othercrit=[]):
-            return apo.slow_rotator_fraction(
+            return slow_rotator_fraction(
                 x, othercrit=othercrit, detcrit="Vsini det")
         try:
             printfunc(
@@ -76,7 +88,7 @@ def display_fraction_census(
             "Fraction of marginal detections that are very rapid rotators "
             "(vsini >= 2piR / (1 day)): ")
         def marginal_very_rapid(x, othercrit=[]):
-            return apo.rapid_rotator_fraction(
+            return rapid_rotator_fraction(
                 x, othercrit=othercrit, detcrit="Vsini marginal", 
                 rrcrit="Very rapid rotators")
         try:
@@ -90,7 +102,7 @@ def display_fraction_census(
             "Fraction of marginal detections that are rapid rotators "
             "(vsini >= 2piR/(5 day)): ")
         def marginal_rapid(x, othercrit=[]):
-            return apo.rapid_rotator_fraction(
+            return rapid_rotator_fraction(
                 x, othercrit=othercrit, detcrit="Vsini marginal")
         try:
             printfunc(
@@ -103,7 +115,7 @@ def display_fraction_census(
             "Fraction of marginal detections that are slow rotators "
             "(vsini < 2piR/(5 day)): ")
         def marginal_slow(x, othercrit=[]):
-            return apo.slow_rotator_fraction(
+            return slow_rotator_fraction(
                 x, othercrit=othercrit, detcrit="Vsini marginal")
         try:
             printfunc(
@@ -115,12 +127,88 @@ def display_fraction_census(
         
         print()
 
+        robust_very_rapid_mcq_analysis_string = (
+            "Fraction of robust very rapid rotators analyzed by McQuillan : ")
+        try:
+            printfunc(
+                aposplit, mcquillan_analysis_fraction, 
+                othercrits+["Vsini det", "Very rapid rotators"], 
+                robust_very_rapid_mcq_analysis_string)
+        except ZeroDivisionError:
+            pass
+
+        robust_rapid_mcq_analysis_string = (
+            "Fraction of robust rapid rotators analyzed by McQuillan: ")
+        try:
+            printfunc(
+                aposplit, mcquillan_analysis_fraction, 
+                othercrits+["Vsini det", "Rapid rotators"], 
+                robust_rapid_mcq_analysis_string)
+        except ZeroDivisionError:
+            pass
+
+        robust_slow_mcq_analysis_string = (
+            "Fraction of robust slow rotators analyzed by McQuillan: ")
+        try:
+            printfunc(
+                aposplit, mcquillan_analysis_fraction, 
+                othercrits+["Vsini det", "Slow rotators"], 
+                robust_slow_mcq_analysis_string)
+        except ZeroDivisionError:
+            pass
+
+        marginal_very_rapid_mcq_analysis_string = (
+            "Fraction of marginal very rapid rotators analyzed by McQuillan: ")
+        try:
+            printfunc(
+                aposplit, mcquillan_analysis_fraction, 
+                othercrits+["Vsini marginal", "Very rapid rotators"], 
+                marginal_very_rapid_mcq_analysis_string)
+        except ZeroDivisionError:
+            pass
+
+        marginal_rapid_mcq_string = (
+            "Fraction of marginal rapid rotators analyzed by McQuillan: ")
+        try:
+            printfunc(
+                aposplit, mcquillan_analysis_fraction, 
+                othercrits+["Vsini marginal", "Rapid rotators"],
+                marginal_rapid_mcq_string)
+        except ZeroDivisionError:
+            pass
+
+        marginal_slow_mcq_string = (
+            "Fraction of marginal slow rotators analyzed by McQuillan: ")
+        try:
+            printfunc(
+                aposplit, mcquillan_analysis_fraction, 
+                othercrits+["Vsini marginal", "Slow rotators"],
+                marginal_slow_mcq_string)
+        except ZeroDivisionError:
+            pass
+
+        nondet_mcq_string = (
+            "Fraction of nondetections analyzed by McQuillan: ")
+        def nondet_mcq(x, othercrit=[]):
+            nondets = mcquillan_analysis_fraction(
+                aposplit, othercrit=othercrit+["Vsini nondet"])
+            bads = mcquillan_analysis_fraction(
+                aposplit, othercrit=othercrit+["No Vsini"])
+            return (nondets[0]+bads[0], nondets[1]+bads[1])
+        try:
+            printfunc(
+            aposplit, nondet_mcq, othercrits, nondet_mcq_string)
+        except ZeroDivisionError:
+            pass
+
+        print()
+
         robust_very_rapid_mcq_string = (
             "Fraction of robust very rapid rotators with "
             "McQuillan detections: ")
         try:
             printfunc(
-                aposplit, apo.mcquillan_detection_fraction, 
+                aposplit, mcquillan_detection_fraction, 
                 othercrits+["Vsini det", "Very rapid rotators"], 
                 robust_very_rapid_mcq_string)
         except ZeroDivisionError:
@@ -130,7 +218,7 @@ def display_fraction_census(
                                    "McQuillan detections: ")
         try:
             printfunc(
-                aposplit, apo.mcquillan_detection_fraction, 
+                aposplit, mcquillan_detection_fraction, 
                 othercrits+["Vsini det", "Rapid rotators"], 
                 robust_rapid_mcq_string)
         except ZeroDivisionError:
@@ -140,7 +228,7 @@ def display_fraction_census(
                                   "McQuillan detections: ")
         try:
             printfunc(
-                aposplit, apo.mcquillan_detection_fraction, 
+                aposplit, mcquillan_detection_fraction, 
                 othercrits+["Vsini det", "Slow rotators"], 
                 robust_slow_mcq_string)
         except ZeroDivisionError:
@@ -151,7 +239,7 @@ def display_fraction_census(
             "McQuillan detections: ")
         try:
             printfunc(
-                aposplit, apo.mcquillan_detection_fraction, 
+                aposplit, mcquillan_detection_fraction, 
                 othercrits+["Vsini marginal", "Very rapid rotators"], 
                 marginal_very_rapid_mcq_string)
         except ZeroDivisionError:
@@ -161,7 +249,7 @@ def display_fraction_census(
                                      "McQuillan detections: ")
         try:
             printfunc(
-                aposplit, apo.mcquillan_detection_fraction, 
+                aposplit, mcquillan_detection_fraction, 
                 othercrits+["Vsini marginal", "Rapid rotators"],
                 marginal_rapid_mcq_string)
         except ZeroDivisionError:
@@ -171,7 +259,7 @@ def display_fraction_census(
                                     "McQuillan detections: ")
         try:
             printfunc(
-                aposplit, apo.mcquillan_detection_fraction, 
+                aposplit, mcquillan_detection_fraction, 
                 othercrits+["Vsini marginal", "Slow rotators"],
                 marginal_slow_mcq_string)
         except ZeroDivisionError:
@@ -179,9 +267,9 @@ def display_fraction_census(
 
         nondet_mcq_string = "Fraction of nondetections with McQuillan detections: "
         def nondet_mcq(x, othercrit=[]):
-            nondets = apo.mcquillan_detection_fraction(
+            nondets = mcquillan_detection_fraction(
                 aposplit, othercrit=othercrit+["Vsini nondet"])
-            bads = apo.mcquillan_detection_fraction(
+            bads = mcquillan_detection_fraction(
                 aposplit, othercrit=othercrit+["No Vsini"])
             return (nondets[0]+bads[0], nondets[1]+bads[1])
         try:
@@ -189,6 +277,7 @@ def display_fraction_census(
             aposplit, nondet_mcq, othercrits, nondet_mcq_string)
         except ZeroDivisionError:
             pass
+
         print()
 
 def print_good_warn_totals(
@@ -196,7 +285,7 @@ def print_good_warn_totals(
     '''Print totals for objects using both good and warn flags.
     
     This is a pretty generic function that should be used to display various
-    lines of information taht require knowing various fractions of objects that
+    lines of information that require knowing various fractions of objects that
     fulfill some criteria.
     
     Aposplit should be the data file that should be used to calculate the
@@ -221,7 +310,7 @@ def print_good_totals(
     '''Print totals for objects using just good flags.
     
     This is a pretty generic function that should be used to display various
-    lines of information taht require knowing various fractions of objects that
+    lines of information that require knowing various fractions of objects that
     fulfill some criteria.
     
     Aposplit should be the data file that should be used to calculate the
@@ -239,3 +328,120 @@ def print_good_totals(
     fracstring = "{0:d}/{1:d} = {2:.1f}%".format(numerator, denominator,
                                                 ratio*100)
     print(dispstring + fracstring)
+
+def print_not_bad_totals(
+    aposplit, fracfunc, othercrits, dispstring):
+    '''Print totals for objects without the bad flag.
+
+    This is a pretty generic function that should be used to display various
+    lines of information that require knowing various fractions of objects that
+    fulfill some criteria.
+    
+    Aposplit should be the data file that should be used to calculate the
+    functions. Fracfunc should be a function that takes two arguments. One
+    positional argument which should be aposplit, and a keyword argument
+    "othercrits", which will take the necessary criteria that go into
+    calculating the desired fractions.
+    
+    Dispstring should be a string which goes before the fractions.'''
+
+    notbad_frac = fracfunc(aposplit, othercrit=othercrits+["~Bad"])
+    numerator = notbad_frac[0]
+    denominator = notbad_frac[1]
+    ratio = numerator / denominator
+    fracstring = "{0:d}/{1:d} = {2:.1f}%".format(numerator, denominator,
+                                                ratio*100)
+    print(dispstring + fracstring)
+
+###############################################################################
+# Functions for calculating fractions #
+###############################################################################
+
+def nondetection_fraction(
+    aposplit, detcrit="Vsini nondet", novsinicrit="No Vsini", othercrit=[]):
+    '''Return the number of vsini nondetections in the sample.
+
+    The nondetections are given in the criterion of detcrit. Usually this is due
+    to some threshold in vsini. Other cuts on categories can be specified in
+    othercrit.'''
+    nondetlen = (aposplit.subsample_len([detcrit] + othercrit) +
+                 aposplit.subsample_len([novsinicrit] + othercrit))
+    fullsamp = aposplit.subsample_len(othercrit)
+    return (nondetlen, fullsamp)
+
+def marginal_detection_fraction(
+        aposplit, marginalcrit="Vsini marginal", othercrit=[]):
+    '''Return the number of vsini marginal detections in the sample.
+
+    The marginal detections are given in the criterion of marginalcrit. This is
+    usually some vsini cut between 7-10 km/s or so. Other cuts on categories
+    can be specified in othercrit.'''
+    marginal_len = aposplit.subsample_len([marginalcrit] + othercrit)
+    fullsamp = aposplit.subsample_len(othercrit)
+    return (marginal_len, fullsamp)
+
+def robust_detection_fraction(
+        aposplit, rapidcrit="Vsini det", othercrit=[]):
+    '''Return the number of robust vsini detections in the sample.
+
+    The robust detections are given in the criterion of rapidcrit. Usually this
+    is above some cutoff. Other cuts on categories can be specified in
+    othercrit.'''
+    robust_len = aposplit.subsample_len([rapidcrit] + othercrit)
+    fullsamp = aposplit.subsample_len(othercrit)
+    return (robust_len, fullsamp)
+
+def slow_rotator_fraction(
+    aposplit, slcrit="Slow rotators", detcrit="Vsini det", othercrit=[]):
+    '''Return the fraction of slow rotators in a sample.
+
+    The slow rotators are those with a vsini detection, but not a large enough
+    vsini to place them into the rapid rotation regime.'''
+    srlen = aposplit.subsample_len([detcrit, slcrit] + othercrit) 
+    fullsamp = aposplit.subsample_len([detcrit] + othercrit)
+    return (srlen, fullsamp)
+
+def rapid_rotator_fraction(
+    aposplit, rrcrit="Rapid rotators", detcrit="Vsini det", othercrit=[]):
+    '''Return the number of rapid rotators and total sample.
+
+    The rapid rotators are those classified under rrcrit, and those with
+    matching vsini detections are under detcrit. Other cuts on categories can
+    be specified in othercrit.'''
+
+    rrlen = aposplit.subsample_len([rrcrit, detcrit] + othercrit)
+    fullsamp = aposplit.subsample_len([detcrit] + othercrit)
+    return (rrlen, fullsamp)
+
+def mcquillan_analysis_fraction(
+    aposplit, mcqcrit="Unknown Mcq", othercrit=[]):
+    '''Get the fraction of the data that were analyzed by McQuillan.
+
+    Returns a 2-tuple containing the number of objects in the subsample
+    analyzed by McQuillan, along with the total number of objects in the
+    subsample.'''
+    mcqlen = aposplit.subsample_len([mcqcrit]+othercrit)
+    fullsamp = aposplit.subsample_len(othercrit)
+    return (fullsamp - mcqlen, fullsamp)
+
+def mcquillan_detection_fraction(
+    aposplit, mcqcrit="Mcq", unknowncrit="~Unknown Mcq", othercrit=[]):
+    '''Get the fraction of the data that has a McQuillan detection.
+
+    Returns a 2-tuple containing the number of objects in the subsample with
+    McQuillan detections, along with the total number of objects in the
+    subsample.'''
+    mcqlen = aposplit.subsample_len([mcqcrit]+othercrit)
+    fullsamp = aposplit.subsample_len([unknowncrit]+othercrit)
+    return (mcqlen, fullsamp)
+
+def not_dlsb_fraction(
+    aposplit, nodlcrit="~DLSB", othercrit=[]):
+    '''Get the fraction of data that are not known to be DLSBs.
+
+    Return a 2-tuple containing the number of objects in the subsample not
+    known to be DLSBs, along with the total number of objects in the
+    subsample.'''
+    nodllen = aposplit.subsample_len([nodlcrit]+othercrit)
+    fullsamp = aposplit.subsample_len(othercrit)
+    return nodllen, fullsamp
