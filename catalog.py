@@ -32,7 +32,6 @@ import path_config as paths
 import sed
 import browse_APOGEE_spectra as browse
 import read_catalog as catin
-import rotation_consistency as rot
 
 SDSS3_URL = "http://data.sdss3.org"
 
@@ -132,6 +131,39 @@ def KIC_to_APOGEE_2MASS_designation(kic_desig):
     ones are 2M##########.'''
     apo_desig = npstr.replace(kic_desig, "2MASS J", "2M")
     return apo_desig
+
+###################################
+# Dressing and Charbonneau (2013) #
+###################################
+
+def replace_Dressing_Charbonneau_params(
+    kictable, kiccol="kepid", oldteffcol="KIC Teff", newteffcol="DC Teff",
+    oldloggcol="KIC logg", newloggcol="DC logg"):
+    '''Replace the Teff and logg parameters with Dressing & Charbonneau.
+
+    For the Kepler IDs which have KIC entries in the Dressing and Charbonneau
+    (2013) table, replace the temperatures and loggs in oldteffcol and
+    oldloggcol with the DC13 temperatures. The new parameters are placed in the
+    newteffcol and new loggcol columns.
+    '''
+    dctable = catin.read_Dressing_Charbonneau_table()
+    kictable[newteffcol] = np.array(kictable[oldteffcol])
+    kictable[newloggcol] = np.array(kictable[oldloggcol])
+    fulltable = au.join_by_id(kictable, dctable, kiccol, "KIC",
+                              join_type="left")
+    try:
+        unchangedindices = fulltable["Teff"].mask
+    except KeyError:
+        unchangedindices = fulltable["Teff_A"].mask
+
+    kictable[newteffcol][~unchangedindices] = fulltable["Teff"][
+        ~unchangedindices]
+    try:
+        kictable[newloggcol][~unchangedindices] = fulltable["logg"][
+            ~unchangedindices]
+    except KeyError:
+        kictable[newloggcol][~unchangedindices] = fulltable["logg_A"][
+            ~unchangedindices]
 
 #####################
 # Kepler Photometry #
@@ -415,7 +447,7 @@ def write_columns_for_input(outputtable, filename, maxlen, table_format,
         endind = min(maxlen * (i+1), len(outputtable))
         outputsegment = outputtable[startind:endind]
         outputsegment.write(str(outputpath / outputfile), format=table_format,
-                            include_names=output_columns)
+                            include_names=output_columns, comment=False)
 
 def write_KIC_Vizier_upload_list(kics, outputfile, outputpath=paths.HEAD_DIR):
     '''Write a file to be uploaded to Vizier. 
