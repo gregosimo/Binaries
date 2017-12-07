@@ -31,6 +31,7 @@ from scipy.stats import uniform
 from scipy.special import erf
 
 import eclipsing_binaries as ebs
+import catalog
 
 def apogee_vsini_distribution(period, radius, vsini, vsini_floor=5):
     '''Plot the distribution of vsinis for an APOGEE sample.
@@ -301,7 +302,7 @@ def plot_velocity_with_errorbars(vsini, lowdiff, medvels, highdiff):
     plt.xlabel("Predicted velocity")
     plt.ylabel("V sini")
 
-def rotation_radius(vsini, prot, vsini_mask=APOGEE_NULL):
+def rotation_radius(vsini, prot, vsini_mask=catalog.APOGEE_NULL):
     '''Calculate the maximum radius of a star with rotation period and vsini.
 
     This function will essentially calculate VSINI * Prot. It's assumed that
@@ -723,8 +724,9 @@ def compare_rotation_DSEP_radius_ratio(
     circles. A radius ratio of 1 is marked on the figure.'''
 
     usable_indices = au.multi_logical_and(
-        vsini != APOGEE_NULL, teff != APOGEE_NULL, xvalue != APOGEE_NULL,
-        metallicity != APOGEE_NULL, alpha != APOGEE_NULL)
+        vsini != catalog.APOGEE_NULL, teff != catalog.APOGEE_NULL, 
+        xvalue != catalog.APOGEE_NULL, metallicity != catalog.APOGEE_NULL, 
+        alpha != catalog.APOGEE_NULL)
     usable_flags = apogee_flags[usable_indices]
     usable_vsini = vsini[usable_indices]
     usable_period = period[usable_indices]
