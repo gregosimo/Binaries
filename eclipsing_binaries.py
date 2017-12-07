@@ -1,6 +1,9 @@
 '''
 Functions using the Kepler Eclipsing Binary population
 '''
+import astropy_util as au
+
+import read_catalog as catin
 
 ###############################################################################
 # EBs and Rafa #
