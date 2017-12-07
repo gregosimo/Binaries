@@ -37,6 +37,8 @@ GARCIA_PERIODS = HEAD_DIR / "Garcia14_Periods.fit"
 HUBER_CATALOG = HEAD_DIR / "huber_kic_parameters.txt"
 KIC_CATALOG = HEAD_DIR / "KIC_DR25.tbl"
 ORIG_KIC = HEAD_DIR / "kic.txt.gz"
+DR14_ORIG_KIC = HEAD_DIR / "DR14_orig_KIC.txt"
+ORIG_KIC_ABRIDGED = HEAD_DIR / "full_kepler_KIC.txt"
 KEPLER_GALEX_BEST = HEAD_DIR / "KGGoldStandard.csv.gz"
 EHK_README = HEAD_DIR / "hlsp_kplrubv_readme.txt"
 EHK_PATH = HEAD_DIR / "EHK2012catalog.dat"
@@ -56,6 +58,7 @@ TGAS_MCQUILLAN_APOGEE_TIDSYNC_PATH = (
     HEAD_DIR / "TGAS_McQuillan_APOGEE_tidsync.fits")
 FLICKER_LOGG = HEAD_DIR / "flicker_loggs.txt"
 BRUNTT_PATH = HEAD_DIR / "Bruntt_vsini.vot"
+DRESSING_CHARBONNEAU_PROPS = HEAD_DIR / "Dressing_Charbonneau13.fits"
 
 STAUFFER_VSINI_PATH = HEAD_DIR / "Stauffer_Hartmann_Table1.txt"
 

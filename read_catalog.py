@@ -275,6 +275,31 @@ def read_Garcia_periods(rottable=paths.GARCIA_PERIODS):
     rafapers = Table.read(rottable, format="fits")
     return rafapers
 
+def read_DR14_original_KIC(kicpath=paths.DR14_ORIG_KIC):
+    '''Reads in the original KIC for DR14 targets.
+
+    This table will have original KIC parameters for objects observed with
+    DR14.'''
+    kictable = read_MAST_file(kicpath)
+    return kictable
+
+def read_abridged_original_KIC(kicpath=paths.ORIG_KIC_ABRIDGED):
+    '''Read in the original KIC for Kepler targets.
+
+    This table will read in the original KIC parameters for all Kepler
+    targets.'''
+    kictable = read_MAST_file(kicpath)
+    return kictable
+
+def read_Dressing_Charbonneau_table(dcpath=paths.DRESSING_CHARBONNEAU_PROPS):
+    '''Read in the cool stellar table of Dressing and Charbonneau (2013).
+
+    This table contains revised Teff and log(g)s of a set of Kepler stars
+    analyzed in Dressing and Charbonneau (2013).
+    '''
+    dctable = Table.read(dcpath, format="fits")
+    return dctable
+
 
 ###############################################################################
 # Joined catalogs #
@@ -436,24 +461,42 @@ def Stauffer_APOGEE_overlap(
     return joined_table
 
 @au.shortcut_file(paths.SHORTCUT_APOGEE_KIC)
-def dr14_with_KIC_stelparms(apopath=paths.DR14_ALLSTAR_PATH,
-                            kicpath=paths.KIC_CATALOG):
+def dr14_with_KIC_stelparms(
+    apopath=paths.DR14_ALLSTAR_PATH, kicpath=paths.KIC_CATALOG,
+    origpath=paths.ORIG_KIC_ABRIDGED):
     '''Read in Kepler DR14 targets with Huber stellar parameters.'''
     apo = read_dr14_allStar(apopath, opt="kepler")
-    kiccat = read_KIC_DR25_catalog(kicpath)
+    kiccat = stelparms_with_original_KIC(kicpath, origpath)
     apokic = catalog.join_by_2MASS_key(
         apo, kiccat, "APOGEE_ID", "tm_designation")
     return apokic
 
 #@au.shortcut_file(paths.SHORTCUT_APOKASC_KIC)
 @au.memoized
-def APOKASC_with_KIC_stelparms(apopath=paths.APOKASC_PATH,
-                               kicpath=paths.KIC_CATALOG):
+def APOKASC_with_KIC_stelparms(
+    apopath=paths.APOKASC_PATH, kicpath=paths.KIC_CATALOG,
+    origpath=paths.ORIG_KIC_ABRIDGED):
     '''Read in the latest APOKASC catalog with Huber stellar parameters.'''
     apo = read_APOKASC_catalog(apopath)
-    kiccat = read_KIC_DR25_catalog(kicpath)
+    kiccat = stelparms_with_original_KIC(kicpath, origpath)
     apokic = au.join_by_id(apo, kiccat, "KEPLER_INT", "kepid")
     return apokic
+
+def stelparms_with_original_KIC(parmpath=paths.KIC_CATALOG,
+                                kicpath=paths.ORIG_KIC_ABRIDGED):
+    '''Read in the Huber and original KIC stellar parameters.'''
+    kiccat = read_KIC_DR25_catalog(parmpath)
+    origcat = read_abridged_original_KIC(kicpath)
+    orig_subtable = Table([
+        origcat["Kepler ID"], origcat["Teff (deg K)"], 
+        origcat["Log G (cm/s/s)"], origcat["Metallicity (solar=0.0)"],
+        origcat["Radius (solar=1.0)"], origcat["Parallax (arcsec)"]], names=(
+            "kepid", "KIC Teff", "KIC logg", "KIC [Fe/H]", "KIC radius", 
+            "KIC parallax"))
+    newcat = au.join_by_id(kiccat, orig_subtable, "kepid", "kepid",
+                           join_type="left")
+    return newcat
+
 
 
 ################################################################################
@@ -599,7 +642,12 @@ def read_SIMBAD_file(simbadfile, output_path=paths.HEAD_DIR):
 
 def read_UKIRT_file(resultfile):
     '''Reads in a file from UKIRT.'''
-    results = read_split_file(resultfile, "ascii.commented_header")
+    results = read_split_file(resultfile, format="ascii.commented_header")
+    return results
+
+def read_MAST_file(resultfile):
+    '''Reads in a file from MAST.'''
+    results = read_split_file(resultfile, format="ascii.csv", data_start=2)
     return results
 
 ###############################################################################
@@ -677,7 +725,7 @@ def fix_table_coordinates_units(tbl, ra_col, dec_col):
 
 # Split files for large online database queries
 
-def read_split_file(filepath, table_format):
+def read_split_file(filepath, **kwargs):
     '''Reads a file that has been split into multiple parts.
 
     This function essentially re-reads a table which has been split according
@@ -689,14 +737,17 @@ def read_split_file(filepath, table_format):
 
     Since the input table isn't used, this means that when writing split files,
     care has to be taken to delete all previous queries made with them.
+
+    Keyword arguments to be passed to the underlying Table.read function should
+    be supplied in kwargs.
     '''
     try:
-        inputtable = Table.read(str(filepath), format=table_format)
+        inputtable = Table.read(str(filepath), **kwargs)
     except FileNotFoundError as f:
         inputfiles = find_split_files(filepath)
         table_pieces = []
         for inputfile in inputfiles:
-            table_piece = Table.read(inputfile, format=table_format)
+            table_piece = Table.read(inputfile, **kwargs)
             table_pieces.append(table_piece)
         try:
             inputtable = vstack(table_pieces)
