@@ -270,6 +270,32 @@ class StarSplitter(DataSplitter):
         self.splitgroups[logg_crit] = set(splitnames)
         self._check_indices_partition(logg_crit)
 
+    def split_Ciardi_logg(
+        self, loggcol, teffcol, splitnames=("Giant", "Dwarf"), 
+        logg_crit="logg", invert_inequality=False):
+        '''Make a Ciardi cut by log(g)
+
+        This is a proposed delineation between dwarfs and giants for Kepler
+        targets. The cut is as follows:
+                    3.5                   if Teff >= 6000
+        log(g) >= { 4.0                   if Teff <= 4250      }
+                    5.2 - (2.8e-4 * Teff) if 4250 < Teff < 6000
+        '''
+        teff = self.data[teffcol]
+        logg = self.data[loggcol]
+        dwarf_indices = np.logical_or(np.logical_or(
+            np.logical_and(teff >= 6000, logg >= 3.5), 
+            np.logical_and(teff <= 4250, logg >= 4.0)),
+            np.logical_and(
+                np.logical_and(teff < 6000, teff > 4250),
+                logg >= 5.2 - 2.8e-4 * teff))
+        giant_indices = np.logical_not(dwarf_indices)
+
+        self.indices[splitnames[0]] = giant_indices
+        self.indices[splitnames[1]] = dwarf_indices
+        self.splitgroups[logg_crit] = set(splitnames)
+        self._check_indices_partition(logg_crit)
+
     def split_teff(self, col, splitvalues, splitnames, teff_crit="teff",
                    invert_inequality=False):
         '''Split the data by Teff.
