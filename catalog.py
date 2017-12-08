@@ -1446,7 +1446,29 @@ def APOKASC_spectroscopic_rapid_rotators():
     apo_photo = au.join_by_ra_dec(
         apo_nodlsb, ehk, "RA", "DEC", "RA", "Dec", join_type="left")
 
+###############################################################################
+# Jen Cool Dwarfs #
+###############################################################################
 
+def build_cool_dwarf_sample(apodata=None):
+    '''Build Jen's cool dwarf sample.
 
+    This will consist of both the objects with the APOGEE_KEPLER_COOLDWARF
+    targeting flag enabled, as well as objects which Jen indicated *should* be
+    in the sample, but were observed through other programs.
+    '''
+    if not apodata:
+        apodata = catin.dr14_with_KIC_stelparms()
+    targeted_sample = apodata[apodata["APOGEE_TARGET2"] & 2**16 != 0]
+    jen_missed = catin.read_van_Saders_missing_targets()
+    found_targets = au.join_by_id(apodata, jen_missed, "kepid", "KIC",
+                                  join_type="right")
+    new_sample = au.extract_subtable_from_column(
+        apodata, "kepid", found_targets["kepid"])
+
+    jen_sample = vstack([targeted_sample, new_sample])
+    jen_cool = perform_teff_cut(jen_sample, hightemp=5500, teffcol="KIC Teff")
+    jen_dc_corrected = replace_Dressing_Charbonneau_params(jen_cool)
+    return jen_dc_corrected
 
 
