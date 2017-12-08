@@ -35,6 +35,7 @@ import matplotlib.pyplot as plt
 
 import catalog
 import hrplots as hr
+import APOGEE_spectroscopy as apo
 
 ################################################################################
 # Generate binned distributions #
@@ -185,3 +186,29 @@ def compare_Huber_APOGEE_loggs(
     plt.plot([4.2, 4.2], [2, 5], 'b--')
     plt.xlabel("Uncalibrated APOGEE log(g)")
     plt.ylabel("Huber log(g)")
+
+###############################################################################
+# Exploring subsamples #
+###############################################################################
+
+def check_Jen_subsample():
+    '''Looks around at the subsample that is Jen's.'''
+    # First, get Jen's subsample
+    jen_data = catalog.build_cool_dwarf_sample()
+    # The KIC Teff and logg automatically are masked arrays.
+    # In order to meet the specifications of the splitter, I want them to not
+    # be.
+    assert(np.all(~jen_data["KIC Teff"].mask))
+    assert(np.all(~jen_data["KIC logg"].mask))
+    jen_data["KIC Teff"] = jen_data["KIC Teff"].filled()
+    jen_data["KIC logg"] = jen_data["KIC logg"].filled()
+    # Make an APOGEESplitter from it.
+    jensplitter = apo.APOGEESplitter(jen_data)
+    # Split the giants from the dwarfs.
+    # There are none!
+    jensplitter.split_Ciardi_logg("DC logg", "DC Teff")
+    # Split off the McQuillan targets.
+    jensplitter.split_McQuillan_periods(kiccol="kepid")
+
+    return jensplitter
+
