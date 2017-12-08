@@ -79,19 +79,16 @@ def test_conflict_raises_exception(typical_splitter):
     with pytest.raises(ValueError):
         a_combo = typical_splitter.subsample(["high_a", "low_a"])
 
-#TODO
 def test_exclusion(typical_splitter):
     '''Tests an exclusion category.'''
     low_a = typical_splitter.subsample(["~high_a"])
     assert np.all(low_a == typical_splitter.data[2:])
 
-#TODO
 def test_multiple_exclusion(typical_splitter):
     '''Test one of more than two exclusion categories.'''
     higher_c = typical_splitter.subsample(["~low_c"])
     assert np.all(higher_c == typical_splitter.data[1:4])
 
-#TODO
 def test_exclusion_conflict(typical_splitter):
     '''Test that exclusion conflicts are detected.'''
     with pytest.raises(ValueError):
