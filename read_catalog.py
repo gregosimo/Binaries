@@ -81,6 +81,15 @@ def read_van_Saders_file(vspath=paths.VAN_SADERS_SDSS):
     datafile["COMMENTS"] = vsidl["comments"]
     return datafile
 
+def read_van_Saders_missing_targets(targpath=paths.VAN_SADERS_MISSING):
+    '''Read the missing targets in Jen's sample.
+    
+    These objects were not observed in APOGEE 1. Maybe they were observed in
+    APOGEE2?'''
+    missing_table = Table.read(targpath, format="ascii.basic", names=(
+        "Plate", "KIC", "RA", "DEC", "H", "nExp", "SNR"))
+    return missing_table
+
 def read_van_Saders_Kepler(vspath=paths.VAN_SADERS_MAST):
     '''Read MAST output for Jen's sample.'''
     mastdata = Table.read(
