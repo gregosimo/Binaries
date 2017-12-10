@@ -14,6 +14,7 @@ import astropy_util as au
 import sample_characterization as samp
 import hrplots as hr
 import rotation_consistency as rot
+import eclipsing_binaries as ebs
 
 
 class DataSplitter:
@@ -543,6 +544,35 @@ class APOGEESplitter(StarSplitter):
         self.indices[names[-1]] = np.logical_not(unionindices)
         self.splitgroups[target_crit] = set(names)
         self._check_indices_partition(target_crit)
+
+    def split_eclipsing_binaries(
+            self, kiccol="kepid", splitnames=("Kepler EB", "Not EB"), 
+            eb_crit="Eclipsing Binaries"):
+        '''Split off objects which were classified as eclipsing binaries.
+        
+        The label for objects that were classified as EBs should be the first
+        element of splitnames, and the label for objects not EBs should be the
+        second one.'''
+        eb_indices = ebs.EB_indices(self.data[kiccol])
+        self.indices[splitnames[0]] = eb_indices
+        self.indices[splitnames[1]] = np.logical_not(eb_indices)
+        self.splitgroups[eb_crit] = set(splitnames)
+        self._check_indices_partition(eb_crit)
+
+    def split_KOIs(
+            self, kiccol="kepid", splitnames=("Kepler KOI", "Not KOI"),
+            koi_crit="KOIs"):
+        '''Split off objects which were classified as KOIs.
+
+        The label for objects classified as KOIs should be the first element of
+        splitnames, and the label for objects not KOIs should be the second
+        one.'''
+        koi_indices = catalog.KOI_indices(self.data[kiccol])
+        self.indices[splitnames[0]] = koi_indices
+        self.indices[splitnames[1]] = np.logical_not(koi_indices)
+        self.splitgroups[koi_crit] = set(splitnames)
+        self._check_indices_partition(koi_crit)
+
 
     def subsample_len(self, namelist):
         '''Get the size of a subsample.

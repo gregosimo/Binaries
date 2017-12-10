@@ -131,6 +131,13 @@ def remove_Kepler_EBs(maincat, McQuillan=True, mainkiccol="KIC"):
             maincat, mainkiccol, ebcat["KIC"])
     return filtered_maincat
 
+def EB_indices(kiccol):
+    '''Return the indices of kiccol which are EBs.'''
+    ebcat = catin.read_villanova_EBs()
+    eb_indices = au.mark_selections_in_columns(kiccol, ebcat["KIC"])
+    return eb_indices
+    
+
 def read_Kirk_geometric_correction_spline(
     splinepath="/home/regulus/simonian/Binaries/Kirk_geometric_correction_spline.csv"):
     '''Read the spline that represents the geometric correction for EBs.

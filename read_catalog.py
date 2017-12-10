@@ -599,7 +599,7 @@ def read_synchronized_EB_details(syncpath=paths.SYNC_EB_PATH):
 
 # KOIs
 
-def read_KOI_list_Mcquillan(koipath=paths.KOI_PATH):
+def read_KOI_list(koipath=paths.KOI_PATH):
     '''Read the list of KOIs as of Feb 16, 2017.'''
     kois = Table.read(koipath, format="ascii.csv", data_start=1, data_end=4800, comment="#")
     return kois

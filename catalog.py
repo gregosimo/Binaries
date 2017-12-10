@@ -1459,6 +1459,7 @@ def build_cool_dwarf_sample(apodata=None):
     '''
     if not apodata:
         apodata = catin.dr14_with_KIC_stelparms()
+        apodata["LOGG_FIT"] = apodata["FPARAM"][:,1]
     targeted_sample = apodata[apodata["APOGEE_TARGET2"] & 2**16 != 0]
     jen_missed = catin.read_van_Saders_missing_targets()
     found_targets = au.join_by_id(apodata, jen_missed, "kepid", "KIC",
@@ -1468,7 +1469,16 @@ def build_cool_dwarf_sample(apodata=None):
 
     jen_sample = vstack([targeted_sample, new_sample])
     jen_cool = perform_teff_cut(jen_sample, hightemp=5500, teffcol="KIC Teff")
-    jen_dc_corrected = replace_Dressing_Charbonneau_params(jen_cool)
-    return jen_dc_corrected
+    replace_Dressing_Charbonneau_params(jen_cool)
 
+    return jen_cool
 
+###############################################################################
+# KOIs #
+###############################################################################
+
+def KOI_indices(kiccol):
+    '''Get the indices of KOIs in the dataset.'''
+    koicat = catin.read_KOI_list()
+    koi_indices = au.mark_selections_in_columns(kiccol, ebcat["KepID"])
+    return koi_indices
