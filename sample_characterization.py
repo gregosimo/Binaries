@@ -204,11 +204,47 @@ def check_Jen_subsample():
     jen_data["KIC logg"] = jen_data["KIC logg"].filled()
     # Make an APOGEESplitter from it.
     jensplitter = apo.APOGEESplitter(jen_data)
-    # Split the giants from the dwarfs.
-    # There are none!
-    jensplitter.split_Ciardi_logg("DC logg", "DC Teff")
     # Split off the McQuillan targets.
     jensplitter.split_McQuillan_periods(kiccol="kepid")
 
+    # Split the giants from the dwarfs.
+    # There are none!
+    jensplitter.split_Ciardi_logg(
+        "DC logg", "DC Teff", logg_crit="DC Ciardi logg", 
+        splitnames=("DC Ciardi Giant", "DC Ciardi Dwarf"))
+    num_DC_misclassified = jensplitter.subsample_len(["DC Ciardi Giant"])
+    print("{0:d} objects were classified as giants by Dressing and "
+          "Charbonneau".format(num_DC_misclassified))
+
+    # Remove the EBs.
+    jensplitter.split_eclipsing_binaries()
+    print("Number of objects not analyzed by  Mcquillan that are EBs: "
+          "{0}.".format(jensplitter.subsample_len(
+              ["Unknown Mcq", "Kepler EB"])))
+    print("Number of objects analyzed by Mcquillan that are EBs: "
+          "{0}.".format(jensplitter.subsample_len(
+              ["~Unknown Mcq", "Kepler EB"])))
+    print("Remaining missing McQuillan: {0}".format(
+        jensplitter.subsample_len(["Unknown Mcq", "Not EB"])))
+
+    # Remove the KOIs.
+    jensplitter.split_KOIs()
+    print("Number of objects not analyzed by  Mcquillan that are KOIs: "
+          "{0}.".format(jensplitter.subsample_len(
+              ["Unknown Mcq", "Not EB", "KOI"])))
+    print("Number of objects analyzed by Mcquillan that are KOI: "
+          "{0}.".format(jensplitter.subsample_len(
+              ["~Unknown Mcq", "Not EB", "KOI"])))
+    print("Remaining missing McQuillan: {0}".format(
+        jensplitter.subsample_len(["Unknown Mcq", "Not EB", "Not KOI"])))
+
+    withmcq = jensplitter.subsample(["~Unknown Mcq"])
+    ebs = jensplitter.subsample(["Unknown Mcq", "Kepler EB"])
+    kois = jensplitter.subsample(["Unknown Mcq", "Not EB", "KOI"])
+    unknownmcq = jensplitter.subsample(["Unknown Mcq", "Not EB", "Not KOI"])
+    hr.logg_teff_plot(withmcq["TEFF"], withmcq["LOGG_FIT"], 'k.')
+    hr.logg_teff_plot(ebs["TEFF"], ebs["LOGG_FIT"], 'b.')
+    hr.logg_teff_plot(kois["TEFF"], kois["LOGG_FIT"], 'o.')
+    hr.logg_teff_plot(unknownmcq["DC Teff"], unknownmcq["DC logg"], 'r.')
     return jensplitter
 
