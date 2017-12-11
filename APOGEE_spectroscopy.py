@@ -4,6 +4,7 @@ interest when checking the rotation properties of the APOGEE'''
 from functools import partial
 
 import numpy as np
+import numpy.core.defchararray as npstr
 from astropy.table import vstack, Table
 import matplotlib.pyplot as plt
 import scipy
@@ -273,7 +274,7 @@ class StarSplitter(DataSplitter):
 
     def split_Ciardi_logg(
         self, loggcol, teffcol, splitnames=("Giant", "Dwarf"), 
-        logg_crit="logg", invert_inequality=False):
+        logg_crit="logg"):
         '''Make a Ciardi cut by log(g)
 
         This is a proposed delineation between dwarfs and giants for Kepler
@@ -296,6 +297,33 @@ class StarSplitter(DataSplitter):
         self.indices[splitnames[1]] = dwarf_indices
         self.splitgroups[logg_crit] = set(splitnames)
         self._check_indices_partition(logg_crit)
+
+    def split_Ciardi_Color(
+        self, jcol="jmag", hcol="hmag", 
+        splitnames=("Color Giant", "Color Dwarf"), color_crit="J-H sep",
+        invert_inequality=False):
+        '''Make a Ciardi cut by J-H color.
+
+        This is a proposed delineation between dwarfs and giants in the M
+        regime for Kepler targets. In this case, the cut classifies objects
+        with J-H > 0.75 as giants. Therefore, columns for the j and h
+        magnitudes should be provided in jcol and hcol.
+        
+        The first element of splitnames should be the label given to giants
+        found by this method. The second element of splitnames should be the
+        label given to dwarfs found by this method.'''
+        jhcolor = self.data[jcol] - self.data[hcol]
+        if not invert_inequality:
+            dwarf_indices = jhcolor < 0.75
+            giant_indices = jhcolor >= 0.75
+        else:
+            dwarf_indices = jhcolor <= 0.75
+            giant_indices = jhcolor > 0.75
+
+        self.indices[splitnames[0]] = giant_indices
+        self.indices[splitnames[1]] = dwarf_indices
+        self.splitgroups[color_crit] = set(splitnames)
+        self._check_indices_partition(color_crit)
 
     def split_teff(self, col, splitvalues, splitnames, teff_crit="teff",
                    invert_inequality=False):
@@ -560,7 +588,7 @@ class APOGEESplitter(StarSplitter):
         self._check_indices_partition(eb_crit)
 
     def split_KOIs(
-            self, kiccol="kepid", splitnames=("Kepler KOI", "Not KOI"),
+            self, kiccol="kepid", splitnames=("KOI", "Not KOI"),
             koi_crit="KOIs"):
         '''Split off objects which were classified as KOIs.
 
@@ -573,6 +601,33 @@ class APOGEESplitter(StarSplitter):
         self.splitgroups[koi_crit] = set(splitnames)
         self._check_indices_partition(koi_crit)
 
+    def split_sufficient_quarter_obs(
+            self, qneeded=8, qused=range(3, 15), quartercol="st_quarters", 
+            splitnames=("Low Quarter Fraction", "OK Quarter Fraction"),
+            quarter_crit="Mcq Quarter Fraction"):
+        '''Split off objects without enough quarters observed.
+
+        The exact quarters to consider are given as an iterable in the qused 
+        parameter; the default is to specify Q3-14. Note that Q0 cannot be 
+        specified. The minimum number of quarters needed to be sufficient is 
+        given as qneeded. 
+
+        The column which has the quarter flags should be quartercol. This
+        function assumes that the column has strings of length 17,
+        corresponding to the quarters. And each index, starting with Q1, is
+        either a 1 or a 0 depending on whether that quarter was observed or
+        not.
+        
+        Splitnames should be a 2-tuple where the first element is the label for
+        objects without sufficient quarters observed. The second element is the
+        label for objects with sufficient quarters observed. The quarter_crit
+        specifies the labels which are used for this particular split.'''
+        rel_quarter = au.slicer_vectorized(self.data[quartercol], qused)
+        qobserved = npstr.count(rel_quarter, '1')
+        self.indices[splitnames[0]] = qobserved < 8
+        self.indices[splitnames[1]] = qobserved >= 8
+        self.splitgroups[quarter_crit] = set(splitnames)
+        self._check_indices_partition(quarter_crit)
 
     def subsample_len(self, namelist):
         '''Get the size of a subsample.

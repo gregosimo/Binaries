@@ -191,19 +191,21 @@ def compare_Huber_APOGEE_loggs(
 # Exploring subsamples #
 ###############################################################################
 
-def check_Jen_subsample():
+def check_Jen_subsample(jensplitter=None):
     '''Looks around at the subsample that is Jen's.'''
     # First, get Jen's subsample
-    jen_data = catalog.build_cool_dwarf_sample()
-    # The KIC Teff and logg automatically are masked arrays.
-    # In order to meet the specifications of the splitter, I want them to not
-    # be.
-    assert(np.all(~jen_data["KIC Teff"].mask))
-    assert(np.all(~jen_data["KIC logg"].mask))
-    jen_data["KIC Teff"] = jen_data["KIC Teff"].filled()
-    jen_data["KIC logg"] = jen_data["KIC logg"].filled()
-    # Make an APOGEESplitter from it.
-    jensplitter = apo.APOGEESplitter(jen_data)
+    if not jensplitter:
+        jen_data = catalog.build_cool_dwarf_sample()
+        # The KIC Teff and logg automatically are masked arrays.
+        # In order to meet the specifications of the splitter, I want them to not
+        # be.
+        assert(np.all(~jen_data["KIC Teff"].mask))
+        assert(np.all(~jen_data["KIC logg"].mask))
+        jen_data["KIC Teff"] = jen_data["KIC Teff"].filled()
+        jen_data["KIC logg"] = jen_data["KIC logg"].filled()
+        # Make an APOGEESplitter from it.
+        jensplitter = apo.APOGEESplitter(jen_data)
+
     # Split off the McQuillan targets.
     jensplitter.split_McQuillan_periods(kiccol="kepid")
 
@@ -216,35 +218,118 @@ def check_Jen_subsample():
     print("{0:d} objects were classified as giants by Dressing and "
           "Charbonneau".format(num_DC_misclassified))
 
+    # Now split based on J-H Color.
+    jensplitter.split_Ciardi_Color()
+    print("Number of objects not analyzed by McQuillan that have J-H > 0.75: "
+          "{0}".format(jensplitter.subsample_len(
+              ["Unknown Mcq", "Color Giant"])))
+    print("Number of objects analyzed by McQuillan that have J-H <= 0.75: "
+          "{0}".format(jensplitter.subsample_len(
+              ["~Unknown Mcq", "Color Giant"])))
+    print("Remaining missing McQuillan: {0}".format(
+        jensplitter.subsample_len(["Unknown Mcq", "Color Dwarf"])))
+
     # Remove the EBs.
     jensplitter.split_eclipsing_binaries()
-    print("Number of objects not analyzed by  Mcquillan that are EBs: "
+    print("Number of objects not analyzed by Mcquillan that are EBs: "
           "{0}.".format(jensplitter.subsample_len(
-              ["Unknown Mcq", "Kepler EB"])))
+              ["Unknown Mcq", "Color Dwarf", "Kepler EB"])))
     print("Number of objects analyzed by Mcquillan that are EBs: "
           "{0}.".format(jensplitter.subsample_len(
-              ["~Unknown Mcq", "Kepler EB"])))
+              ["~Unknown Mcq", "Color Dwarf", "Kepler EB"])))
     print("Remaining missing McQuillan: {0}".format(
-        jensplitter.subsample_len(["Unknown Mcq", "Not EB"])))
+        jensplitter.subsample_len(["Unknown Mcq", "Color Dwarf", "Not EB"])))
 
     # Remove the KOIs.
     jensplitter.split_KOIs()
-    print("Number of objects not analyzed by  Mcquillan that are KOIs: "
+    print("Number of objects not analyzed by Mcquillan that are KOIs: "
           "{0}.".format(jensplitter.subsample_len(
-              ["Unknown Mcq", "Not EB", "KOI"])))
+              ["Unknown Mcq", "Color Dwarf", "Not EB", "KOI"])))
     print("Number of objects analyzed by Mcquillan that are KOI: "
           "{0}.".format(jensplitter.subsample_len(
-              ["~Unknown Mcq", "Not EB", "KOI"])))
+              ["~Unknown Mcq", "Color Dwarf", "Not EB", "KOI"])))
     print("Remaining missing McQuillan: {0}".format(
-        jensplitter.subsample_len(["Unknown Mcq", "Not EB", "Not KOI"])))
+        jensplitter.subsample_len([
+            "Unknown Mcq", "Color Dwarf", "Not EB", "Not KOI"])))
+
+    # Remove targets without adequate observations.
+    jensplitter.split_sufficient_quarter_obs()
+    print("Number of objects not analyzed by Mcquillan with fewer than 8 "
+          "quarters observed: {0}.".format(jensplitter.subsample_len(
+              ["Unknown Mcq", "Color Dwarf", "Not EB", "Not KOI", 
+               "Low Quarter Fraction"])))
+    print("Number of objects analyzed by Mcquillan with fewer than 8 "
+          "quarters observed: {0}.".format(jensplitter.subsample_len(
+              ["~Unknown Mcq", "Color Dwarf", "Not EB", "Not KOI", 
+               "Low Quarter Fraction"])))
+    print("Remaining missing McQuillan: {0}".format(
+        jensplitter.subsample_len([
+            "Unknown Mcq", "Color Dwarf", "Not EB", "Not KOI", 
+            "OK Quarter Fraction"])))
+
+
+
 
     withmcq = jensplitter.subsample(["~Unknown Mcq"])
-    ebs = jensplitter.subsample(["Unknown Mcq", "Kepler EB"])
-    kois = jensplitter.subsample(["Unknown Mcq", "Not EB", "KOI"])
-    unknownmcq = jensplitter.subsample(["Unknown Mcq", "Not EB", "Not KOI"])
-    hr.logg_teff_plot(withmcq["TEFF"], withmcq["LOGG_FIT"], 'k.')
-    hr.logg_teff_plot(ebs["TEFF"], ebs["LOGG_FIT"], 'b.')
-    hr.logg_teff_plot(kois["TEFF"], kois["LOGG_FIT"], 'o.')
-    hr.logg_teff_plot(unknownmcq["DC Teff"], unknownmcq["DC logg"], 'r.')
+    colorgiants = jensplitter.subsample(["Unknown Mcq", "Color Giant"])
+    ebs = jensplitter.subsample(["Unknown Mcq", "Color Dwarf", "Kepler EB"])
+    kois = jensplitter.subsample([
+        "Unknown Mcq", "Color Dwarf", "Not EB", "KOI"])
+    fewquarters = jensplitter.subsample([
+        "Unknown Mcq", "Color Dwarf", "Not EB", "Not KOI", 
+        "Low Quarter Fraction"])
+    unknownmcq = jensplitter.subsample([
+        "Unknown Mcq", "Color Dwarf", "Not EB", "Not KOI", 
+        "OK Quarter Fraction"])
+    plot_teffcol="KIC Teff"
+    plot_loggcol="KIC logg"
+    plt.figure()
+    hr.logg_teff_plot(
+        withmcq[plot_teffcol], withmcq[plot_loggcol], ls="", marker=".", 
+        color=(0, 0, 0), label="Analyzed")
+    hr.logg_teff_plot(
+        colorgiants[plot_teffcol], colorgiants[plot_loggcol], ls="", 
+        marker=".", color=(36/255, 255/255, 36/255), label="Color Giant")
+    hr.logg_teff_plot(
+        ebs[plot_teffcol], ebs[plot_loggcol], ls="", marker=".", 
+        color=(0, 109/255, 219/255), label="EB")
+    hr.logg_teff_plot(
+        kois[plot_teffcol], kois[plot_loggcol], ls="", marker=".",
+        color=(109/255, 182/255, 255/255), label="KOI")
+    hr.logg_teff_plot(
+        fewquarters[plot_teffcol], fewquarters[plot_loggcol], ls="",
+        marker=".", color=(146/255, 0, 0), 
+        label="Too few quarters")
+    hr.logg_teff_plot(
+        unknownmcq[plot_teffcol], unknownmcq[plot_loggcol], ls="", marker=".",
+        color=(255/255, 109/255, 182/255), label="Unaccounted")
+    plt.xlim([6400, 3200])
+    plt.ylim([5.1, 1.4])
+    plt.xlabel("KIC Teff")
+    plt.ylabel("KIC logg")
+    plt.legend(loc="upper left")
+
     return jensplitter
 
+def plot_APOGEE_quality(splitter, teffcol, loggcol):
+    '''Make a plot showing the locations of APOGEE qualities.
+
+    The splitter should have the APOGEE quality splits already done.'''
+
+    good_objs = splitter.subsample(["Good"])
+    warn_objs = splitter.subsample(["Warn"])
+    vsini_objs = splitter.subsample(["vsini"])
+    bad_objs = splitter.subsample(["Bad"])
+
+    plot_teffcol = "teff"
+    plot_loggcol = "logg"
+    hr.logg_teff_plot(good_objs[plot_teffcol], good_objs[plot_loggcol], 'g.',
+                      label="Good")
+    hr.logg_teff_plot(warn_objs[plot_teffcol], warn_objs[plot_loggcol], ls="",
+                      marker=".", color=(219/255, 209/255, 0), label="Warn")
+    hr.logg_teff_plot(vsini_objs[plot_teffcol], vsini_objs[plot_loggcol], 'y.',
+                      label="vsini")
+    hr.logg_teff_plot(bad_objs[plot_teffcol], bad_objs[plot_loggcol], 'r.',
+                      label="bad")
+
+    plt.legend(loc="upper left")
