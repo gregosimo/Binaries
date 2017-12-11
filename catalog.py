@@ -1480,5 +1480,5 @@ def build_cool_dwarf_sample(apodata=None):
 def KOI_indices(kiccol):
     '''Get the indices of KOIs in the dataset.'''
     koicat = catin.read_KOI_list()
-    koi_indices = au.mark_selections_in_columns(kiccol, ebcat["KepID"])
+    koi_indices = au.mark_selections_in_columns(kiccol, koicat["kepid"])
     return koi_indices
