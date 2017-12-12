@@ -250,8 +250,8 @@ def _check_namelist_for_tildes(namelist):
                 "{0} cannot be a name that starts with a tilde (~)".format(
                     name))
 
-class StarSplitter(DataSplitter):
-    '''Split dataset with stellar properties.
+class KeplerSplitter(DataSplitter):
+    '''Split dataset with Kepler stellar properties.
 
     Current stellar properties are: Teff and Log(g).'''
 
@@ -342,7 +342,35 @@ class StarSplitter(DataSplitter):
         self.splitgroups[teff_crit] = set(splitnames)
         self._check_indices_partition(teff_crit)
 
-class McQuillanSplitter(StarSplitter):
+    def split_sufficient_quarter_obs(
+            self, qneeded=8, qused=range(3, 15), quartercol="st_quarters", 
+            splitnames=("Low Quarter Fraction", "OK Quarter Fraction"),
+            quarter_crit="Mcq Quarter Fraction"):
+        '''Split off objects without enough quarters observed.
+
+        The exact quarters to consider are given as an iterable in the qused 
+        parameter; the default is to specify Q3-14. Note that Q0 cannot be 
+        specified. The minimum number of quarters needed to be sufficient is 
+        given as qneeded. 
+
+        The column which has the quarter flags should be quartercol. This
+        function assumes that the column has strings of length 17,
+        corresponding to the quarters. And each index, starting with Q1, is
+        either a 1 or a 0 depending on whether that quarter was observed or
+        not.
+        
+        Splitnames should be a 2-tuple where the first element is the label for
+        objects without sufficient quarters observed. The second element is the
+        label for objects with sufficient quarters observed. The quarter_crit
+        specifies the labels which are used for this particular split.'''
+        rel_quarter = au.slicer_vectorized(self.data[quartercol], qused)
+        qobserved = npstr.count(rel_quarter, '1')
+        self.indices[splitnames[0]] = qobserved < 8
+        self.indices[splitnames[1]] = qobserved >= 8
+        self.splitgroups[quarter_crit] = set(splitnames)
+        self._check_indices_partition(quarter_crit)
+
+class McQuillanSplitter(KeplerSplitter):
     '''Keep an organized database of various cuts on McQuillan data.'''
 
     def __init__(self, data=None):
@@ -376,7 +404,7 @@ class McQuillanSplitter(StarSplitter):
         self.splitgroups[period_crit] = set(splitnames)
         self._check_indices_partition(period_crit)
 
-class APOGEESplitter(StarSplitter):
+class APOGEESplitter(KeplerSplitter):
     '''Keep an organized database of various cuts on APOGEE data.'''
 
     def __init__(self, data=None):
@@ -601,33 +629,6 @@ class APOGEESplitter(StarSplitter):
         self.splitgroups[koi_crit] = set(splitnames)
         self._check_indices_partition(koi_crit)
 
-    def split_sufficient_quarter_obs(
-            self, qneeded=8, qused=range(3, 15), quartercol="st_quarters", 
-            splitnames=("Low Quarter Fraction", "OK Quarter Fraction"),
-            quarter_crit="Mcq Quarter Fraction"):
-        '''Split off objects without enough quarters observed.
-
-        The exact quarters to consider are given as an iterable in the qused 
-        parameter; the default is to specify Q3-14. Note that Q0 cannot be 
-        specified. The minimum number of quarters needed to be sufficient is 
-        given as qneeded. 
-
-        The column which has the quarter flags should be quartercol. This
-        function assumes that the column has strings of length 17,
-        corresponding to the quarters. And each index, starting with Q1, is
-        either a 1 or a 0 depending on whether that quarter was observed or
-        not.
-        
-        Splitnames should be a 2-tuple where the first element is the label for
-        objects without sufficient quarters observed. The second element is the
-        label for objects with sufficient quarters observed. The quarter_crit
-        specifies the labels which are used for this particular split.'''
-        rel_quarter = au.slicer_vectorized(self.data[quartercol], qused)
-        qobserved = npstr.count(rel_quarter, '1')
-        self.indices[splitnames[0]] = qobserved < 8
-        self.indices[splitnames[1]] = qobserved >= 8
-        self.splitgroups[quarter_crit] = set(splitnames)
-        self._check_indices_partition(quarter_crit)
 
     def subsample_len(self, namelist):
         '''Get the size of a subsample.
@@ -678,6 +679,49 @@ def initialize_APOGEE_splitter_with_bins(aposplit):
     aposplit.split_by_ASPCAP_flags()
 
     aposplit.split_apogee_targeting()
+
+def initialize_Jen_Sample_Splitter(aposplit):
+    '''Initialize a splitter for Jen's cool dwarf sample.
+
+    This splitter will make the usual splits for Jen's cool dwarf sample.
+    
+    * Splits between dwarfs, subgiants, and giants in both APOGEE and Huber
+      space. 
+
+    * Splits at 4250 or so in Teff space where APOGEE models start getting
+      funky (but verify these.
+
+    * A VSCATTER split to discern RV variable from RV nonvariable objects.
+
+    * A split in vsini at various detection levels.
+
+    * A split to separate rapid rotators from slow rotators.
+
+    * A split to separate know DLSBs (which should be complete).
+
+    * A split to separate those with McQuillan periods and those without.
+
+    * A split by ASPCAP quality.'''
+
+    aposplit.split_logg(
+        "logg", [3.5, 4], ["Huber giant", "Huber subgiant", "Huber dwarf"],
+        logg_crit="Huber logg")
+    aposplit.split_logg(
+        "LOGG_FIT", [3.5, 4], [
+            "APOGEE giant", "APOGEE subgiant", "APOGEE dwarf"],
+        logg_crit="APOGEE_logg")
+    
+    aposplit.split_teff(
+        "TEFF", 4250, ["Bad Teff", "Good Teff"], teff_crit="APOGEE Models")
+
+    aposplit.split_vscatter(
+        [0, 1], ["Single epoch", "RV Nonvar", "RV Var"], invert_inequality=True)
+
+    aposplit.split_dlsb()
+
+    aposplit.split_McQuillan_periods(kiccol="kepid")
+
+    aposplit.split_by_ASPCAP_flags()
 
 def gen_samp(name):
     '''Function to generate the given sample objects which was broken down.'''
@@ -884,3 +928,19 @@ def rapid_rotator_det_test(
              print(("For {0} and vsini>={1:d}, {2:d} out of {3:d} ({4:d}%) "
                     "are rapid.").format(
                         teff, i, num, denom, num*100//denom))
+
+################################################################################
+# Making Narrow-purpose datasplitters #
+################################################################################
+
+def jen_cool_splitter():
+    '''Create a Datasplitter consisting only of Jen's cool dwarf sample.
+    
+    These are mostly targets with the APOGEE_KEPLER_COOLDWARF and around 100 of
+    the APOGEE2_APOKASC_DWARF targets. These targets mostly have Teff < 5500
+    and H < 11.'''
+    
+    jendata = catalog.build_cool_dwarf_sample()
+    jensplitter = APOGEESplitter(data=jendata)
+    initialize_Jen_Sample_Splitter(jensplitter)
+    return jensplitter
