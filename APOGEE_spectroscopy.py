@@ -39,7 +39,7 @@ class DataSplitter:
         else:
             self.indices = indices
 
-    def split_by_col(self, col, splitvalues, splitnames,
+    def split_by_col(self, col, splitvalues, splitnames, crit,
                      invert_inequality=False):
         '''Make a simple split in the dataset using one column.
 
@@ -58,6 +58,10 @@ class DataSplitter:
         Note that due to the exclusion mechanism as part of the DataSplitter,
         that splitnames are not allowed to begin with a tilde (~) character.
         '''
+        # Don't split when there are no splitvalues.
+        if splitvalues == []:
+            raise ValueError("Need values to split on")
+
         colvalues = self.data[col]
 
         # Anytime an ordered comparison needs to be made, things can get weird 
@@ -77,26 +81,66 @@ class DataSplitter:
         # start with a tilde.
         _check_namelist_for_tildes(splitnames)
 
-        # Invert_inequality basically transforms < to <= and >= to >
-        if not invert_inequality:
-            # First make the lowest table.
-            self.indices[splitnames[0]] = colvalues < splitvalues[0]
-            # Then make intermediate tables.
-            for i, (low, high) in enumerate(zip(
-                    splitvalues[:-1], splitvalues[1:])):
-                self.indices[splitnames[i+1]] = np.logical_and(
-                    colvalues >= low, colvalues < high)
-            # Now make the highest table.
-            self.indices[splitnames[-1]] = colvalues >= splitvalues[-1]
-        else:
-            # First make the lowest table.
-            self.indices[splitnames[0]] = colvalues <= splitvalues[0]
-            # Then make intermediate tables.
-            for i, (low, high) in zip(splitvalues[:-1], splitvalues[1:]):
-                self.indices[splitnames[i+1]] = np.logical_and(
-                    colvalues > low, colvalues <= high)
-            # Now make the highest table.
-            self.indices[splitnames[-1]] = colvalues > splitvalues[-1]
+        # If something goes wrong, I'll want to have a backup to restore the
+        # object. But I haven't faced a use-case for this yet. So just have an
+        # outline of something to do.
+        backup_indices = self._backup_crit(crit)
+        
+        # If there's already an existing criteria, delete all the indices
+        # corresponding to that criteria. This will be a total replacement.
+        if crit in self.splitgroups:
+            self.delete_crit(crit)
+
+        # Once all of the old indices are deleted, check if any of the new
+        # indices are in the index array. If they are, then there's a conflict
+        # and the function should throw an exception.
+        for indexname in splitnames:
+            if indexname in self.indices:
+                self._restore_crit(crit, backup_indices)
+                raise ValueError(
+                    "Splitnames conflicts with other index names.")
+
+        try:
+            # Invert_inequality basically transforms < to <= and >= to >
+            if not invert_inequality:
+                # First make the lowest table.
+                self.indices[splitnames[0]] = colvalues < splitvalues[0]
+                # Then make intermediate tables.
+                for i, (low, high) in enumerate(zip(
+                        splitvalues[:-1], splitvalues[1:])):
+                    self.indices[splitnames[i+1]] = np.logical_and(
+                        colvalues >= low, colvalues < high)
+                # Now make the highest table.
+                self.indices[splitnames[-1]] = colvalues >= splitvalues[-1]
+            else:
+                # First make the lowest table.
+                self.indices[splitnames[0]] = colvalues <= splitvalues[0]
+                # Then make intermediate tables.
+                for i, (low, high) in zip(splitvalues[:-1], splitvalues[1:]):
+                    self.indices[splitnames[i+1]] = np.logical_and(
+                        colvalues > low, colvalues <= high)
+                # Now make the highest table.
+                self.indices[splitnames[-1]] = colvalues > splitvalues[-1]
+        except:
+            self._restore_crit(crit, backup_indices)
+            raise
+
+
+        self.splitgroups[crit] = set(splitnames)
+        self._check_indices_partition(crit)
+
+    def _backup_crit(self, crit):
+        '''Makes a backup of the indices under crit.
+
+        Return a dictionary containing the indices stored under crit.'''
+        pass
+
+    def _restore_crit(self, crit, backups):
+        '''Restore the indices in backups under crit.
+
+        Takes a dictionary containing indices, and restores them in the
+        indextable under crit.'''
+        pass
 
     def subsample(self, namelist):
         '''Get a specified subsample.
@@ -228,6 +272,25 @@ class DataSplitter:
                         categories[1:], datafunc, prevsamps=cursamps))
         return catdict
 
+    def delete_crit(self, crit):
+        '''Delete the selected criterion from the DataSplitter.
+
+        If a criteron is no longer desired, run this method to delete that
+        criterion as well as the corresponding indices.'''
+        for index in self.splitgroups[crit]:
+            del(self.indices[index])
+        del(self.splitgroups[crit])
+
+    def _crit_of_index(self, indname):
+        '''Get the criteria corresponding to the given index.'''
+        for crit, indices in self.splitgroups:
+            if indname in indices:
+                return crit
+        raise KeyError(
+            "{0} is not a valid index name. Run names() to get "
+            "currently available index names.".format(indname))
+
+
 def format_census_tree(census_tree, indents=""):
     '''Write the partition census to a string.
 
@@ -268,9 +331,8 @@ class KeplerSplitter(DataSplitter):
 
         For more information on invert_inequality, see split_by_col.
         '''
-        self.split_by_col(col, splitvalues, splitnames, invert_inequality)
-        self.splitgroups[logg_crit] = set(splitnames)
-        self._check_indices_partition(logg_crit)
+        self.split_by_col(col, splitvalues, splitnames, logg_crit, 
+                          invert_inequality)
 
     def split_Ciardi_logg(
         self, loggcol, teffcol, splitnames=("Giant", "Dwarf"), 
@@ -338,9 +400,8 @@ class KeplerSplitter(DataSplitter):
 
         For more information on invert_inequality, see split_by_col.
         '''
-        self.split_by_col(col, splitvalues, splitnames, invert_inequality)
-        self.splitgroups[teff_crit] = set(splitnames)
-        self._check_indices_partition(teff_crit)
+        self.split_by_col(col, splitvalues, splitnames, teff_crit, 
+                          invert_inequality)
 
     def split_sufficient_quarter_obs(
             self, qneeded=8, qused=range(3, 15), quartercol="st_quarters", 
@@ -400,9 +461,8 @@ class McQuillanSplitter(KeplerSplitter):
 
         For more information on invert_inequality, see split_by_col.
         '''
-        self.split_by_col(col, splitvalues, splitnames, invert_inequality)
-        self.splitgroups[period_crit] = set(splitnames)
-        self._check_indices_partition(period_crit)
+        self.split_by_col(col, splitvalues, splitnames, period_crit, 
+                          invert_inequality)
 
 class APOGEESplitter(KeplerSplitter):
     '''Keep an organized database of various cuts on APOGEE data.'''
@@ -433,7 +493,8 @@ class APOGEESplitter(KeplerSplitter):
 
         For more information on invert_inequality, see split_by_col.
         '''
-        self.split_by_col(col, splitvalues, splitnames, invert_inequality)
+        self.split_by_col(col, splitvalues, splitnames, vscatter_crit, 
+                          invert_inequality)
         self.splitgroups[vscatter_crit] = set(splitnames)
         self._check_indices_partition(vscatter_crit)
 
@@ -450,8 +511,6 @@ class APOGEESplitter(KeplerSplitter):
         For more information on invert_inequality, see split_by_col.
         '''
         self.split_by_col(col, splitvalues, splitnames, invert_inequality)
-        self.splitgroups[vsini_crit] = set(splitnames)
-        self._check_indices_partition(vsini_crit)
 
     def split_spectroscopic_rapid_rotators(
         self, splitperiods, splitnames, radius_col="radius", 
@@ -475,9 +534,8 @@ class APOGEESplitter(KeplerSplitter):
         self.data[tempcol] = rot.vsini_to_period(
             np.maximum(self.data[vsini_col], det_limit), 
             self.data[radius_col])[0]
-        self.split_by_col(tempcol, splitperiods, splitnames, invert_inequality)
-        self.splitgroups[rapid_crit] = set(splitnames)
-        self._check_indices_partition(rapid_crit)
+        self.split_by_col(tempcol, splitperiods, splitnames, rapid_crit, 
+                          invert_inequality)
         del(self.data[tempcol])
         assert tempcol not in self.data.colnames
 

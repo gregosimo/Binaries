@@ -20,18 +20,15 @@ class CustomSplitter(DataSplitter):
     def split_a(self, splitvalues, splitnames, col="a", a_crit="a",
                 invert_inequality=False):
         '''Split by a'''
-        self.split_by_col(col, splitvalues, splitnames, invert_inequality)
-        self.splitgroups[a_crit] = set(splitnames)
+        self.split_by_col(col, splitvalues, splitnames, a_crit, invert_inequality)
     def split_b(self, splitvalues, splitnames, col="b", b_crit="b",
                 invert_inequality=False):
         '''Split by b'''
-        self.split_by_col(col, splitvalues, splitnames, invert_inequality)
-        self.splitgroups[b_crit] = set(splitnames)
+        self.split_by_col(col, splitvalues, splitnames, b_crit, invert_inequality)
     def split_c(self, splitvalues, splitnames, col="c", c_crit="c",
                 invert_inequality=False):
         '''Split by c'''
-        self.split_by_col(col, splitvalues, splitnames, invert_inequality)
-        self.splitgroups[c_crit] = set(splitnames)
+        self.split_by_col(col, splitvalues, splitnames, c_crit, invert_inequality)
 
 @pytest.fixture
 def typical_splitter():
@@ -43,7 +40,7 @@ def typical_splitter():
     b = CustomSplitter(a)
     b.split_a([3], ["low_a", "high_a"])
     b.split_b([6.0], ["low_b", "high_b"])
-    b.split_b([6.0], ["inv_low_b", "inv_high_b"], invert_inequality=True)
+    b.split_b([6.0], ["inv_low_b", "inv_high_b"], b_crit="inv b", invert_inequality=True)
     b.split_c([2, 6], ["low_c", "mid_c", "high_c"])
     return b
 

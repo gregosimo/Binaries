@@ -20,18 +20,18 @@ class CustomSplitter(DataSplitter):
     def split_a(self, splitvalues, splitnames, col="a", a_crit="a",
                 invert_inequality=False):
         '''Split by a'''
-        self.split_by_col(col, splitvalues, splitnames, invert_inequality)
-        self.splitgroups[a_crit] = set(splitnames)
+        self.split_by_col(col, splitvalues, splitnames, a_crit, 
+                          invert_inequality)
     def split_b(self, splitvalues, splitnames, col="b", b_crit="b",
                 invert_inequality=False):
         '''Split by b'''
-        self.split_by_col(col, splitvalues, splitnames, invert_inequality)
-        self.splitgroups[b_crit] = set(splitnames)
+        self.split_by_col(col, splitvalues, splitnames, b_crit, 
+                          invert_inequality)
     def split_c(self, splitvalues, splitnames, col="c", c_crit="c",
                 invert_inequality=False):
         '''Split by c'''
-        self.split_by_col(col, splitvalues, splitnames, invert_inequality)
-        self.splitgroups[c_crit] = set(splitnames)
+        self.split_by_col(col, splitvalues, splitnames, c_crit, 
+                          invert_inequality)
 
 @pytest.fixture
 def typical_splitter():
@@ -41,13 +41,8 @@ def typical_splitter():
     column b.'''
     a = Table.read(tablestring, format="ascii.fixed_width")
     b = CustomSplitter(a)
-    b.split_a([3], ["low_a", "high_a"])
-    b.split_b([6.0], ["low_b", "high_b"])
-    b.split_b([6.0], ["inv_low_b", "inv_high_b"], invert_inequality=True)
-    b.split_c([1, 6], ["low_c", "mid_c", "high_c"])
     return b
 
-#TODO
 def test_empty_split(typical_splitter):
     '''Make sure empty split raises an error.'''
     with pytest.raises(ValueError):
@@ -98,13 +93,16 @@ def test_multiple_split(typical_splitter):
 
 def test_custom_group_name(typical_splitter):
     '''Split the table with a custom group name'''
-    typical_splitter.split_a([3], ["low_a", "high_a"], a_crit="custom_a")
+    typical_splitter.split_a([3], ["low_custom_a", "high_custom_a"], 
+                             a_crit="custom_a")
     assert np.all(
-        typical_splitter.indices["low_a"] == [False, False, True, True, True])
+        typical_splitter.indices["low_custom_a"] == [
+            False, False, True, True, True])
     assert np.all(
-        typical_splitter.indices["high_a"] == [True, True, False, False,
-                                               False])
-    assert typical_splitter.splitgroups["custom_a"] == {"low_a", "high_a"}
+        typical_splitter.indices["high_custom_a"] == [
+            True, True, False, False, False])
+    assert typical_splitter.splitgroups["custom_a"] == {
+        "low_custom_a", "high_custom_a"}
     with pytest.raises(KeyError):
         a_group = typical_splitter.subsample(["a"])
 
@@ -124,7 +122,6 @@ def test_tilde_splitname(typical_splitter):
     with pytest.raises(ValueError):
         typical_splitter.split_a([3], ["low_a", "~high_a"])
 
-#TODO
 def test_split_replacement(typical_splitter):
     '''Test that replacing a split groups cleans up correctly.'''
     typical_splitter.split_a([3], ["low_a", "high_a"])
@@ -140,7 +137,6 @@ def test_split_replacement(typical_splitter):
     assert typical_splitter.splitgroups["a"] == {"low_a", "mid_a", "higher_a"}
     assert "high_a" not in typical_splitter.indices
 
-#TODO
 def test_split_name_conflict(typical_splitter):
     '''Test that conflicting names for different groups throw an error.'''
     typical_splitter.split_a([3], ["low_a", "high_a"])
