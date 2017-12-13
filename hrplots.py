@@ -2,6 +2,10 @@
 
 import matplotlib.pyplot as plt
 
+###############################################################################
+# HR Diagram Classes #
+###############################################################################
+
 def logg_teff_plot(teff, logg, style="k.", **kwargs):
     '''Creates a plot in the Teff-logg space.
 
@@ -18,6 +22,23 @@ def logg_teff_plot(teff, logg, style="k.", **kwargs):
     invert_y_axis(ax)
     plt.xlabel("Teff")
     plt.ylabel("log g")
+
+def radius_teff_plot(teff, radius, style="k.", **kwargs):
+    '''Creates a plot in Teff-radius space.
+
+    Teff and radius are values which should be plotted. Style should be the
+    plot style for the points; they are black dots by default. All other values
+    will be passed to the underlying errorbar routine.
+    '''
+    try:
+        ax = kwargs.pop("axis")
+    except KeyError:
+        ax = plt.gca()
+    ax.errorbar(teff, radius, fmt=style, **kwargs)
+    invert_x_axis(ax)
+    plt.xlabel("Teff")
+    plt.ylabel("Radius")
+    
 
 
 def invert_x_axis(axes=None):
