@@ -439,18 +439,10 @@ class McQuillanSplitter(KeplerSplitter):
         '''Initialize a splitter of McQuillan data.'''
         if not data:
             data = catin.mcquillan_with_stelparms()
-            super().__init__(data)
+        super().__init__(data)
 
-        self.split_logg(
-            "logg", 3.5, ["Huber giant", "Huber dwarf"], logg_crit="Huber logg")
-        self.split_teff(
-            "teff", [5500, 6500], ["Jen Cool Huber", "Cool Huber", "Hot Huber"], 
-            teff_crit="Huber Teff")
-
-        self.split_period("Prot", [1, 5], ["very rapid", "rapid", "slow"])
-
-    def split_period(self, col, splitvalues, splitnames, period_crit="period",
-                     invert_inequality=False):
+    def split_period(self, splitvalues, splitnames, pcol="Prot", 
+                     period_crit="period", invert_inequality=False):
         '''Split the data by period.
 
         Since there are many different ways to measure period, the desired
@@ -462,7 +454,7 @@ class McQuillanSplitter(KeplerSplitter):
 
         For more information on invert_inequality, see split_by_col.
         '''
-        self.split_by_col(col, splitvalues, splitnames, period_crit, 
+        self.split_by_col(pcol, splitvalues, splitnames, period_crit, 
                           invert_inequality)
 
 class APOGEESplitter(KeplerSplitter):
@@ -704,6 +696,20 @@ class APOGEESplitter(KeplerSplitter):
         indexlen = len(np.unique(names))
         return indexlen
 
+def CombinedRotationSplitter(APOGEESplitter,McQuillanSplitter):
+    '''A splitter for a dataset containing both APOGEE and McQuillan data.
+
+    This splitter will be useful for unifying parts of the Kepler sample which
+    overlap when observed with McQuillan and APOGEE.'''
+    def __init__(self, data=None):
+        '''A class for overlapping spectroscopic and photometric data.
+
+        These objects ought to have both vsinis and rotational periods.'''
+        if not data:
+            data = catin.dr14_with_KIC_stelparms()
+            data["LOGG_FIT"] = data["FPARAM"][:,1]
+        super().__init__(data)
+
 def initialize_APOGEE_splitter_with_bins(aposplit):
     '''Initialize the APOGEE splitter with Teff bins.'''
 
@@ -814,6 +820,39 @@ def initialize_apogee_dwarf_rotation_sample(aposplit):
     aposplit.split_McQuillan_periods(kiccol="kepid")
 
     aposplit.split_by_ASPCAP_flags()
+
+def initialize_combined_rotation_sample(aposplit):
+    '''Initialize the dwarf rotation sample with McQuillan targets.
+
+    The dwarf rotation sample consists of those targets in Jen's cool dwarf
+    sample that meet the APOGEE criteria of having log(g) > 4.0, and that have
+    Teff > 4250 in order to avoid bad ASPCAP fits.
+    
+    This function deals with those targets which have McQuillan detections!'''
+    aposplit.split_logg(
+        "logg", [3.6, 4.2], ["Huber giant", "Huber subgiant", "Huber dwarf"],
+        logg_crit="Huber logg")
+
+    aposplit.split_teff(
+        "TEFF", 5250, ["ZAMS", "Age-evolved"], teff_crit="Age Evolution")
+
+    aposplit.split_vscatter(
+        [0, 1], ["Single epoch", "RV Nonvar", "RV Var"], invert_inequality=True)
+
+    aposplit.split_vsini([0, 7, 10], [
+        "No Vsini", "Vsini nondet", "Vsini marginal", "Vsini det"])
+
+    aposplit.split_spectroscopic_rapid_rotators(
+        [1, 5], ["Very rapid rotators", "Rapid rotators", "Slow rotators"],
+        radius_col="APOGEE radius")
+
+    aposplit.split_dlsb()
+
+    aposplit.split_period([1, 5], [
+        "Very rapid period", "Rapid period", "Slow period"])
+
+    aposplit.split_by_ASPCAP_flags()
+
 
 def gen_samp(name):
     '''Function to generate the given sample objects which was broken down.'''
@@ -1059,4 +1098,16 @@ def jen_cool_apodwarf_splitter():
     initialize_apogee_dwarf_rotation_sample(dwarfsplitter)
     return dwarfsplitter
 
-    
+def combo_from_APOGEE_Splitter(aposplit):
+    '''Add the McQuillan periods to an existing APOGEE splitter.
+
+    This function will take the existing APOGEE splitter, and then take the
+    subset with McQuillan periods to yield a DataSplitter with McQuillan
+    information.'''
+    targs_with_mcq = aposplit.subsample(["Mcq"])
+    mcq = catin.read_McQuillan_catalog().copy()
+    mcq.remove_columns(["Teff", "log_g_", "Mass", "_RA", "_DE", "Ref"])
+    combined_table = au.join_by_id(targs_with_mcq, mcq, "kepid", "KIC")
+    assert len(targs_with_mcq) == len(combined_table)
+
+    combosplitter = CombinedRotationSplitter(combined_table)
