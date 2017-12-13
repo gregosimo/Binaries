@@ -511,7 +511,8 @@ class APOGEESplitter(KeplerSplitter):
 
         For more information on invert_inequality, see split_by_col.
         '''
-        self.split_by_col(col, splitvalues, splitnames, invert_inequality)
+        self.split_by_col(col, splitvalues, splitnames, vsini_crit, 
+                          invert_inequality)
 
     def split_spectroscopic_rapid_rotators(
         self, splitperiods, splitnames, radius_col="radius", 
@@ -763,7 +764,7 @@ def initialize_Jen_Sample_Splitter(aposplit):
     * A split by ASPCAP quality.'''
 
     aposplit.split_logg(
-        "logg", [3.5, 4], ["Huber giant", "Huber subgiant", "Huber dwarf"],
+        "logg", [3.6, 4.2], ["Huber giant", "Huber subgiant", "Huber dwarf"],
         logg_crit="Huber logg")
     aposplit.split_logg(
         "LOGG_FIT", [3.5, 4], [
@@ -775,6 +776,38 @@ def initialize_Jen_Sample_Splitter(aposplit):
 
     aposplit.split_vscatter(
         [0, 1], ["Single epoch", "RV Nonvar", "RV Var"], invert_inequality=True)
+
+    aposplit.split_vsini([0, 7, 10], [
+        "No Vsini", "Vsini nondet", "Vsini marginal", "Vsini det"])
+
+    aposplit.split_dlsb()
+
+    aposplit.split_McQuillan_periods(kiccol="kepid")
+
+    aposplit.split_by_ASPCAP_flags()
+
+def initialize_apogee_dwarf_rotation_sample(aposplit):
+    '''Initialize the dwarf rotation sample.
+
+    The dwarf rotation sample consists of those targets in Jen's cool dwarf
+    sample that meet the APOGEE criteria of having log(g) > 4.0, and that have
+    Teff > 4250 in order to avoid bad ASPCAP fits.'''
+    aposplit.split_logg(
+        "logg", [3.6, 4.2], ["Huber giant", "Huber subgiant", "Huber dwarf"],
+        logg_crit="Huber logg")
+
+    aposplit.split_teff(
+        "TEFF", 5250, ["ZAMS", "Age-evolved"], teff_crit="Age Evolution")
+
+    aposplit.split_vscatter(
+        [0, 1], ["Single epoch", "RV Nonvar", "RV Var"], invert_inequality=True)
+
+    aposplit.split_vsini([0, 7, 10], [
+        "No Vsini", "Vsini nondet", "Vsini marginal", "Vsini det"])
+
+    aposplit.split_spectroscopic_rapid_rotators(
+        [1, 5], ["Very rapid rotators", "Rapid rotators", "Slow rotators"],
+        radius_col="APOGEE radius")
 
     aposplit.split_dlsb()
 
@@ -1003,3 +1036,27 @@ def jen_cool_splitter():
     jensplitter = APOGEESplitter(data=jendata)
     initialize_Jen_Sample_Splitter(jensplitter)
     return jensplitter
+
+def jen_cool_apodwarf_splitter():
+    '''Create a Datasplitter with the good dwarf subset of Jen's sample.
+
+    From within Jen's cool dwarf sample, create a datasplitter which constains
+    the subset with APOGEE parameters log(g) < 4.0 and Teff > 4200 K. This
+    dataset will also have radii calibrated from the Huber parameters, but
+    using the APOGEE Teffs. Possibly even the metallicities at some point.
+
+    Because the radii are present, this sample will also have the distinction
+    between slow and rapid rotators.'''
+    jensplit = jen_cool_splitter()
+    # Calibrate the relationship between Teff and radius.
+    radius_calib = jensplit.subsample(["Good Teff", "Huber dwarf"])
+    radius_fitter = samp.fit_teff_radius_relation(
+        radius_calib["teff"], radius_calib["radius"])
+    
+    jen_dwarfs = jensplit.subsample(["APOGEE dwarf", "Good Teff"])
+    samp.generate_radius_column(jen_dwarfs, radius_fitter)
+    dwarfsplitter = APOGEESplitter(jen_dwarfs)
+    initialize_apogee_dwarf_rotation_sample(dwarfsplitter)
+    return dwarfsplitter
+
+    

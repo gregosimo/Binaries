@@ -32,6 +32,7 @@ rapid_fraction_multiple_limits:
 """
 import numpy as np
 import matplotlib.pyplot as plt
+from astropy.modeling import models, fitting
 
 import catalog
 import hrplots as hr
@@ -333,3 +334,47 @@ def plot_APOGEE_quality(splitter, teffcol, loggcol):
                       label="bad")
 
     plt.legend(loc="upper left")
+
+###############################################################################
+# Radius determination #
+###############################################################################
+
+def fit_teff_radius_relation(teffs, radii):
+    '''Fit a relationship between the Teff and Radius of a sample.
+    
+    The form of the relationship as currently used is linear.'''
+    init_model = models.Polynomial1D(3)
+    fit_model = fitting.LevMarLSQFitter()
+    new_model = fit_model(init_model, teffs, radii)
+
+    return new_model
+
+def plot_teff_radius_relation(dwarf_teff, dwarf_radius, subgiant_teff,
+                              subgiant_radius, dwarf_metallicity):
+    relation = fit_teff_radius_relation(dwarf_teff, dwarf_radius)
+    fig, ax = plt.subplots()
+    cax = ax.scatter(
+        dwarf_teff, dwarf_radius, c=dwarf_metallicity,
+        cmap=plt.cm.get_cmap("winter"), label="Dwarfs")
+    hr.radius_teff_plot(subgiant_teff, subgiant_radius, 'r.',
+                        label="Subgiants", axis=ax)
+
+    teff_boundaries = np.array(np.sort(dwarf_teff))
+    radius_boundaries = relation(teff_boundaries)
+    hr.radius_teff_plot(teff_boundaries, radius_boundaries, style='k-', lw=3,
+                        label="Fit", axis=ax) 
+
+    cbar = fig.colorbar(cax)
+    cbar.ax.set_xlabel("[Fe/H]")
+    print(np.std(dwarf_radius - relation(dwarf_teff)))
+    plt.xlabel("Huber Teff")
+    plt.ylabel("Huber Radius")
+    plt.legend(loc="upper right")
+
+def generate_radius_column(
+    apotable, teff_rad_conv, teffcol="TEFF", radcol="APOGEE radius"):
+    '''Add a radius column to apotable.
+
+    The column to convert teff to radius should be given as Teffcol. The radius
+    will be stored in the radcol column.'''
+    apotable[radcol] = teff_rad_conv(apotable[teffcol])
