@@ -32,6 +32,7 @@ from scipy.special import erf
 
 import eclipsing_binaries as ebs
 import catalog
+import hrplots as hr
 
 def apogee_vsini_distribution(period, radius, vsini, vsini_floor=5):
     '''Plot the distribution of vsinis for an APOGEE sample.
@@ -1238,3 +1239,28 @@ def expected_rotation_fraction_hist(ebperiods, obsperiods, nbins=20,
     plt.ylabel("Number")
     plt.xlim(binrange)
     
+################################################################################
+# Vsini limits #
+################################################################################
+
+def plot_period_limit_in_velocity_space(rad_from_teff):
+    '''Plot the maximum period observable for dwarfs.
+
+    This function will plot the maximum rotation period corresponding to the
+    potential vsini detection limits in APOGEE.'''
+    tefflims = np.linspace(4250, 5500, 100)
+
+    radii = rad_from_teff(tefflims)
+    vsini_maxima = np.array([7, 10])
+    max_periods, _, _ = vsini_to_period(vsini_maxima[:,np.newaxis], radii)
+
+    plt.plot(tefflims, max_periods[0,:], 'b-', 
+             label="Vsini limit {0} km/s".format(vsini_maxima[0]))
+    plt.plot(tefflims, max_periods[1,:], 'r-', 
+             label="Vsini limit {0} km/s".format(vsini_maxima[1]))
+    plt.legend(loc="upper right")
+    plt.xlabel("Teff")
+    hr.invert_x_axis()
+    plt.ylabel("(P/sini)max")
+    plt.ylim([0, 7])
+    plt.title("Vsini detection limits in period space")
