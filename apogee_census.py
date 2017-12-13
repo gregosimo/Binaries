@@ -25,6 +25,23 @@ def display_fraction_census(aposplit, basic_crit=[]):
         print_mcq_detections(aposplit, statecrits, printfunc=printfunc)
         print()
 
+def display_cool_dwarf_fraction_census(coolsplit, basic_crit=[]):
+    '''Display a the various levels of rapid rotation for the cool dwarfs.'''
+    othercrits = basic_crit.copy()
+    printfunc = print_not_bad_totals
+    print()
+    print_vsini_detection_types(coolsplit, othercrits, printfunc=printfunc)
+    print()
+    print_DLSB_fractions(coolsplit, othercrits, printfunc=printfunc)
+    print()
+    othercrits.append("~DLSB")
+    print_rapid_rotation_fractions(coolsplit, othercrits, printfunc=printfunc)
+    print()
+    print_mcq_analysis_overlap(coolsplit, othercrits, printfunc=printfunc)
+    print()
+    print_mcq_detections(coolsplit, othercrits, printfunc=printfunc)
+    print()
+
 ###############################################################################
 # Functions for choosing quality
 ###############################################################################
