@@ -91,6 +91,39 @@ def test_multiple_split(typical_splitter):
                                                False])
     assert typical_splitter.splitgroups["c"] == {"low_c", "mid_c", "high_c"}
 
+def test_split_on_value(typical_splitter):
+    '''Test that functions splits correctly on exact matches.'''
+    typical_splitter.split_b([6.0], ["low_b", "high_b"])
+    assert np.all(typical_splitter.indices["low_b"]  == [
+        True, True, True, False, False])
+    assert np.all(typical_splitter.indices["high_b"]  == [
+        False, False, False, True, True])
+    assert typical_splitter.splitgroups["b"] == {"low_b", "high_b"}
+
+def test_inverted_inequality(typical_splitter):
+    '''Test that functions splits correctly on exact matches.'''
+    typical_splitter.split_b([6.0], ["low_b", "high_b"], invert_inequality=True)
+    assert np.all(typical_splitter.indices["low_b"]  == [
+        True, True, True, True, False])
+    assert np.all(typical_splitter.indices["high_b"]  == [
+        False, False, False, False, True])
+    assert typical_splitter.splitgroups["b"] == {"low_b", "high_b"}
+
+def test_multiple_inverted_inequality(typical_splitter):
+    '''Test that the function inverts multiple values.
+
+    This is to test for a syntax error that occurs when invert_inequality is
+    used with multiple objects.'''
+    typical_splitter.split_b([3.0, 6.0], ["low_b", "mid_b", "high_b"], 
+                             invert_inequality=True)
+    assert np.all(typical_splitter.indices["low_b"]  == [
+        True, True, False, False, False])
+    assert np.all(typical_splitter.indices["mid_b"]  == [
+        False, False, True, True, False])
+    assert np.all(typical_splitter.indices["high_b"]  == [
+        False, False, False, False, True])
+    assert typical_splitter.splitgroups["b"] == {"low_b", "mid_b", "high_b"}
+
 def test_custom_group_name(typical_splitter):
     '''Split the table with a custom group name'''
     typical_splitter.split_a([3], ["low_custom_a", "high_custom_a"], 

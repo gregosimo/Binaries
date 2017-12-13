@@ -116,7 +116,8 @@ class DataSplitter:
                 # First make the lowest table.
                 self.indices[splitnames[0]] = colvalues <= splitvalues[0]
                 # Then make intermediate tables.
-                for i, (low, high) in zip(splitvalues[:-1], splitvalues[1:]):
+                for i, (low, high) in enumerate(zip(
+                        splitvalues[:-1], splitvalues[1:])):
                     self.indices[splitnames[i+1]] = np.logical_and(
                         colvalues > low, colvalues <= high)
                 # Now make the highest table.
