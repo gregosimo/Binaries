@@ -41,6 +41,11 @@ def display_cool_dwarf_fraction_census(coolsplit, basic_crit=[]):
     print()
     print_mcq_detections(coolsplit, othercrits, printfunc=printfunc)
     print()
+    with_periods = apo.combo_from_APOGEE_Splitter(coolsplit)
+    apo.initialize_combined_rotation_sample(with_periods)
+    print_mcq_rapid_rotator_overlap(
+        with_periods, othercrits, printfunc=printfunc)
+    print()
 
 ###############################################################################
 # Functions for choosing quality
@@ -442,6 +447,89 @@ def print_mcq_detections(aposplit, othercrits, printfunc=print_not_bad_totals):
     except ZeroDivisionError:
         pass
 
+def print_mcq_rapid_rotator_overlap(combosplit, othercrits, 
+                                    printfunc=print_not_bad_totals):
+    '''Print spectroscopic and photometric rapid rotators fractions.'''
+
+    robust_very_rapid_mcq_string = (
+        "Fraction of robust very rapid rotators with that are photometric "
+        "rapid rotators: ")
+    try:
+        printfunc(
+            combosplit, mcquillan_rapid_rotator_fraction, 
+            othercrits+["Vsini det", "Very rapid rotators"], 
+            robust_very_rapid_mcq_string)
+    except ZeroDivisionError:
+        pass
+
+    robust_rapid_mcq_string = (
+        "Fraction of robust rapid rotators that are photometric rapid "
+        "rotators: ") 
+    try:
+        printfunc(
+            combosplit, mcquillan_rapid_rotator_fraction, 
+            othercrits+["Vsini det", "Rapid rotators"], 
+            robust_rapid_mcq_string)
+    except ZeroDivisionError:
+        pass
+
+    robust_slow_mcq_string = (
+        "Fraction of robust slow rotators that are photometric rapid "
+        "rotators: ")
+    try:
+        printfunc(
+            combosplit, mcquillan_rapid_rotator_fraction, 
+            othercrits+["Vsini det", "Slow rotators"], 
+            robust_slow_mcq_string)
+    except ZeroDivisionError:
+        pass
+
+    marginal_very_rapid_mcq_string = (
+        "Fraction of marginal very rapid rotators that are photometric rapid "
+        "rotators: ")
+    try:
+        printfunc(
+            combosplit, mcquillan_rapid_rotator_fraction, 
+            othercrits+["Vsini marginal", "Very rapid rotators"], 
+            marginal_very_rapid_mcq_string)
+    except ZeroDivisionError:
+        pass
+
+    marginal_rapid_mcq_string = (
+        "Fraction of marginal rapid rotators with that are photometric rapid " 
+        "rotators: ")
+    try:
+        printfunc(
+            combosplit, mcquillan_rapid_rotator_fraction, 
+            othercrits+["Vsini marginal", "Rapid rotators"],
+            marginal_rapid_mcq_string)
+    except ZeroDivisionError:
+        pass
+
+    marginal_slow_mcq_string = (
+        "Fraction of marginal slow rotators that are photometric rapid "
+        "rotators: ")
+    try:
+        printfunc(
+            combosplit, mcquillan_rapid_rotator_fraction, 
+            othercrits+["Vsini marginal", "Slow rotators"],
+            marginal_slow_mcq_string)
+    except ZeroDivisionError:
+        pass
+
+    nondet_mcq_string = (
+        "Fraction of nondetections that are photometric rapid rotators: ")
+    def nondet_mcq(x, othercrit=[]):
+        nondets = mcquillan_rapid_rotator_fraction(
+            combosplit, othercrit=othercrit+["Vsini nondet"])
+        bads = mcquillan_rapid_rotator_fraction(
+            combosplit, othercrit=othercrit+["No Vsini"])
+        return (nondets[0]+bads[0], nondets[1]+bads[1])
+    try:
+        printfunc(
+        combosplit, nondet_mcq, othercrits, nondet_mcq_string)
+    except ZeroDivisionError:
+        pass
 
 ###############################################################################
 # Functions for calculating fractions #
@@ -523,6 +611,17 @@ def mcquillan_detection_fraction(
     subsample.'''
     mcqlen = aposplit.subsample_len([mcqcrit]+othercrit)
     fullsamp = aposplit.subsample_len([unknowncrit]+othercrit)
+    return (mcqlen, fullsamp)
+
+def mcquillan_rapid_rotator_fraction(
+    aposplit, rapidcrit="~Slow period", othercrit=[]):
+    '''Get the fraction of the data that are rapid rotators in McQuillan.
+
+    Returns a 2-tuple containing the number of objects in the subsample with
+    McQuillan periods shorter than 5 days, along with the total number of 
+    objects in the subsample.'''
+    mcqlen = aposplit.subsample_len([rapidcrit]+othercrit)
+    fullsamp = aposplit.subsample_len(othercrit)
     return (mcqlen, fullsamp)
 
 def not_dlsb_fraction(

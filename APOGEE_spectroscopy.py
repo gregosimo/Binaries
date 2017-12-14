@@ -696,7 +696,7 @@ class APOGEESplitter(KeplerSplitter):
         indexlen = len(np.unique(names))
         return indexlen
 
-def CombinedRotationSplitter(APOGEESplitter,McQuillanSplitter):
+class CombinedRotationSplitter(APOGEESplitter,McQuillanSplitter):
     '''A splitter for a dataset containing both APOGEE and McQuillan data.
 
     This splitter will be useful for unifying parts of the Kepler sample which
@@ -1111,3 +1111,4 @@ def combo_from_APOGEE_Splitter(aposplit):
     assert len(targs_with_mcq) == len(combined_table)
 
     combosplitter = CombinedRotationSplitter(combined_table)
+    return combosplitter
