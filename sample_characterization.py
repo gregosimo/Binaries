@@ -377,4 +377,14 @@ def generate_radius_column(
 
     The column to convert teff to radius should be given as Teffcol. The radius
     will be stored in the radcol column.'''
-    apotable[radcol] = teff_rad_conv(apotable[teffcol])
+    radius_column = teff_rad_conv(apotable[teffcol])
+    try:
+        colmask = radius_column.mask
+    except AttributeError:
+        pass
+    else:
+        if isinstance(colmask, np.bool_):
+            colmask = np.ones(len(radius_column)) * colmask
+            radius_column.mask = colmask
+
+    apotable[radcol] = radius_column
