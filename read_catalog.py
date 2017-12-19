@@ -309,6 +309,47 @@ def read_Dressing_Charbonneau_table(dcpath=paths.DRESSING_CHARBONNEAU_PROPS):
     dctable = Table.read(dcpath, format="fits")
     return dctable
 
+def read_El_Badry_Single_Stars(elb_single_path=paths.EL_BADRY_SINGLE):
+    '''Read in the single stars from the APOGEE binary analysis.
+
+    This table contains the 2MASS IDs for the stars which were determined to be
+    single from the spectral analysis.'''
+    singletable = Table.read(
+        elb_single_path, format="ascii.csv", data_start=0, names=["APOGEE_ID"])
+    return singletable
+
+def read_El_Badry_SB1(elb_sb1=paths.EL_BADRY_SB1):
+    '''Read in the SB1s from the APOGEE binary analysis.
+
+    This table contains the 2MASS IDs for the stars which were determined to be
+    single-lined spectroscopic binaries from the spectral analysis.'''
+    sb1table = Table.read(elb_sb1, format="ascii.csv")
+    return sb1table
+
+def read_El_Badry_SB2(elb_sb2=paths.EL_BADRY_SB2):
+    '''Read in the SB2s from the APOGEE binary analysis.
+
+    This table contains the 2MASS IDs for the stars which were determined to be
+    double-lined spectroscopic binaries from the spectral analysis.'''
+    sb2table = Table.read(elb_sb2, format="ascii.csv")
+    return sb2table
+
+def read_El_Badry_hidden_triples(elb_hidden_trip=paths.EL_BADRY_HIDDEN_TRIPLE):
+    '''Read in the SB2s with hidden triples from the APOGEE binary analysis.
+
+    This table contains the 2MASS IDs for the stars which were determined to be
+    double-lined spectroscopic binaries with RV trends indicating a hidden
+    third component from the spectral analysis.'''
+    triptable = Table.read(elb_hidden_trip, format="ascii.csv")
+    return triptable
+
+def read_El_Badry_SB3(elb_sb3=paths.EL_BADRY_SB3):
+    '''Read in the SB3s from the APOGEE binary analysis.
+
+    This table contains the 2MASS IDs for the stars which were determined to be
+    triple-lined spectroscopic binaries from the spectral analysis.'''
+    sb3table = Table.read(elb_sb3, format="ascii.csv")
+    return sb3table
 
 ###############################################################################
 # Joined catalogs #

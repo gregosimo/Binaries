@@ -60,6 +60,12 @@ TGAS_MCQUILLAN_APOGEE_TIDSYNC_PATH = (
 FLICKER_LOGG = HEAD_DIR / "flicker_loggs.txt"
 BRUNTT_PATH = HEAD_DIR / "Bruntt_vsini.vot"
 DRESSING_CHARBONNEAU_PROPS = HEAD_DIR / "Dressing_Charbonneau13.fits"
+EL_BADRY_SINGLE = HEAD_DIR / "Table_E1_all_single_star_ids.csv"
+EL_BADRY_SB1 = HEAD_DIR / "Table_E2_all_SB1_labels.csv"
+EL_BADRY_SB2 = HEAD_DIR / "Table_E3_all_binary_star_labels.csv"
+EL_BADRY_HIDDEN_TRIPLE = (
+    HEAD_DIR / "Table_E4_all_SB2s_hidden_third_component_labels.csv")
+EL_BADRY_SB3 = HEAD_DIR / "Table_E5_all_SB3_labels.csv"
 
 STAUFFER_VSINI_PATH = HEAD_DIR / "Stauffer_Hartmann_Table1.txt"
 

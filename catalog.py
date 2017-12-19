@@ -1482,3 +1482,69 @@ def KOI_indices(kiccol):
     koicat = catin.read_KOI_list()
     koi_indices = au.mark_selections_in_columns(kiccol, koicat["kepid"])
     return koi_indices
+
+###############################################################################
+# APOGEE Binaries #
+###############################################################################
+
+def APOGEE_Binary_Classification(tmID):
+    '''Classify the 2MASS IDs given according to the Binary Classification.
+
+    Make an array which classifies the list of APOGEE objects according to the
+    classes defined in the El-Badry et al (2017) study. These include the
+    classes:
+
+    * "Single" objects that show no signs of binarity
+    
+    * "SB1" for single-lined spectroscopic binaries which show RV variability.
+
+    * "SB2" for double-lined spectroscopic binaries.
+
+    * "Triple" for double-lined spectroscopic binaries that have a
+        hidden third component.
+
+    * "SB3" for triple-lined spectroscopic binaries.
+
+    * "N/A" for objects which were not analyzed as part of the study. This will
+      largely be due to the fact that they were observed after DR13.
+    '''
+    labelcol = np.zeros(len(tmID), dtype="U6")
+    singletable = catin.read_El_Badry_Single_Stars()
+    singleindices = au.mark_selections_in_columns(
+        tmID, singletable["APOGEE_ID"])
+    del(singletable)
+    sb1table = catin.read_El_Badry_SB1()
+    sb1indices = au.mark_selections_in_columns(
+        tmID, sb1table["APOGEE_ID"])
+    del(sb1table)
+    sb2table = catin.read_El_Badry_SB2()
+    sb2indices = au.mark_selections_in_columns(
+        tmID, sb2table["APOGEE_ID"])
+    del(sb2table)
+    tripletable = catin.read_El_Badry_hidden_triples()
+    tripleindices = au.mark_selections_in_columns(
+        tmID, tripletable["APOGEE_ID"])
+    del(tripletable)
+    sb3table = catin.read_El_Badry_SB3()
+    sb3indices = au.mark_selections_in_columns(
+        tmID, sb3table["APOGEE_ID"])
+    del(sb3table)
+
+    labelcol[singleindices] = "Single"
+    labelcol[sb1indices] = "SB1"
+    labelcol[sb2indices] = "SB2"
+    labelcol[tripleindices] = "Triple"
+    labelcol[sb3indices] = "SB3"
+
+    naindices = labelcol == ""
+    labelcol[naindices] = "N/A"
+
+    return labelcol
+
+def add_APOGEE_Binary_column(datatab, apidcol="APOGEE_ID", newcol="Binarity"):
+    '''Add a column corresponding to the spectral binarity of the system.
+
+    This function will add a column to datatab with the title of newcol. The
+    targets will be identified by the APOGEE_IDs in apidcol.'''
+    binarray = APOGEE_Binary_Classification(datatab[apidcol])
+    datatab[newcol] = binarray
