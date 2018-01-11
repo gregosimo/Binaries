@@ -76,6 +76,17 @@ APOGEE_ANCILLARY_TARGETS_TABLE = PROPOSAL_PATH / "ancillary_targets.txt"
 DR14_ALLVISIT_PATH = HEAD_DIR / "allVisit-l31c.2.fits"
 DR14_ALLSTAR_PATH = HEAD_DIR / "allStar-l31c.2.fits"
 
+# Modspec Run
+MODSPEC_FOLDER = HEAD_DIR / "Modspec"
+CALIB_FOLDER = MODSPEC_FOLDER / "Modspec_Calibration"
+MDM_DIR = HEAD_DIR / "Don_May_MDM_run"
+
+# RV Standards
+RV_STANDARD_SIMBAD = MDM_DIR / "Standard_SIMBAD.txt"
+RV_STANDARD_SOURCES = HEAD_DIR / "SIMBAD_Standard_References.txt"
+LCES_STANDARD_LIST = HEAD_DIR / "ajaa66cat1_mrt.txt"
+RV_STANDARD_MATRIX_FOLDER = MDM_DIR / "Standard_RVs"
+
 # SHORTCUT PATHS
 # These are for subsets of table that take a really long time to generate.
 # Since disk space is cheap, I think it will be much more valuable to just

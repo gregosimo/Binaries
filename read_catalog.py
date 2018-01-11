@@ -701,6 +701,29 @@ def read_MAST_file(resultfile):
     return results
 
 ###############################################################################
+# Radial Velocity Standards #
+###############################################################################
+
+def read_RV_SIMBAD(simpath=paths.RV_STANDARD_SIMBAD):
+    '''Read in the SIMBAD entry for the LCES standard stars.'''
+    standard_info = Table.read(
+        str(simpath), format="ascii.commented_header", header_start=0, 
+        data_start=4, data_end=-1, delimiter="|", 
+        fill_values=[("~", 0), ("", 0)], guess=False)
+    return standard_info
+
+def read_RV_References(refpath=paths.RV_STANDARD_SOURCES):
+    '''Read in the SIMBAD bibliographic sources.'''
+    bibinfo = Table.read(
+        str(refpath), format="ascii.fixed_width")
+    return bibinfo
+
+def read_LCES_targets(refpath=paths.LCES_STANDARD_LIST):
+    '''Read in the objects observed as part of the Keck/LCES survey.'''
+    lces_objs = Table.read(str(refpath), format="ascii.cds")
+    return lces_objs
+
+###############################################################################
 # Utilities #
 ###############################################################################
 

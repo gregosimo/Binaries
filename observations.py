@@ -1,10 +1,12 @@
 import random
+import os
 
 import numpy as np
 import numpy.core.defchararray as npstr
 import astropy_util as au
 from astropy.coordinates import SkyCoord
 from astropy.table import Table
+from astropy.io.fits import getval
 import astropy.units as u
 import matplotlib.pyplot as plt
 
@@ -14,6 +16,7 @@ import sed
 import path_config as paths
 import hrplots as hr
 
+obsnights = [1, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14]
 
 @au.shortcut_file(paths.SHORTCUT_MDM_NOMAGCUT)
 def select_targets_before_magcut():
@@ -489,3 +492,126 @@ def select_RV_nonvariable_targets():
 
     return mcq_observing
 
+def observed_standards(
+        datafolder=paths.CALIB_FOLDER, 
+        filetemplate="Night{0:d}_Standards_Calib.txt"):
+    '''Read in a set of observed standards.
+
+    Go through the files for each night and pick out the names of standards and
+    insert them into a set. The top data folder should be specified in data
+    folder. Under datafolder, should be a file specified by
+    filetemplate.format(n) which lists the standards observed for the night n.
+    '''
+    standard_names = set()
+    for n in obsnights:
+        standard_list = filetemplate.format(n)
+        with (datafolder / standard_list).open() as standards:
+            for standard in standards:
+                stdname = getval(str(datafolder / standard)[:-1], "OBJECT")
+                standard_names.add(stdname)
+    return standard_names
+
+def observed_standard_table(
+        datafolder=paths.CALIB_FOLDER,
+        filetemplate="Night{0:d}_Standards_Calib.txt"):
+    '''Get the SIMBAD table for objects which were specifically observed.'''
+    obs_standards = observed_standards(datafolder, filetemplate)
+    standard_table = catin.read_RV_SIMBAD()
+
+    obs_standard_table = au.extract_subtable_from_column(
+        standard_table, "typed ident", obs_standards)
+    assert obs_standards.issubset(standard_table["typed ident"])
+    return obs_standard_table
+
+def compact_standard(standname):
+    '''Compactify an MDM filename.'''
+    compact = os.path.splitext(os.path.splitext(
+        os.path.basename(standname))[0])[0].replace(
+            ".","").replace( "night", "n").replace("NIGHT", "N")
+    return compact
+
+# Maybe break this up into reading one night. And then use that to read several
+# nights.
+
+def assemble_rv_standard_crosscor_matrix(
+        night, datafolder=paths.CALIB_FOLDER,
+        standardtemplate="Night{0}_Standards_Linear.txt",
+        crosscortemplate="Night{0}_Standards_Cor_{1}.txt"):
+    '''Assemble the RV Standard cross-correlation from FXCor output in a night.
+
+    For the given night, go through all of the crosscortemplate files for each
+    standard and insert those into a matrix.'''
+    standardfile = standardtemplate.format(night)
+    fullvalues = []
+    with (datafolder / standardfile).open() as refstands:
+        for refstand in refstands:
+            crosscorfile = crosscortemplate.format(
+                night, compact_standard(refstand[:-1].upper()))
+            refvalues = []
+            with (datafolder / crosscorfile).open() as cor_measurements:
+                for cor in cor_measurements:
+                    firstl = cor.rindex("l")
+                    secondl = cor[:firstl].rindex("l")
+                    targnum = cor[secondl+1:secondl+4]
+                    tempnum = cor[firstl+1:firstl+4]
+                    if targnum != tempnum:
+                        vel_table = Table.read(
+                        str(datafolder / (cor[:-1] + ".txt")),
+                            format="ascii.commented_header", names=[
+                                "OBJECT", "IMAGE", "REF", "HJD", "AP",
+                                "CODES", "SHIFT", "HGHT", "FWHM", "TDR",
+                                "VOBS", "VREL", "VHELIO", "VERR"])
+                        refvalues.append(vel_table["VHELIO"][-1])
+                    else:
+                        refvalues.append(np.nan)
+            fullvalues.append(refvalues)
+    full_array = np.array(fullvalues)
+    return full_array
+
+
+
+
+def transfer_rv_standard_crosscor_to_matrix(
+        datafolder=paths.CALIB_FOLDER,
+        standardtemplate="Night{0}_Standards_Linear.txt",
+        crosscortemplate="Night{0}_Standards_Cor_{1}.txt",
+        outputfolder=paths.RV_STANDARD_MATRIX_FOLDER,
+        outputfiletemplate="Night{0}_Standards.npy"):
+    '''Write the matrix of standard radial velocities to files.
+
+    The RV standard matrix will be generated from reading the RVs from the
+    files under crosscortemplate for every standard and every night. The
+    standards observed in a night should be specified in standardtemplate. The
+    template filenames are assumed to be stored relative to datafolder.
+
+    The matrix of radial velocity standard measurements will be written to
+    files under outputfolder. The files will have the form of
+    outputfiletemplate, but will be formatted to contain the night number.
+    '''
+    for n in obsnights:
+        matrix = assemble_rv_standard_crosscor_matrix(
+            n, datafolder, standardtemplate, crosscortemplate)
+        np.save(str(outputfolder / outputfiletemplate.format(n)), matrix)
+
+def read_rv_standard_crosscor_matrix(
+        night, matrixfolder=paths.RV_STANDARD_MATRIX_FOLDER,
+        filetemplate="Night{0}_Standards.npy"):
+    '''Read the matrix of standard radial velocities for a given night.
+
+    Load the numpy matrix corresponding to radial velocity standard
+    measurements for the given night.'''
+    return np.load(str(matrixfolder / filetemplate.format(night)))
+
+def read_full_rv_standard_matrix(
+        matrixfolder=paths.RV_STANDARD_MATRIX_FOLDER,
+        filetemplate="Night{0}_Standards.npy"):
+    '''Read'''
+    # Each key should be the night of observation while each value should be
+    # a square matrix that corresponds to the measured RV of standard stars
+    # with respect to each other. Note that this means that diagonal elements
+    # should be undefined.
+    standard_matrices = {}
+    for n in obsnights:
+        standard_matrices[n] = read_rv_standard_crosscor_matrix(
+            n, matrixfolder, filetemplate)
+    return standard_matrices
