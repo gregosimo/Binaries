@@ -606,7 +606,12 @@ def read_rv_standard_crosscor_matrix(
 def read_full_rv_standard_matrix(
         matrixfolder=paths.RV_STANDARD_MATRIX_FOLDER,
         filetemplate="Night{0}_Standards.npy"):
-    '''Read'''
+    '''Read the full standard matrix for a given night.
+    
+    The guide to correctly accessing the various parts of the matrix are that
+    horizontal rows ([0,:]) are measurements of all objects with a given 
+    template. And vertical columns ([:, 0]) are measurements of a given object
+    with all of the templates.'''
     # Each key should be the night of observation while each value should be
     # a square matrix that corresponds to the measured RV of standard stars
     # with respect to each other. Note that this means that diagonal elements
@@ -669,16 +674,14 @@ def plot_standard_radial_velocities(n, min_jk=0.23, max_jk=0.71):
     J-K color.'''
     standnames = read_night_standard_names(n)
     standardrvs = read_rv_standard_crosscor_matrix(n)
-    standardtable = catin.read_RV_SIMBAD()
+    nighttable = custom_standard_subtable(standnames)
 
-    true_rvs = np.array([standardtable["radvel"][np.argwhere(
-        standardtable["typed ident"] == name)[0][0]] for name in standnames])
-    jkcolor = standardtable["Mag J"] - standardtable["Mag K"]
+    true_rvs = nighttable["radvel"]
+    jkcolor = nighttable["Mag J"] - nighttable["Mag K"]
     cmap = plt.get_cmap("cool")
     mplnorm = Normalize(vmin=min_jk, vmax=max_jk)
     normed_jks = mplnorm(jkcolor)
-    jkarray = np.array([normed_jks[np.argwhere(
-        standardtable["typed ident"] == name)[0][0]] for name in standnames])
+    jkarray = normed_jks
 
     for i in range(len(standnames)):
         plt.plot(true_rvs, standardrvs[:,i], color=cmap(jkarray[i]), marker="o",
@@ -693,22 +696,38 @@ def plot_standard_radial_velocities(n, min_jk=0.23, max_jk=0.71):
     plt.xlabel("Catalog RV")
     plt.ylabel("Measured RV")
 
+def night_standard_subtable(n):
+    '''Get the standard table for only standards observed on a given night.'''
+    obs_stand = read_night_standard_names(n)
+    subtable = custom_standard_subtable(obs_stand)
+    return subtable
+
+def custom_standard_subtable(standards):
+    '''Get a subtable for given standards.
     
+    This function returns a subtable in the order that the list of standards
+    were given.'''
+    standard_table = catin.read_RV_SIMBAD()
+    rows = []
+    for standname in standards:
+        standrow = np.argwhere(standard_table["typed ident"] == standname)
+        assert standrow.shape == (1, 1)
+        rows.append(standard_table[standrow[0][0]])
+    subtable = Table(rows=rows, names=standard_table.colnames)
+    assert np.all(subtable["typed ident"] == standards)
+
+    return subtable
 
 # Calibrating Radial Velocities
-def pick_median_JK(standardlist):
-    '''Out of the given list of standards, pick the one with the median J-K.'''
-
-    standard_table = catin.read_RV_SIMBAD()
-    subtable = au.extract_subtable_from_column(
-        standard_table, "typed ident", standardlist)
-    assert set(standardlist) == set(subtable["typed ident"])
+def pick_median_JK(n):
+    '''For a given night, pick the index with the median J-K.'''
+    subtable = night_standard_subtable(n)
     subtable["J-K"] = subtable["Mag J"] - subtable["Mag K"]
     subtable.sort("J-K")
     if len(subtable) % 2 == 1:
-        return subtable["typed ident"][len(subtable) // 2]
+        return len(subtable) // 2
     else:
-        return subtable["typed ident"][len(subtable) / 2]
+        return len(subtable) / 2
 
 def pick_night_calibrator(
         n, calibfunc=pick_median_JK, rvfolder=paths.RV_STANDARD_MATRIX_FOLDER,
@@ -721,11 +740,8 @@ def pick_night_calibrator(
     and then returns the name to be calibrated.'''
     if n == 7:
         return pick_night_calibrator(6)
-    names = np.loadtxt(
-        str(rvfolder / namefiletemplate.format(n)))
-    assert len(set(names)) == len(names)
-    calibname = calibfunc(names)
-    return np.argwhere[0][0]
+    calibname = calibfunc(n)
+    return calibname
 
 def standard_rv_matrix_index_corrections(matrix, calibindex, cov=False):
     '''Return the fits between rows of the matrix and the calibration row.
@@ -736,8 +752,15 @@ def standard_rv_matrix_index_corrections(matrix, calibindex, cov=False):
 
     If desired, a covariance matrix will also be returned as part of a tuple. 
     '''
-    linefit = np.polyfit(matrix[:,calibindex], matrix, 1, cov=cov)
-    return linefit
+    fitlist = []
+    assert matrix.shape[0] == matrix.shape[1]
+    calibmask = np.isfinite(matrix[calibindex, :])
+    for i in range(matrix.shape[0]):
+        rowmask = np.logical_and(np.isfinite(matrix[i, :]), calibmask)
+        linefit = np.polyfit(
+            matrix[calibindex,:][rowmask], matrix[i,:][rowmask], 1, cov=cov)
+        fitlist.append(linefit)
+    return np.transpose(np.vstack(fitlist))
 
 
 def calibrate_standard_rv_matrix_to_index(matrix, calibindex):
@@ -749,7 +772,7 @@ def calibrate_standard_rv_matrix_to_index(matrix, calibindex):
     '''
     linefit = standard_rv_matrix_index_corrections(
         matrix, calibindex, cov=False)
-    self_calib = matrix - linefit[1,:]
+    self_calib = matrix - linefit[1,:][:,np.newaxis]
     return self_calib
 
 def self_calibrated_rv_matrix_corrections(matrix, truervs):
@@ -764,7 +787,7 @@ def self_calibrated_rv_matrix_corrections(matrix, truervs):
     rv_nodiags = np.broadcast_to(truervs, (len(truervs), len(truervs)))[
         np.logical_not(np.identity(len(truervs)))]
 
-    fullfit = polyfit(rv_nodiags.flatten(), matrix_nodiags.flatten(), 1)
+    fullfit = np.polyfit(rv_nodiags.flatten(), matrix_nodiags.flatten(), 1)
     return fullfit
 
 def standard_rv_matrix_full_correction(matrix, rvvalues, calibindex):
@@ -780,3 +803,63 @@ def standard_rv_matrix_full_correction(matrix, rvvalues, calibindex):
     fullfit = self_calibrated_rv_matrix_corrections(self_calib, rvvalues)
     return fullfit
     
+def write_RV_template_correction_table(
+        rvfolder=paths.RV_STANDARD_MATRIX_FOLDER, 
+        outputfile="Calibration_Table.txt"):
+    '''Write a table which contains the template and correction for each night.
+
+    This table will be used as the input for actually calibrating the Kepler
+    targets so that they are all on the same RV system.'''
+    corrections= []
+    names = []
+    for n in obsnights:
+        if n == 7:
+            corrections.append(corrections[-1])
+            names.append(names[-1])
+        else:
+            standnames = read_night_standard_names(n)
+            standinfo = custom_standard_subtable(standnames)
+            standmatrix = read_rv_standard_crosscor_matrix(n)
+            nightrvs = standinfo["radvel"]
+
+            calib_index = pick_night_calibrator(n)
+            names.append(standnames[calib_index])
+            cor = standard_rv_matrix_full_correction(
+                standmatrix, nightrvs, calib_index)
+            corrections.append(cor[1])
+
+    calibtable = Table([obsnights, names, corrections], names=(
+        "Night", "Template", "Correction"))
+    calibtable.write(str(rvfolder / outputfile), format="ascii.fixed_width",
+                     formats={"Correction": ".2f"})
+
+def read_RV_template_correction_table(
+        rvfolder=paths.RV_STANDARD_MATRIX_FOLDER,
+        outputfile="Calibration_Table.txt"):
+    '''Read in the table with template and corrections for each night.
+
+    This table is useful as input for actually calibrating the Kepler targets
+    so that they are all on the same RV system.'''
+    cortable = Table.read(str(rvfolder / outputfile), format="ascii.fixed_width")
+    return cortable
+
+def plot_corrected_standards(n):
+    '''Plot measured RVs against catalog RVs.'''
+    standnames = read_night_standard_names(n)
+    standinfo = custom_standard_subtable(standnames)
+    rawrv = read_rv_standard_crosscor_matrix(n)
+    calib_index = pick_night_calibrator(n)
+    corrv = calibrate_standard_rv_matrix_to_index(rawrv, calib_index)
+
+    cortable = read_RV_template_correction_table()
+    corvalue = cortable["Correction"][cortable["Night"] == n]
+
+    calibrated_rv = corrv - corvalue
+
+    nightrvs = standinfo["radvel"]
+    newfit = self_calibrated_rv_matrix_corrections(calibrated_rv, nightrvs)
+
+    residuals = calibrated_rv - newfit[1]
+
+    plt.plot(nightrvs, residuals, 'k.')
+    plt.plot(nightrvs, newfit[0]*nightrvs, 'k-')
