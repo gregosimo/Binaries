@@ -1460,7 +1460,7 @@ def convert_to_colors(
 
 def mass_to_band_DSEP_interpolator(
     band, age=1.5, metallicity=0.0, bands=1, Y=1, afe=2, lowT=3000,
-    redden_EBV=0.0, D=10):
+    redden_EBV=0.0, D=10, minlogg=4.1, highT=6000):
     '''Return function to interpolate a magnitude for a given mass.
 
     This function returns an interpolator to map mass and magnitude in the
@@ -1470,11 +1470,11 @@ def mass_to_band_DSEP_interpolator(
     try:
         interpolator = DSEP_interpolation(
             "M/Mo", band, age=age, metallicity=metallicity, bands=bands, Y=Y,
-            afe=afe, lowT=lowT)
+            afe=afe, lowT=lowT, minlogg=minlogg, highT=highT)
     except IndexError:
         interpolator = DSEP_interpolation(
             "M/Mo", band[0], age=age, metallicity=metallicity, bands=bands,
-            Y=Y, afe=afe, lowT=lowT)
+            Y=Y, afe=afe, lowT=lowT, minlogg=minlogg, highT=highT)
 
     # I hope weird bugs don't result from this.
     interpolator.y = redden_mag(band, interpolator.y, redden_EBV)
@@ -2993,6 +2993,45 @@ def sum_binary_mag(mag1, mag2):
     order to make the combined magnitude in that band.'''
     summed_mag = mag1 - 2.5 * np.log10(1 + 10**(-0.4 * (mag2 - mag1)))
     return summed_mag
+
+def binary_luminosity_ratio_evolution():
+    '''Plot the evolution of the luminosity ratio for a high-mass q=0.95 binary
+    and a low-mass q=0.95 binary.
+    
+    This function should hopefully explain why lots of binary contamination
+    occurs in the cool dwarf regime, but not in the asteroseismic dwarf regime.'''
+    ages = np.concatenate([np.arange(1, 5, 0.25), np.arange(5, 10, 0.5)])
+    primary_masses = np.array([0.9, 1.2])
+    massratio = 0.95
+    lowmass_absmags = np.zeros(len(ages))
+    highmass_absmags = np.zeros(len(ages))
+
+    for i, age in enumerate(ages):
+        interp = mass_to_band_DSEP_interpolator(
+            "H", age=age, minlogg=3.5, highT=7000)
+
+        lowprimary = interp(primary_masses[0])
+        lowsecondary = interp(primary_masses[0]*massratio)
+        lowmass_absmags[i] = lowprimary - lowsecondary
+
+        try:
+            highprimary = interp(primary_masses[1])
+            highsecondary = interp(primary_masses[1]*massratio)
+        except OutOfBoundsError:
+            highmass_absmags[i] = np.nan
+        else: 
+            highmass_absmags[i] = highprimary - highsecondary
+        
+    plt.plot(ages, 10**(-highmass_absmags/2.5), 'b-', label="M=1.2")
+    plt.plot(ages, 10**(-lowmass_absmags/2.5), 'r-', label="M=0.8")
+    plt.ylabel("L1/L2")
+    plt.xlabel("Age (Gyr)")
+    plt.title("Differential luminosity for q={0:0.02f} components".format(
+        massratio))
+    plt.legend(loc="upper right")
+
+
+
     
 if __name__ == "__main__":
 
