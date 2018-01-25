@@ -388,3 +388,41 @@ def generate_radius_column(
             radius_column.mask = colmask
 
     apotable[radcol] = radius_column
+
+###############################################################################
+# Asteroseismic log(g) determination #
+###############################################################################
+
+def asteroseismic_logg_check(apokasc_splitter):
+    '''Use the APOKASCSplitter functions to plot the log(g) uncertainty.
+
+    This function will plot the difference between the ASPCAP and asteroseismic
+    log(g) for the dwarf sample.'''
+
+    good_targets = apokasc_splitter.subsample(["Asteroseismic Dwarfs", "Good"])
+    warn_targets = apokasc_splitter.subsample(["Asteroseismic Dwarfs", "Warn"])
+
+    offgrid_indices = catalog.search_in_ASPCAPFLAGS(
+        warn_targets["ASPCAPFLAGS"], "VMICRO_WARN")
+    offgrid_targets = warn_targets[offgrid_indices]
+    colorte_targets = warn_targets[~offgrid_indices]
+
+    good_loggdiff = good_targets["LOGG_FIT"] - good_targets["LOGG_DW"]
+    offgrid_loggdiff = offgrid_targets["LOGG_FIT"] - offgrid_targets["LOGG_DW"]
+    colorte_loggdiff = colorte_targets["LOGG_FIT"] - colorte_targets["LOGG_DW"]
+
+    plt.plot(
+        good_targets["TEFF_COR"], good_loggdiff, 'k.', 
+        label="Good APOKASC Dwarfs")
+    plt.plot(
+        colorte_targets["TEFF_COR"], colorte_loggdiff, 'm.', 
+        label="COLORTE_WARN")
+    plt.plot(
+        offgrid_targets["TEFF_COR"], offgrid_loggdiff, 'r.', 
+        label="COLORTE_WARN")
+    hr.invert_x_axis()
+    plt.xlabel("APOGEE Teff (K)")
+    plt.ylabel("ASPCAP - Asteroseismic log(g) Difference")
+    plt.legend()
+
+

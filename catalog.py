@@ -347,13 +347,20 @@ def split_McQuillan_periods(fullsamp, kiccol):
 # APOGEE filters #
 ##################
 
+def invalid_indices(apotable, colname, maskvalue=APOGEE_NULL):
+    '''Mark the indices where the column values are mask values.'''
+    badindices = au.mark_selections_in_columns(apotable[colname], [maskvalue])
+
+    return badindices
+
 def filter_invalid_APOGEE_entries(apotable, colname, maskvalue=APOGEE_NULL):
     '''Remove rows from apotable where column values are the mask values.
 
     This will filter apotable where only the rows that do not have the mask
     value in the column will be returned.'''
-    filtered_table = au.filter_column_from_subtable(apotable, colname, 
-                                                    [maskvalue])
+    badindices = invalid_indices(apotable, colname, maskvalue=maskvalue)
+    filtered_table = apotable[~badindices]
+                                         
     add_cut_metadata(filtered_table,
         "Removed masked entries in {0}".format(colname))
     return filtered_table
@@ -1245,6 +1252,15 @@ def apogee_filter_quality(apotable, quality=("good", "bad", "warn"),
 
     return remaining_table
 
+def search_in_ASPCAPFLAGS(aspcapflags, flagval):
+    '''Index entries which have flagval in aspcapflags.
+
+    Returns an index array which indicates which values in aspcapflags have the
+    string given in flagval within. This helps with general manipulation of the
+    aspcapflags parameter without having to pull up the bitmask array.'''
+    indexarr = npstr.find(aspcapflags, flagval) >= 0
+    return indexarr
+
 def bad_ASPCAP_indices(aspcapflags, warn=False):
     '''Picks bad ASPCAP flags from flag array.
 
@@ -1252,12 +1268,12 @@ def bad_ASPCAP_indices(aspcapflags, warn=False):
     no ASPCAP result at all. If the warn keyword is given, STAR_WARN flags are 
     also marked as bad.
     '''
-    bad_indices = npstr.find(aspcapflags, "STAR_BAD") >= 0
+    bad_indices = search_in_ASPCAPFLAGS(aspcapflags, "STAR_BAD")
     bad_indices = np.logical_or(
-        bad_indices, npstr.find(aspcapflags, "NO_ASPCAP_RESULT") >= 0)
+        bad_indices, search_in_ASPCAPFLAGS(aspcapflags, "NO_ASPCAP_RESULT"))
     if warn:
-        bad_indices = np.logical_or(bad_indices, npstr.find(
-            aspcapflags, "STAR_WARN") >= 0)
+        bad_indices = np.logical_or(bad_indices, search_in_ASPCAPFLAGS(
+            aspcapflags, "STAR_WARN"))
 
     return bad_indices
 
@@ -1265,7 +1281,7 @@ def warn_VSINI_indices(aspcapflags):
     '''Picks ASPCAP flags which indicate a VSINI warning.
 
     These are objects which have the VSINI_WARN flag enabled.'''
-    warn_indices = npstr.find(aspcapflags, "VSINI_WARN") >= 0
+    warn_indices = search_in_ASPCAPFLAGS(aspcapflags, "VSINI_WARN")
     return warn_indices
 
 def good_aspcap_fits(apotable, aspcapcol="ASPCAPFLAG"):

@@ -696,6 +696,49 @@ class APOGEESplitter(KeplerSplitter):
         indexlen = len(np.unique(names))
         return indexlen
 
+class APOKASCSplitter(APOGEESplitter):
+    '''A splitter for the APOKASC dataset.'''
+
+    def __init__(self, data=None):
+        '''Initialize a splitter of APOKASC data.
+        
+        If the data parameter is passed, then it will be set to the full data
+        sample. If not, then it will be read in manually.'''
+        if not data:
+            data = catin.APOKASC_with_KIC_stelparms()
+        super().__init__(data)
+
+    def split_asteroseismic_dwarfs(
+        self, dwarfcol="RADIUS_DW", splitnames=(
+            "Asteroseismic Dwarfs", "Asteroseismic Giants"), 
+        apodwarf_crit="Asteroseismic Dwarf"):
+        '''Split stars with dwarf pipeline asteroseismic parameters.
+
+        This function will essentially split off targets that don't have valid
+        values in the dwarfcol column. The dwarfcol column should have numbers
+        for objects that have been run through the dwarf pipeline, and null for
+        objects that don't.'''
+        invalid = catalog.invalid_indices(self.data, dwarfcol)
+        apodwarfs = np.logical_not(invalid)
+        self.indices[splitnames[0]] = apodwarfs
+        self.indices[splitnames[1]] = invalid
+        self.splitgroups[apodwarf_crit] = set(splitnames)
+        self._check_indices_partition(apodwarf_crit)
+
+    def subsample_len(self, namelist):
+        '''Get the size of a subsample.
+
+        This function automatically gets the size of a subsample in a fast way
+        as opposed to running subsample() and getting its length.
+        
+        APOGEE data specifically can have duplicate entries because of the
+        targeting. This method will make sure to only return number of unique
+        entries in the subsample.'''
+        indices = self._subsample_indices(namelist)
+        names = self.data["2MASS_ID"][indices]
+        indexlen = len(np.unique(names))
+        return indexlen
+
 class CombinedRotationSplitter(APOGEESplitter,McQuillanSplitter):
     '''A splitter for a dataset containing both APOGEE and McQuillan data.
 
@@ -853,6 +896,15 @@ def initialize_combined_rotation_sample(aposplit):
 
     aposplit.split_by_ASPCAP_flags()
 
+def initialize_asteroseismic_sample(aposplit):
+    '''Initialize the sample for asteroseismic targets.
+    
+    This will set aside the asteroseismic dwarfs from the rest of the sample.'''
+    # First split the asteroseismic targets
+    aposplit.split_asteroseismic_dwarfs()
+
+    # Split  by quality.
+    aposplit.split_by_ASPCAP_flags()
 
 def gen_samp(name):
     '''Function to generate the given sample objects which was broken down.'''
