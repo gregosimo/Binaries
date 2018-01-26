@@ -415,20 +415,38 @@ def asteroseismic_logg_check(apokasc_splitter):
             plt.plot(good_targets["TEFF_COR"], good_loggdiff, 'k.', 
                      label="Good APOKASC Dwarf")
         else:
-            # Build the color list
-            colorlist = np.array([0, 0, 0, 1])
-            colorbases = {
-                "TEFF_WARN": np.array([255.0, 0, 0, 0])/255, 
-                "VSINI_WARN": np.array([0, 255.0, 0, 0])/255,
-                "COLORTE_WARN": np.array([0, 0, 255.0, 0])/255,
-                "VMICRO_WARN": np.array([0, 0, 0, -0.4]),
-                "LOGG_WARN": np.zeros(4)}
-            marker="o"
-            for warnlabel in flags:
-                colorlist = colorlist + colorbases[warnlabel]
+            # Since I want the single-entries for labeling, even though most of
+            # them don't occur by themselves, I will make a flag that should
+            # trigger if the criterion is specified, but there are elements in
+            # the array that fit it.
+            at_least_teff_or_colorte = False
+            not_both_logg_and_vsini = False
+            # To denote the TEFF_WARN flag, set the color to 0.0 of the
+            # colormap. To denote the COLORTE_WARN flag, set the color to 1.0
+            # of the colormap. For both, set the color to 0.5.
+            cmap = plt.cm.get_cmap("OrRd")
+            if "TEFF_WARN" in flags and "COLORTE_WARN" in flags:
+                markerfacecolor = cmap(0.6)
+            elif "TEFF_WARN" in flags:
+                markerfacecolor = cmap(0.2)
+            elif "COLORTE_WARN" in flags:
+                markerfacecolor = cmap(1.0)
+            else:
+                at_least_teff_or_colorte = True
 
-            if "LOGG_WARN" in flags:
+            if "VMICRO_WARN" in flags:
+                markeredgewidth=2
+            else:
+                markeredgewidth=1
+
+            if "LOGG_WARN" in flags and "VSINI_WARN" in flags:
+                not_both_logg_and_vsini = True
+            elif "LOGG_WARN" in flags:
                 marker="s"
+            elif "VSINI_WARN" in flags:
+                marker="^"
+            else:
+                marker="o"
 
             # Now set the label in the correct place
             if len(flags) == 1:
@@ -446,14 +464,47 @@ def asteroseismic_logg_check(apokasc_splitter):
 
             smallwarn = warn_targets[indexlist]
             warn_loggdiff = smallwarn["LOGG_FIT"] - smallwarn["LOGG_DW"]
-            plt.plot(smallwarn["TEFF_COR"], warn_loggdiff, color=colorlist,
-                     marker=marker, label=label, ls="none")
 
+            if len(smallwarn) > 0:
+                if at_least_teff_or_colorte:
+                    raise ValueError(
+                        "Need at least TEFF_WARN or COLORTE_WARN.")
+                if not_both_logg_and_vsini:
+                    raise ValueError(
+                        "Can't have both LOGG_WARN and VSINI_WARN.")
 
+            plt.plot(smallwarn["TEFF_COR"], warn_loggdiff, 
+                     markerfacecolor=markerfacecolor, marker=marker, 
+                     label=label, ls="none", markeredgewidth=markeredgewidth, 
+                     mec="k", markersize=9)
 
     hr.invert_x_axis()
     plt.xlabel("APOGEE Teff (K)")
     plt.ylabel("ASPCAP - Asteroseismic log(g) Difference")
     plt.legend()
+
+def asteroseismic_hr_check(apokascsplitter):
+    '''Compare HR diagram location for APOGEE and asteroseismic logg.
+
+    Plot the asteroseismic and spectroscopic log(g) on the same scale and see
+    if the asteroseismic targets follow the track that they ought in
+    spectroscopic space as well as in asteroseismic space.
+    
+    This requires the splitter to have quality determinations, as well as
+    spectroscopic determinations of dwarfs.'''
+    full_dwarfs = apokascsplitter.subsample(["~Bad", "~Spectroscopic Giants"])
+    astero_dwarfs = apokascsplitter.subsample(["Asteroseismic Dwarfs", "~Bad"])
+
+    hr.logg_teff_plot(full_dwarfs["TEFF_COR"], full_dwarfs["LOGG_FIT"], 'k.',
+                      label="APOGEE")
+    hr.logg_teff_plot(astero_dwarfs["TEFF_COR"], astero_dwarfs["LOGG_FIT"],
+                      'ro', label="Spectroscopic log(g)")
+    hr.logg_teff_plot(astero_dwarfs["TEFF_COR"], astero_dwarfs["LOGG_DW"],
+                      'b*', label="Asteroseismic log(g)")
+
+    plt.xlabel("APOGEE Teff (K)")
+    plt.ylabel("Log(g)")
+    plt.legend(loc="lower right")
+
 
 
