@@ -33,6 +33,7 @@ rapid_fraction_multiple_limits:
 import numpy as np
 import matplotlib.pyplot as plt
 from astropy.modeling import models, fitting
+import astropy_util as au
 
 import catalog
 import hrplots as hr
@@ -398,28 +399,58 @@ def asteroseismic_logg_check(apokasc_splitter):
 
     This function will plot the difference between the ASPCAP and asteroseismic
     log(g) for the dwarf sample.'''
+    formats = {"LOGG_WARN": {"marker": "s"}, "COLORTE_WARN": {"markersize": 4},
+               "VSINI_WARN": {"marker": "o"}, "TEFF_WARN": {"color": "r"},
+               "VMICRO_WARN": {"alpha": 1}}
 
     good_targets = apokasc_splitter.subsample(["Asteroseismic Dwarfs", "Good"])
     warn_targets = apokasc_splitter.subsample(["Asteroseismic Dwarfs", "Warn"])
 
-    offgrid_indices = catalog.search_in_ASPCAPFLAGS(
-        warn_targets["ASPCAPFLAGS"], "VMICRO_WARN")
-    offgrid_targets = warn_targets[offgrid_indices]
-    colorte_targets = warn_targets[~offgrid_indices]
+    warnindices = {
+        k: catalog.search_in_ASPCAPFLAGS(warn_targets["ASPCAPFLAGS"], k) for k 
+        in formats.keys()}
+    for flags in au.powerset(formats.keys()):
+        if not flags:
+            good_loggdiff = good_targets["LOGG_FIT"] - good_targets["LOGG_DW"]
+            plt.plot(good_targets["TEFF_COR"], good_loggdiff, 'k.', 
+                     label="Good APOKASC Dwarf")
+        else:
+            # Build the color list
+            colorlist = np.array([0, 0, 0, 1])
+            colorbases = {
+                "TEFF_WARN": np.array([255.0, 0, 0, 0])/255, 
+                "VSINI_WARN": np.array([0, 255.0, 0, 0])/255,
+                "COLORTE_WARN": np.array([0, 0, 255.0, 0])/255,
+                "VMICRO_WARN": np.array([0, 0, 0, -0.4]),
+                "LOGG_WARN": np.zeros(4)}
+            marker="o"
+            for warnlabel in flags:
+                colorlist = colorlist + colorbases[warnlabel]
 
-    good_loggdiff = good_targets["LOGG_FIT"] - good_targets["LOGG_DW"]
-    offgrid_loggdiff = offgrid_targets["LOGG_FIT"] - offgrid_targets["LOGG_DW"]
-    colorte_loggdiff = colorte_targets["LOGG_FIT"] - colorte_targets["LOGG_DW"]
+            if "LOGG_WARN" in flags:
+                marker="s"
 
-    plt.plot(
-        good_targets["TEFF_COR"], good_loggdiff, 'k.', 
-        label="Good APOKASC Dwarfs")
-    plt.plot(
-        colorte_targets["TEFF_COR"], colorte_loggdiff, 'm.', 
-        label="COLORTE_WARN")
-    plt.plot(
-        offgrid_targets["TEFF_COR"], offgrid_loggdiff, 'r.', 
-        label="COLORTE_WARN")
+            # Now set the label in the correct place
+            if len(flags) == 1:
+                label = flags[0]
+            else:
+                label=""
+
+
+            indexlist = np.ones(len(warn_targets))
+            for k, v in warnindices.items():
+                if k in flags:
+                    indexlist = np.logical_and(indexlist, v)
+                else:
+                    indexlist = np.logical_and(indexlist, np.logical_not(v))
+
+            smallwarn = warn_targets[indexlist]
+            warn_loggdiff = smallwarn["LOGG_FIT"] - smallwarn["LOGG_DW"]
+            plt.plot(smallwarn["TEFF_COR"], warn_loggdiff, color=colorlist,
+                     marker=marker, label=label, ls="none")
+
+
+
     hr.invert_x_axis()
     plt.xlabel("APOGEE Teff (K)")
     plt.ylabel("ASPCAP - Asteroseismic log(g) Difference")
