@@ -835,6 +835,8 @@ def initialize_Jen_Sample_Splitter(aposplit):
 
     aposplit.split_by_ASPCAP_flags()
 
+    aposplit.split_apogee_targeting()
+
 def initialize_apogee_dwarf_rotation_sample(aposplit):
     '''Initialize the dwarf rotation sample.
 
@@ -902,6 +904,11 @@ def initialize_asteroseismic_sample(aposplit):
     This will set aside the asteroseismic dwarfs from the rest of the sample.'''
     # First split the asteroseismic targets
     aposplit.split_asteroseismic_dwarfs()
+
+    # Now split the spectroscopic targets
+    aposplit.split_logg("LOGG_FIT", [3.5, 4.0], (
+        "Spectroscopic dwarfs", "Spectroscopic subgiants", 
+        "Spectroscopic giants"), logg_crit="APOGEE logg")
 
     # Split  by quality.
     aposplit.split_by_ASPCAP_flags()
