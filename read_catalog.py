@@ -14,7 +14,7 @@ import catalog
 # Reading Kepler/APOGEE catalogs #
 ###############################################################################
 
-@au.memoized
+#@au.memoized
 def read_APOKASC_catalog(
     filepath=paths.APOKASC_PATH):
     '''Reads in the APOKASC catalog.
@@ -31,7 +31,7 @@ def read_EHK_catalog(filepath=paths.EHK_PATH):
         names=["RA", "Dec", "U", "U_err", "B", "B_err", "V", "V_err"] )
     return cat
 
-@au.memoized
+#@au.memoized
 def read_McQuillan_catalog(filepath=paths.MCQUILLAN_CATALOG):
     '''Reads in the McQuillan catalog.
 
@@ -522,7 +522,7 @@ def dr14_with_KIC_stelparms(
     return apokic
 
 #@au.shortcut_file(paths.SHORTCUT_APOKASC_KIC)
-@au.memoized
+#@au.memoized
 def APOKASC_with_KIC_stelparms(
     apopath=paths.APOKASC_PATH, kicpath=paths.KIC_CATALOG,
     origpath=paths.ORIG_KIC_ABRIDGED):

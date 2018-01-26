@@ -29,7 +29,7 @@ M67_EPIC = M67_PATH / "M67_WOCS_EPIC_match.txt"
 
 MCQUILLAN_CATALOG = HEAD_DIR / "McQuillan.fit"
 MCQUILLAN_NONDETECTIONS = HEAD_DIR / "McQuillan_nondet.fit"
-APOKASC_PATH = HEAD_DIR / "APOKASC_cat_v4.2.3.fits"
+APOKASC_PATH = HEAD_DIR / "APOKASC_cat_v4.2.4.fits"
 KIC_PULSATORS = HEAD_DIR / "pulsators.kic"
 UKIRT_RESULTS = HEAD_DIR / "ukirt_results.csv.gz"
 RAFA_SAVITA_PERIODS = HEAD_DIR / "Prot_OK_noCP.txt"
