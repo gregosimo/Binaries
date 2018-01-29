@@ -37,8 +37,8 @@ import astropy_util as au
 
 import catalog
 import hrplots as hr
-import APOGEE_spectroscopy as apo
 import biovis_colors as bc
+import data_splitting as data
 
 ################################################################################
 # Generate binned distributions #
