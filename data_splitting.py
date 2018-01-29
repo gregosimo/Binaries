@@ -846,6 +846,10 @@ def initialize_apogee_dwarf_rotation_sample(aposplit):
     aposplit.split_logg(
         "logg", [3.6, 4.2], ["Huber giant", "Huber subgiant", "Huber dwarf"],
         logg_crit="Huber logg")
+    aposplit.split_logg(
+        "LOGG_FIT", [3.6, 4.2], 
+        ["APOGEE Giant", "APOGEE Subgiant", "APOGEE Dwarf"], 
+        logg_crit="APOGEE logg")
 
     aposplit.split_teff(
         "TEFF", 5250, ["ZAMS", "Age-evolved"], teff_crit="Age Evolution")
