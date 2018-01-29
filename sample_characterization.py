@@ -38,6 +38,7 @@ import astropy_util as au
 import catalog
 import hrplots as hr
 import APOGEE_spectroscopy as apo
+import biovis_colors as bc
 
 ################################################################################
 # Generate binned distributions #
@@ -495,12 +496,15 @@ def asteroseismic_hr_check(apokascsplitter):
     full_dwarfs = apokascsplitter.subsample(["~Bad", "~Spectroscopic Giants"])
     astero_dwarfs = apokascsplitter.subsample(["Asteroseismic Dwarfs", "~Bad"])
 
-    hr.logg_teff_plot(full_dwarfs["TEFF_COR"], full_dwarfs["LOGG_FIT"], 'k.',
-                      label="APOGEE")
-    hr.logg_teff_plot(astero_dwarfs["TEFF_COR"], astero_dwarfs["LOGG_FIT"],
-                      'ro', label="Spectroscopic log(g)")
-    hr.logg_teff_plot(astero_dwarfs["TEFF_COR"], astero_dwarfs["LOGG_DW"],
-                      'b*', label="Asteroseismic log(g)")
+    hr.logg_teff_plot(
+        full_dwarfs["TEFF_COR"], full_dwarfs["LOGG_FIT"], color=bc.black, 
+        linestyle="", marker=".", label="APOGEE")
+    hr.logg_teff_plot(
+        astero_dwarfs["TEFF_COR"], astero_dwarfs["LOGG_FIT"], color=bc.violet, 
+        linestyle="", marker="o", label="Spectroscopic log(g)")
+    hr.logg_teff_plot(
+        astero_dwarfs["TEFF_COR"], astero_dwarfs["LOGG_DW"], color=bc.green,
+        linestyle="", marker="*", ms=9, label="Asteroseismic log(g)")
 
     plt.xlabel("APOGEE Teff (K)")
     plt.ylabel("Log(g)")
