@@ -432,6 +432,16 @@ class KeplerSplitter(DataSplitter):
         self.splitgroups[quarter_crit] = set(splitnames)
         self._check_indices_partition(quarter_crit)
 
+def split_original_KIC_params(
+    self, paramcol="KIC Teff", 
+    names=("Orig KIC Present", "Orig KIC Not Present"), crit="Orig KIC"):
+    '''Split the data based on the presence of original KIC parameters.
+
+    Because the DataSplitter does not handle null values well, It may be useful
+    to automatically split by the presence of original KIC params. One useful
+    aspect is that the dataset can be split by KIC params after the entries
+    with KIC parameters are included.'''
+
 class McQuillanSplitter(KeplerSplitter):
     '''Keep an organized database of various cuts on McQuillan data.'''
 
@@ -625,31 +635,30 @@ class APOGEESplitter(KeplerSplitter):
         self.splitgroups[aspcap_crit] = set(qual_names)
         self._check_indices_partition(aspcap_crit)
 
-    def split_apogee_targeting(
-        self, masks=[
-            ("APOGEE2_TARGET1", 28), ("APOGEE_TARGET2", 16), 
-            ("APOGEE_TARGET1", 27)], names=(
-                "Dwarf targets", "Non-dwarf Targets"), 
-        target_crit="Jen Targeting"):
-        '''Get the objects which fall under the correct flags.
+    def split_targeting(
+        self, target_label, names=None, target_crit=None):
+        '''Select the objects which fall under the targeting flag.
 
-        The flags specified under masks will be put in their own subdivisions.
-        Masks should be a list of 2-tuples where the first element is the
-        targeting column (e.g. APOGEE2_TARGET1), and the second element is the
-        bitmask exponent. The corresponding names should be specified as well
-        as a catch-all term for other targeted objects.'''
-        unionindices = np.zeros(len(self.data))
-        for masktup in masks:
-#            self.indices[name] = self.data[masktup[0]] & 2**masktup[1] != 0
-            newindices = self.data[masktup[0]] & 2**masktup[1] != 0
-            if masktup == ("APOGEE_TARGET1", 27):
-                newindices = np.logical_and(
-                    newindices, self.data["LOGG_FIT"] > 3.5)
-            unionindices = np.logical_or(unionindices, newindices)
-            print(np.count_nonzero(unionindices))
+        The target_label should be the label passed to catalog.target_indices.
+        Then the indices corresponding to that targeting flag will be placed.
+        If a 2-tuple is provided for names, then that will be the label for the
+        objects with the targeting flag, and without the targeting flag,
+        respectively. Similarly, target_crit can be specified.
 
-        self.indices[names[0]] = unionindices
-        self.indices[names[-1]] = np.logical_not(unionindices)
+        If names or target_crit isn't specified, then they will use the
+        targeting flag given. For example, if the targeting flag was
+        APOGEE_KEPLER_COOLDWARF, names would be ("APOGEE_KEPLER_COOLDWARF",
+        "Not APOGEE_KEPLER_COOLDWARF") and target_crit would just be
+        "APOGEE_KEPLER_COOLDWARF".'''
+
+        indices = catalog.target_indices(target_label)
+        if not names:
+            names = (target_label, "Not " + target_label)
+        if not target_crit:
+            target_crit = target_label
+
+        self.indices[names[0]] = indices
+        self.indices[names[1]] = np.logical_not(indices)
         self.splitgroups[target_crit] = set(names)
         self._check_indices_partition(target_crit)
 
@@ -853,6 +862,11 @@ def initialize_apogee_dwarf_rotation_sample(aposplit):
 
     aposplit.split_teff(
         "TEFF", 5250, ["ZAMS", "Age-evolved"], teff_crit="Age Evolution")
+    # Split using the original KIC parameters.
+    aposplit.split_teff("KIC Teff", 5500, ("Too Hot For Jen", "Jen Cool"),
+                        teff_crit="Original KIC Teff")
+    aposplit.split_logg("KIC logg", 4.0, ("Too giant for Jen", "Jen Dwarf"),
+                        logg_crit="Original KIC Logg")
 
     aposplit.split_vscatter(
         [0, 1], ["Single epoch", "RV Nonvar", "RV Var"], invert_inequality=True)
