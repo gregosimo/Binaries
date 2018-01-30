@@ -1289,6 +1289,15 @@ def good_aspcap_fits(apotable, aspcapcol="ASPCAPFLAG"):
     return apogee_filter_quality(
         apotable, quality=("bad", "warn"), aspcapcol=aspcapcol)
 
+###############################################################################
+# APOGEE Targeting #
+###############################################################################
+
+# Have a lookup dictionary that has the column and bitmask information.
+target_dict = {
+    "APOGEE_KEPLER_COOLDWARF": ("APOGEE_TARGET2", 16), 
+    "APOGEE2_APOKASC_DWARF": ("APOGEE2_TARGET1", 28)}
+
 
 ###############################################################################
 # Double-Lined Spectroscopic Binaries #
