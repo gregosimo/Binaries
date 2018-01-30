@@ -1298,6 +1298,16 @@ target_dict = {
     "APOGEE_KEPLER_COOLDWARF": ("APOGEE_TARGET2", 16), 
     "APOGEE2_APOKASC_DWARF": ("APOGEE2_TARGET1", 28)}
 
+def target_indices(fulltable, targetlabel):
+    '''Select the objects in fulltable that are specified by targetlabel.
+
+    This function requires the full APOGEE table because it automatically
+    selects the targeting column where the given targeting bitmask can be
+    found.'''
+    colname, exponent = target_dict[targetlabel]
+    select_indices = fulltable[colname] & 2**exponent > 0
+    return target_indices
+
 
 ###############################################################################
 # Double-Lined Spectroscopic Binaries #
