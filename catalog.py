@@ -1306,7 +1306,7 @@ def target_indices(fulltable, targetlabel):
     found.'''
     colname, exponent = target_dict[targetlabel]
     select_indices = fulltable[colname] & 2**exponent > 0
-    return target_indices
+    return select_indices
 
 
 ###############################################################################

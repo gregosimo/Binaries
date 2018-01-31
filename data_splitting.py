@@ -432,22 +432,38 @@ class KeplerSplitter(DataSplitter):
         self.splitgroups[quarter_crit] = set(splitnames)
         self._check_indices_partition(quarter_crit)
 
-def split_original_KIC_params(
-    self, paramcol="KIC Teff", 
-    names=("Orig KIC Present", "Orig KIC Not Present"), crit="Orig KIC"):
-    '''Split the data based on the presence of original KIC parameters.
+    def split_original_KIC_params(
+            self, paramcol="KIC Teff", 
+            splitnames=("Orig KIC Present", "Orig KIC Not Present"), 
+            orig_crit="Orig KIC"):
+        '''Split the data based on the presence of original KIC parameters.
 
-    Because the DataSplitter does not handle null values well, It may be useful
-    to automatically split by the presence of original KIC params. One useful
-    aspect is that the dataset can be split by KIC params after the entries
-    with KIC parameters are included.'''
-    notindices = self.data[paramcol].mask
-    indices = np.logical_not(notindices)
+        Because the DataSplitter does not handle null values well, It may be useful
+        to automatically split by the presence of original KIC params. One useful
+        aspect is that the dataset can be split by KIC params after the entries
+        with KIC parameters are included.'''
+        notindices = self.data[paramcol].mask
+        indices = np.logical_not(notindices)
 
-    self.indices[names[0]] = indices
-    selfindices[names[1]] = notindices
-    self.splitgroups[crit] = set(names)
-    self._check_indices_partition(crit)
+        self.indices[names[0]] = indices
+        self.indices[names[1]] = notindices
+        self.splitgroups[crit] = set(names)
+        self._check_indices_partition(crit)
+
+    def split_mag(
+            self, magcol, mags, splitnames=("Bright", "Faint"), mag_crit="mag", 
+            invert_inequality=False):
+        '''Split based on a magnitude cut.
+
+        The column which contains magnitudes should be given in magcol. The
+        value to be split between should be given as mags.
+        Splitnames should have the name for the bright objects as the first
+        element, and the name for the faint elements as the second element. The
+        mag_crit specifies the labels used for this particular split.
+
+        For more information on invert_inequality, see split_by_col.
+        '''
+        self.split_by_col(magcol, mag, splitnames, mag_crit, invert_inequality)
 
 class McQuillanSplitter(KeplerSplitter):
     '''Keep an organized database of various cuts on McQuillan data.'''
@@ -658,7 +674,7 @@ class APOGEESplitter(KeplerSplitter):
         "Not APOGEE_KEPLER_COOLDWARF") and target_crit would just be
         "APOGEE_KEPLER_COOLDWARF".'''
 
-        indices = catalog.target_indices(target_label)
+        indices = catalog.target_indices(self.data, target_label)
         if not names:
             names = (target_label, "Not " + target_label)
         if not target_crit:
@@ -740,6 +756,23 @@ class APOKASCSplitter(APOGEESplitter):
         self.indices[splitnames[1]] = invalid
         self.splitgroups[apodwarf_crit] = set(splitnames)
         self._check_indices_partition(apodwarf_crit)
+
+    def split_Jen_targets(
+            self, jencol="VANSADERS", 
+            splitnames=("Jen Targets", "Not Jen Targets"), jen_crit="Jen"):
+    '''Split stars which were in Jen's targeting list.
+
+    Targets which have "T" in jencol are considered as being in Jen's list. If
+    they weren't, then it should have an "F". The names given to Jen's targets
+    should be given in splitnames[0] and those that aren't her targets should
+    be splitnames[1].'''
+    jentargs = self.data[jencol] == "T"
+    notjentargs = self.data[jencol] == "F"
+    self.indices[splitnames[0]] = jentargs
+    self.indices[splitnames[1]] = notjentargs
+    self.splitgroups[jen_crit] = set(splitnames)
+    self._check_indices_partition(jen_crit)
+    
 
     def subsample_len(self, namelist):
         '''Get the size of a subsample.
@@ -856,8 +889,31 @@ def initialize_cool_dwarfs(aposplit):
     Set a quality Teff cut between 4500 and 5450 K. The former is where fits
     start to all be flagged as STAR_BAD. The latter is where the radius starts
     experiencing significant age evolution.'''
+    # I want all of these to be in the original KIC.
     aposplit.split_original_KIC_params()
-    origteffs = aposplit.subsample("
+    origteffs = aposplit.subsample(["Orig KIC Present"])
+    newsplitter = APOGEESplitter(origteffs)
+
+    newsplitter.split_teff(
+        "TEFF", [4500, 5450, 5500], (
+            "Too Cool", "Right Teff", "Teff Age Evolution", "Too Hot"),
+        teff_crit="APOGEE Teff")
+    newsplitter.split_logg("LOGG_FIT", 4.2, ("Giant", "Dwarf"),
+                           logg_crit="Subgiant Split")
+    newsplitter.split_teff(
+        "KIC Teff", 5500, ("Jen Cool", "Jen Hot"), teff_crit="KIC Teff")
+    newsplitter.split_logg("KIC logg", 4.0, ("Jen Giant", "Jen Dwarf"),
+                           logg_crit="KIC logg")
+
+    newsplitter.split_mag(
+        "hmag", [7, 11], ("H Bright", "H Jen", "H Faint"), mag_crit="H")
+    
+    newsplitter.split_targeting("APOGEE_KEPLER_COOLDWARF")
+    newsplitter.split_targeting("APOGEE2_APOKASC_DWARF")
+    newsplitter.split_by_ASPCAP_flags()
+
+    return newsplitter
+
 
 def initialize_apogee_dwarf_rotation_sample(aposplit):
     '''Initialize the dwarf rotation sample.
