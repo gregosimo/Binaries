@@ -433,7 +433,7 @@ class KeplerSplitter(DataSplitter):
         self._check_indices_partition(quarter_crit)
 
     def split_original_KIC_params(
-            self, paramcol="KIC Teff", 
+            self, paramcol="K-Teff", 
             splitnames=("Orig KIC Present", "Orig KIC Not Present"), 
             orig_crit="Orig KIC"):
         '''Split the data based on the presence of original KIC parameters.
@@ -445,10 +445,10 @@ class KeplerSplitter(DataSplitter):
         notindices = self.data[paramcol].mask
         indices = np.logical_not(notindices)
 
-        self.indices[names[0]] = indices
-        self.indices[names[1]] = notindices
-        self.splitgroups[crit] = set(names)
-        self._check_indices_partition(crit)
+        self.indices[splitnames[0]] = indices
+        self.indices[splitnames[1]] = notindices
+        self.splitgroups[orig_crit] = set(splitnames)
+        self._check_indices_partition(orig_crit)
 
     def split_mag(
             self, magcol, mags, splitnames=("Bright", "Faint"), mag_crit="mag", 
@@ -463,7 +463,7 @@ class KeplerSplitter(DataSplitter):
 
         For more information on invert_inequality, see split_by_col.
         '''
-        self.split_by_col(magcol, mag, splitnames, mag_crit, invert_inequality)
+        self.split_by_col(magcol, mags, splitnames, mag_crit, invert_inequality)
 
 class McQuillanSplitter(KeplerSplitter):
     '''Keep an organized database of various cuts on McQuillan data.'''
@@ -502,10 +502,6 @@ class APOGEESplitter(KeplerSplitter):
             data = catin.dr14_with_KIC_stelparms()
             data["LOGG_FIT"] = data["FPARAM"][:,1]
         super().__init__(data)
-
-
-
-
 
     def split_vscatter(self, splitvalues, splitnames, col="VSCATTER",
                        vscatter_crit="VSCATTER", invert_inequality=False):
@@ -760,18 +756,18 @@ class APOKASCSplitter(APOGEESplitter):
     def split_Jen_targets(
             self, jencol="VANSADERS", 
             splitnames=("Jen Targets", "Not Jen Targets"), jen_crit="Jen"):
-    '''Split stars which were in Jen's targeting list.
+        '''Split stars which were in Jen's targeting list.
 
-    Targets which have "T" in jencol are considered as being in Jen's list. If
-    they weren't, then it should have an "F". The names given to Jen's targets
-    should be given in splitnames[0] and those that aren't her targets should
-    be splitnames[1].'''
-    jentargs = self.data[jencol] == "T"
-    notjentargs = self.data[jencol] == "F"
-    self.indices[splitnames[0]] = jentargs
-    self.indices[splitnames[1]] = notjentargs
-    self.splitgroups[jen_crit] = set(splitnames)
-    self._check_indices_partition(jen_crit)
+        Targets which have "T" in jencol are considered as being in Jen's list. If
+        they weren't, then it should have an "F". The names given to Jen's targets
+        should be given in splitnames[0] and those that aren't her targets should
+        be splitnames[1].'''
+        jentargs = self.data[jencol] == "T"
+        notjentargs = self.data[jencol] == "F"
+        self.indices[splitnames[0]] = jentargs
+        self.indices[splitnames[1]] = notjentargs
+        self.splitgroups[jen_crit] = set(splitnames)
+        self._check_indices_partition(jen_crit)
     
 
     def subsample_len(self, namelist):
@@ -900,14 +896,19 @@ def initialize_cool_dwarfs(aposplit):
         teff_crit="APOGEE Teff")
     newsplitter.split_logg("LOGG_FIT", 4.2, ("Giant", "Dwarf"),
                            logg_crit="Subgiant Split")
+
     newsplitter.split_teff(
-        "KIC Teff", 5500, ("Jen Cool", "Jen Hot"), teff_crit="KIC Teff")
-    newsplitter.split_logg("KIC logg", 4.0, ("Jen Giant", "Jen Dwarf"),
+        "SDSS-Teff", [0, 5500], ("No SDSS Teff", "Jen Cool", "Jen Hot"), 
+        teff_crit="SDSS Teff")
+    newsplitter.split_teff(
+        "K-Teff", 5500, ("KIC Jen Cool", "KIC Jen Hot"), 
+        teff_crit="KIC Teff")
+    newsplitter.split_logg("log(g)", 4.0, ("Jen Giant", "Jen Dwarf"),
                            logg_crit="KIC logg")
 
     newsplitter.split_mag(
         "hmag", [7, 11], ("H Bright", "H Jen", "H Faint"), mag_crit="H")
-    
+
     newsplitter.split_targeting("APOGEE_KEPLER_COOLDWARF")
     newsplitter.split_targeting("APOGEE2_APOKASC_DWARF")
     newsplitter.split_by_ASPCAP_flags()
@@ -932,7 +933,7 @@ def initialize_apogee_dwarf_rotation_sample(aposplit):
     aposplit.split_teff(
         "TEFF", 5250, ["ZAMS", "Age-evolved"], teff_crit="Age Evolution")
     # Split using the original KIC parameters.
-    aposplit.split_teff("KIC Teff", 5500, ("Too Hot For Jen", "Jen Cool"),
+    aposplit.split_teff("K-Teff", 5500, ("Too Hot For Jen", "Jen Cool"),
                         teff_crit="Original KIC Teff")
     aposplit.split_logg("KIC logg", 4.0, ("Too giant for Jen", "Jen Dwarf"),
                         logg_crit="Original KIC Logg")
@@ -1209,6 +1210,19 @@ def rapid_rotator_det_test(
 ################################################################################
 # Making Narrow-purpose datasplitters #
 ################################################################################
+
+def jen_cool_sample(splitter=None):
+    '''Generate the sample of cool dwarfs from Jen's targeting program.'''
+    if not splitter:
+        splitter = APOGEESplitter()
+        splitter = initialize_cool_dwarfs(splitter)
+    apogee1_samp = splitter.subsample(["APOGEE_KEPLER_COOLDWARF"])
+    apogee2_samp = splitter.subsample([
+        "APOGEE2_APOKASC_DWARF", "Jen Dwarf", "H Jen", "Jen Cool"])
+    nosdss_samp = splitter.subsample([
+        "APOGEE2_APOKASC_DWARF", "Jen Dwarf", "H Jen", "No SDSS Teff", 
+        "KIC Jen Cool"])
+    return vstack([apogee1_samp, apogee2_samp, nosdss_samp])
 
 def jen_cool_splitter():
     '''Create a Datasplitter consisting only of Jen's cool dwarf sample.

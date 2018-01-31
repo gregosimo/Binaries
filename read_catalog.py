@@ -63,6 +63,10 @@ def read_KIC_DR25_catalog(kicpath=paths.KIC_CATALOG):
     fix_table_coordinates_units(kiccat, "ra", "dec")
     return kiccat
 
+def read_Pinsonneault_2012_catalog(pinpath=paths.PINSONNEAULT_CORRECTIONS):
+    '''Read the corrected catalog from Pinsonneault et al (2012).'''
+    pincat = Table.read(str(pinpath), format="ascii.cds")
+    return pincat
 
 def read_van_Saders_file(vspath=paths.VAN_SADERS_SDSS):
     '''Read the APOGEE dwarf targets from Jen's catalog.'''
@@ -513,16 +517,16 @@ def Stauffer_APOGEE_overlap(
 @au.shortcut_file(paths.SHORTCUT_APOGEE_KIC)
 def dr14_with_KIC_stelparms(
     apopath=paths.DR14_ALLSTAR_PATH, kicpath=paths.KIC_CATALOG,
-    origpath=paths.ORIG_KIC_ABRIDGED):
+    origpath=paths.ORIG_KIC_ABRIDGED, pinpath=paths.PINSONNEAULT_CORRECTIONS):
     '''Read in Kepler DR14 targets with Huber stellar parameters.'''
     apo = read_dr14_allStar(apopath, opt="kepler")
-    kiccat = stelparms_with_original_KIC(kicpath, origpath)
+    kiccat = stelparms_triple_KIC(origpath, pinpath, kicpath)
     apokic = catalog.join_by_2MASS_key(
         apo, kiccat, "APOGEE_ID", "tm_designation")
     return apokic
 
 #@au.shortcut_file(paths.SHORTCUT_APOKASC_KIC)
-#@au.memoized
+@au.memoized
 def APOKASC_with_KIC_stelparms(
     apopath=paths.APOKASC_PATH, kicpath=paths.KIC_CATALOG,
     origpath=paths.ORIG_KIC_ABRIDGED):
@@ -547,6 +551,20 @@ def stelparms_with_original_KIC(parmpath=paths.KIC_CATALOG,
                            join_type="left")
     return newcat
 
+def stelparms_triple_KIC(
+    origpath=paths.ORIG_KIC_ABRIDGED, pinpath=paths.PINSONNEAULT_CORRECTIONS,
+    huberpath=paths.KIC_CATALOG):
+    '''Create a table with the original, Pinsonneault, and Huber parameters.
+
+    The original KIC parameters came from the analysis in Brown et al (2011).
+    The Pinsonneault et al (2012) analysis corrected the effective temperatures
+    to put them on the SDSS system. Finally Huber et al (2014) reanalyzed the
+    whole KIC to use the best available data and fit the parameters as well as
+    uncertainties using DSEP isochrones.'''
+    hubercat = read_KIC_DR25_catalog(huberpath)
+    pinsonneaultcat = read_Pinsonneault_2012_catalog(pinpath)
+    joinedcat = au.join_by_id(hubercat, pinsonneaultcat, "kepid", "KIC")
+    return joinedcat
 
 
 ################################################################################
