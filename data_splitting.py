@@ -441,6 +441,13 @@ def split_original_KIC_params(
     to automatically split by the presence of original KIC params. One useful
     aspect is that the dataset can be split by KIC params after the entries
     with KIC parameters are included.'''
+    notindices = self.data[paramcol].mask
+    indices = np.logical_not(notindices)
+
+    self.indices[names[0]] = indices
+    selfindices[names[1]] = notindices
+    self.splitgroups[crit] = set(names)
+    self._check_indices_partition(crit)
 
 class McQuillanSplitter(KeplerSplitter):
     '''Keep an organized database of various cuts on McQuillan data.'''
@@ -822,9 +829,6 @@ def initialize_Jen_Sample_Splitter(aposplit):
     * A split by ASPCAP quality.'''
 
     aposplit.split_logg(
-        "logg", [3.6, 4.2], ["Huber giant", "Huber subgiant", "Huber dwarf"],
-        logg_crit="Huber logg")
-    aposplit.split_logg(
         "LOGG_FIT", [3.5, 4], [
             "APOGEE giant", "APOGEE subgiant", "APOGEE dwarf"],
         logg_crit="APOGEE_logg")
@@ -845,6 +849,15 @@ def initialize_Jen_Sample_Splitter(aposplit):
     aposplit.split_by_ASPCAP_flags()
 
     aposplit.split_apogee_targeting()
+
+def initialize_cool_dwarfs(aposplit):
+    '''Get the cool dwarfs.
+
+    Set a quality Teff cut between 4500 and 5450 K. The former is where fits
+    start to all be flagged as STAR_BAD. The latter is where the radius starts
+    experiencing significant age evolution.'''
+    aposplit.split_original_KIC_params()
+    origteffs = aposplit.subsample("
 
 def initialize_apogee_dwarf_rotation_sample(aposplit):
     '''Initialize the dwarf rotation sample.
