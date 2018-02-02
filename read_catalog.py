@@ -408,7 +408,6 @@ def mcquillan_flicker_loggs(
     mcq_flicker.remove_columns(["kepmag", "Teff"])
     return mcq_flicker
 
-@au.shortcut_file(paths.SHORTCUT_MCQUILLAN_APOKASC)
 def create_joined_APOKASC_McQuillan_catalog(
         apofile=paths.APOKASC_PATH, mcquillanfile=paths.MCQUILLAN_CATALOG):
     '''Creates a joint APOKASC/McQuillan catalog.
@@ -424,6 +423,30 @@ def create_joined_APOKASC_McQuillan_catalog(
 
     combocat = au.join_by_id(apocat, mcquillancat, "KEPLER_INT", "KIC")
     return combocat
+
+def APOKASC_Huber_KIC(
+    apofile=paths.APOKASC_PATH, huberfile=paths.KIC_CATALOG):
+    '''Create a joined catalog with APOKASC and McQuillan.'''
+    apocat = read_APOKASC_catalog(apofile)
+    kics = read_KIC_DR25_catalog(huberfile)
+    apokic = au.join_by_id(
+        apocat, kics, "KEPLER_INT", "kepid", join_type="left")
+    return apokic
+
+@au.shortcut_file(paths.SHORTCUT_MCQUILLAN_APOKASC)
+def APOKASC_with_McQuillan_KIC(
+    apofile=paths.APOKASC_PATH, huberfile=paths.KIC_CATALOG,
+    mcquillanfile=paths.MCQUILLAN_CATALOG):
+    '''Join the APOKASC catalog with McQuillan periods.
+
+    This function will also have the Huber KIC stellar parameters.'''
+    apocat = APOKASC_Huber_KIC(apofile, huberfile)
+    mcq = read_McQuillan_catalog(mcquillanfile).copy()
+    mcq.remove_columns(["Teff", "log_g_", "Mass", "_RA", "_DE", "Ref"])
+    combined_table = au.join_by_id(
+        apocat, mcq, "KEPLER_INT", "KIC", join_type="left")
+
+    return combined_table
 
 def garcia_dr14(
     apofile=paths.DR14_ALLSTAR_PATH, kicfile=paths.KIC_CATALOG, 
@@ -525,8 +548,7 @@ def dr14_with_KIC_stelparms(
         apo, kiccat, "APOGEE_ID", "tm_designation")
     return apokic
 
-#@au.shortcut_file(paths.SHORTCUT_APOKASC_KIC)
-@au.memoized
+@au.shortcut_file(paths.SHORTCUT_APOKASC_KIC)
 def APOKASC_with_KIC_stelparms(
     apopath=paths.APOKASC_PATH, kicpath=paths.KIC_CATALOG,
     origpath=paths.ORIG_KIC_ABRIDGED):

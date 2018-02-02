@@ -319,6 +319,17 @@ class KeplerSplitter(DataSplitter):
 
     Current stellar properties are: Teff and Log(g).'''
 
+    def __init__(self, data, kic_col="kepid", tm_col="tm_designation"):
+        '''Initialize the splitter for a dataset specifying the index columns.
+
+        Set up the Splitter with the given data. The splitter is also indexed
+        both by KIC IDs as well as 2MASS IDs. The columns specifying those
+        should be given in kic_col and tm_col. They'll be available as
+        self.kic_col and self.tm_col.'''
+        super().__init__(data)
+        self.kic_col = kic_col
+        self.tm_col = tm_col
+
     def split_logg(self, col, splitvalues, splitnames, logg_crit="logg",
                    invert_inequality=False):
         '''Split the data by log(g).
@@ -468,11 +479,11 @@ class KeplerSplitter(DataSplitter):
 class McQuillanSplitter(KeplerSplitter):
     '''Keep an organized database of various cuts on McQuillan data.'''
 
-    def __init__(self, data=None):
+    def __init__(self, data=None, kic_col="kepid", tm_col="tm_designation"):
         '''Initialize a splitter of McQuillan data.'''
         if not data:
             data = catin.mcquillan_with_stelparms()
-        super().__init__(data)
+        super().__init__(data, kic_col=kic_col, tm_col=tm_col)
 
     def split_period(self, splitvalues, splitnames, pcol="Prot", 
                      period_crit="period", invert_inequality=False):
@@ -493,7 +504,7 @@ class McQuillanSplitter(KeplerSplitter):
 class APOGEESplitter(KeplerSplitter):
     '''Keep an organized database of various cuts on APOGEE data.'''
 
-    def __init__(self, data=None):
+    def __init__(self, data=None, kic_col="kepid", tm_col="APOGEE_ID"):
         '''Initialize a splitter of APOGEE data.
         
         If the data parameter is passed, then it will be set to the full data
@@ -501,7 +512,7 @@ class APOGEESplitter(KeplerSplitter):
         if not data:
             data = catin.dr14_with_KIC_stelparms()
             data["LOGG_FIT"] = data["FPARAM"][:,1]
-        super().__init__(data)
+        super().__init__(data, kic_col=kic_col, tm_col=tm_col)
 
     def split_vscatter(self, splitvalues, splitnames, col="VSCATTER",
                        vscatter_crit="VSCATTER", invert_inequality=False):
@@ -720,21 +731,21 @@ class APOGEESplitter(KeplerSplitter):
         targeting. This method will make sure to only return number of unique
         entries in the subsample.'''
         indices = self._subsample_indices(namelist)
-        names = self.data["APOGEE_ID"][indices]
+        names = self.data[self.tm_col][indices]
         indexlen = len(np.unique(names))
         return indexlen
 
 class APOKASCSplitter(APOGEESplitter):
     '''A splitter for the APOKASC dataset.'''
 
-    def __init__(self, data=None):
+    def __init__(self, data=None, kic_col="KEPLER_INT", tm_col="2MASS_ID"):
         '''Initialize a splitter of APOKASC data.
         
         If the data parameter is passed, then it will be set to the full data
         sample. If not, then it will be read in manually.'''
         if not data:
             data = catin.APOKASC_with_KIC_stelparms()
-        super().__init__(data)
+        super().__init__(data, kic_col=kic_col, tm_col=tm_col)
 
     def split_asteroseismic_dwarfs(
         self, dwarfcol="RADIUS_DW", splitnames=(
@@ -780,7 +791,7 @@ class APOKASCSplitter(APOGEESplitter):
         targeting. This method will make sure to only return number of unique
         entries in the subsample.'''
         indices = self._subsample_indices(namelist)
-        names = self.data["2MASS_ID"][indices]
+        names = self.data[self.tm_col][indices]
         indexlen = len(np.unique(names))
         return indexlen
 
@@ -789,14 +800,14 @@ class CombinedRotationSplitter(APOGEESplitter,McQuillanSplitter):
 
     This splitter will be useful for unifying parts of the Kepler sample which
     overlap when observed with McQuillan and APOGEE.'''
-    def __init__(self, data=None):
+    def __init__(self, data=None, kic_col="kepid", tm_col="tm_designation"):
         '''A class for overlapping spectroscopic and photometric data.
 
         These objects ought to have both vsinis and rotational periods.'''
         if not data:
             data = catin.dr14_with_KIC_stelparms()
             data["LOGG_FIT"] = data["FPARAM"][:,1]
-        super().__init__(data)
+        super().__init__(data, kic_col=kic_col, tm_col=tm_col)
 
 def initialize_APOGEE_splitter_with_bins(aposplit):
     '''Initialize the APOGEE splitter with Teff bins.'''
@@ -828,7 +839,7 @@ def initialize_APOGEE_splitter_with_bins(aposplit):
 
     aposplit.split_asteroseismic_dwarfs()
 
-    aposplit.split_McQuillan_periods(kiccol="kepid")
+    aposplit.split_McQuillan_periods(kiccol=aposplit.kic_col)
 
     aposplit.split_by_ASPCAP_flags()
 
@@ -873,7 +884,7 @@ def initialize_Jen_Sample_Splitter(aposplit):
 
     aposplit.split_dlsb()
 
-    aposplit.split_McQuillan_periods(kiccol="kepid")
+    aposplit.split_McQuillan_periods(kiccol=aposplit.kic_col)
 
     aposplit.split_by_ASPCAP_flags()
 
@@ -913,8 +924,9 @@ def initialize_cool_dwarfs(aposplit):
     newsplitter.split_targeting("APOGEE2_APOKASC_DWARF")
     newsplitter.split_by_ASPCAP_flags()
 
-    return newsplitter
+    newsplitter.split_McQuillan_periods()
 
+    return newsplitter
 
 def initialize_apogee_dwarf_rotation_sample(aposplit):
     '''Initialize the dwarf rotation sample.
@@ -950,7 +962,7 @@ def initialize_apogee_dwarf_rotation_sample(aposplit):
 
     aposplit.split_dlsb()
 
-    aposplit.split_McQuillan_periods(kiccol="kepid")
+    aposplit.split_McQuillan_periods(kiccol=aposplit.kic_col)
 
     aposplit.split_by_ASPCAP_flags()
 
@@ -991,7 +1003,7 @@ def initialize_asteroseismic_sample(aposplit):
     
     This will set aside the asteroseismic dwarfs from the rest of the sample.'''
     # First split the asteroseismic targets
-    aposplit.split_asteroseismic_dwarfs()
+    aposplit.split_asteroseismic_dwarfs(apid_col=aposplit.tm_col)
 
     # Now split the spectroscopic targets
     aposplit.split_logg("LOGG_FIT", [3.5, 4.0], (
@@ -1000,6 +1012,9 @@ def initialize_asteroseismic_sample(aposplit):
 
     # Split  by quality.
     aposplit.split_by_ASPCAP_flags()
+
+    # Split by McQuillan Periods
+    aposplit.split_McQuillan_periods(kiccol=aposplit.kic_col)
 
 def gen_samp(name):
     '''Function to generate the given sample objects which was broken down.'''
