@@ -4,7 +4,7 @@ from astropy.table import Table
 import pytest
 
 import catalog
-from APOGEE_spectroscopy import DataSplitter
+from data_splitting import DataSplitter
 
 tablestring = '''
 |  a  |  b  |  c  |
