@@ -100,35 +100,56 @@ class DataSplitter:
                 raise ValueError(
                     "Splitnames conflicts with other index names.")
 
+        indexlist = []
         try:
             # Invert_inequality basically transforms < to <= and >= to >
             if not invert_inequality:
                 # First make the lowest table.
-                self.indices[splitnames[0]] = colvalues < splitvalues[0]
+                indexlist.append(colvalues < splitvalues[0])
                 # Then make intermediate tables.
                 for i, (low, high) in enumerate(zip(
                         splitvalues[:-1], splitvalues[1:])):
-                    self.indices[splitnames[i+1]] = np.logical_and(
-                        colvalues >= low, colvalues < high)
+                    indexlist.append(np.logical_and(
+                        colvalues >= low, colvalues < high))
                 # Now make the highest table.
-                self.indices[splitnames[-1]] = colvalues >= splitvalues[-1]
+                indexlist.append(colvalues >= splitvalues[-1])
             else:
                 # First make the lowest table.
-                self.indices[splitnames[0]] = colvalues <= splitvalues[0]
+                indexlist.append(colvalues <= splitvalues[0])
                 # Then make intermediate tables.
                 for i, (low, high) in enumerate(zip(
                         splitvalues[:-1], splitvalues[1:])):
-                    self.indices[splitnames[i+1]] = np.logical_and(
-                        colvalues > low, colvalues <= high)
+                    indexlist.append(np.logical_and(
+                        colvalues > low, colvalues <= high))
                 # Now make the highest table.
-                self.indices[splitnames[-1]] = colvalues > splitvalues[-1]
+                indexlist.append(colvalues > splitvalues[-1])
         except:
             self._restore_crit(crit, backup_indices)
             raise
 
+        self._setup_indices(splitnames, indexlist, crit)
 
+    def _setup_indices(self, splitnames, indices, crit):
+        '''Automatically map splitnames to indices in the internal dict.
+
+        Avoid repetitively setting the values in self.indices to the actual
+        indices and setting the crit values.'''
+        for name, index in zip(splitnames, indices):
+            self.indices[name] = index
         self.splitgroups[crit] = set(splitnames)
         self._check_indices_partition(crit)
+
+    def _setup_complement_index(self, splitnames, index, crit):
+        '''Indices where one index is given and the other is complementary
+
+        This is a shorthand for _setup_indices where
+        indexarr = [index, np.logical_not(index)]
+        
+        Don't forget that the index should correspond to the first entry of
+        splitnames while the complement should correspond to the second entry.
+        '''
+        indexarr = [index, np.logical_not(index)]
+        self._setup_indices(splitnames, indexarr, crit)
 
     def _backup_crit(self, crit):
         '''Makes a backup of the indices under crit.
@@ -155,6 +176,33 @@ class DataSplitter:
         subsample = self.data[indices]
 
         return subsample
+
+    def split_subsample(self, namelist):
+        '''Make another splitter on the subsample given in the namelist.
+
+        The return splitter will be a valid splitter of the same type on the
+        subsample. The types of splits which were not involved in namelist will
+        also be passed down.
+        '''
+        indices = self._subsample_indices(namelist)
+        subsampled_data = self.data[indices]
+
+        subsampled_crits = {}
+        nameset = set(namelist)
+        # Carry over all criteria which aren't part of the subsample filtering.
+        for crit, critset in self.splitgroups.items():
+            if nameset.isdisjoint(critset):
+                subsampled_crits[crit] = critset
+
+        subsampled_indices = {}
+        for critset in subsampled_crits.values():
+            for indexname in critset:
+                subsampled_indices[indexname] = self.indices[indexname][indices]
+
+        subsample_splitter = type(self)(
+            subsampled_data, splitgroups=subsampled_crits,
+            indices=subsampled_indices)
+        return subsample_splitter
 
     def split_sample(self, group, otherparms=None):
         '''Split the sample according to the group partition.
@@ -245,6 +293,29 @@ class DataSplitter:
         outstr = "\n".join(["{0}: {1}".format(k, v) for k,v in
                             self.splitgroups.items()])
         return outstr
+
+    def __eq__(self, other):
+        '''Test for equality between this splitter and others.'''
+        # They must be the same type of splitter, otherwise they will not be
+        # equal.
+        if not isinstance(other, self.__class__):
+            return NotImplemented
+
+        data_eq = np.all(self.data == other.data)
+        splitgroup_eq = self.splitgroups == other.splitgroups
+        # I can't just use self.indices == other.indices
+        # Because it tries to compare numpy arrays.
+        index_eq = True
+        for key, value in self.indices.items():
+            try:
+                if not np.all(other.indices[key] == value):
+                    index_eq = False
+                    break
+            except KeyError:
+                index_eq = False
+                break
+
+        return data_eq and splitgroup_eq and index_eq
 
     def generate_partition_census(self, categories):
         '''Break down the sample into subsamples with numbers.
@@ -367,10 +438,9 @@ class KeplerSplitter(DataSplitter):
                 logg >= 5.2 - 2.8e-4 * teff))
         giant_indices = np.logical_not(dwarf_indices)
 
-        self.indices[splitnames[0]] = giant_indices
-        self.indices[splitnames[1]] = dwarf_indices
-        self.splitgroups[logg_crit] = set(splitnames)
-        self._check_indices_partition(logg_crit)
+        self._setup_complement_index(
+            splitnames[::-1], dwarf_indices, logg_crit)
+
 
     def split_Ciardi_Color(
         self, jcol="jmag", hcol="hmag", 
@@ -394,10 +464,8 @@ class KeplerSplitter(DataSplitter):
             dwarf_indices = jhcolor <= 0.75
             giant_indices = jhcolor > 0.75
 
-        self.indices[splitnames[0]] = giant_indices
-        self.indices[splitnames[1]] = dwarf_indices
-        self.splitgroups[color_crit] = set(splitnames)
-        self._check_indices_partition(color_crit)
+        indexlist = [giant_indices, dwarf_indices]
+        self._setup_indices(splitnames, indexlist, color_crit)
 
     def split_teff(self, col, splitvalues, splitnames, teff_crit="teff",
                    invert_inequality=False):
@@ -438,10 +506,8 @@ class KeplerSplitter(DataSplitter):
         specifies the labels which are used for this particular split.'''
         rel_quarter = au.slicer_vectorized(self.data[quartercol], qused)
         qobserved = npstr.count(rel_quarter, '1')
-        self.indices[splitnames[0]] = qobserved < 8
-        self.indices[splitnames[1]] = qobserved >= 8
-        self.splitgroups[quarter_crit] = set(splitnames)
-        self._check_indices_partition(quarter_crit)
+        indexarr = [qobserved < 8, qobserved >= 8]
+        self._setup_indices(splitnames, indexarr, quarter_crit)
 
     def split_original_KIC_params(
             self, paramcol="K-Teff", 
@@ -456,10 +522,8 @@ class KeplerSplitter(DataSplitter):
         notindices = self.data[paramcol].mask
         indices = np.logical_not(notindices)
 
-        self.indices[splitnames[0]] = indices
-        self.indices[splitnames[1]] = notindices
-        self.splitgroups[orig_crit] = set(splitnames)
-        self._check_indices_partition(orig_crit)
+        indexarr = [indices, notindices]
+        self._setup_indices(splitnames, indexarr, orig_crit)
 
     def split_mag(
             self, magcol, mags, splitnames=("Bright", "Faint"), mag_crit="mag", 
@@ -528,8 +592,6 @@ class APOGEESplitter(KeplerSplitter):
         '''
         self.split_by_col(col, splitvalues, splitnames, vscatter_crit, 
                           invert_inequality)
-        self.splitgroups[vscatter_crit] = set(splitnames)
-        self._check_indices_partition(vscatter_crit)
 
     def split_vsini(self, splitvalues, splitnames, col="VSINI",
                     vsini_crit="VSINI", invert_inequality=False):
@@ -588,19 +650,18 @@ class APOGEESplitter(KeplerSplitter):
         be specified by dlsb_crit.
         '''
         apids = self.data[apid_col]
-        self.indices[dl_names[0]] = catalog.mark_DLSB_indices(
+        known_dlsbs = catalog.mark_DLSB_indices(
             apids, dlsb_db=dlsb_db)
-        self.indices[dl_names[1]] = catalog.mark_non_DLSB_indices(
+        known_nondlsbs = catalog.mark_non_DLSB_indices(
             apids, nodl_db=nodl_db)
-        self.indices[dl_names[2]] = np.logical_not(np.logical_or(
+        unknown_dlsbs = np.logical_not(np.logical_or(
             self.indices[dl_names[0]], self.indices[dl_names[1]]))
-        assert not np.any(np.logical_and(
-            self.indices[dl_names[0]], self.indices[dl_names[1]]))
-        self.splitgroups[dlsb_crit] = set(dl_names)
-        self._check_indices_partition(dlsb_crit)
+
+        indexarr = [known_dlsbs, known_nondlsbs, unknown_dlsbs]
+        self._setup_indices(splitnames, indexarr, dlsb_crit)
 
     def split_asteroseismic_dwarfs(
-        self, astero_names=("Asteroseismic", "Non-asteroseismic"), 
+        self, splitnames=("Asteroseismic", "Non-asteroseismic"), 
         apid_col="APOGEE_ID", astero_crit="astero"):
         '''Separate asteroseismic dwarfs in dataset.
 
@@ -610,12 +671,9 @@ class APOGEESplitter(KeplerSplitter):
         astero_crit.'''
         apokasc = catin.read_APOKASC_catalog()[["2MASS_ID", "RADIUS_DW"]]
         ast_dwarf = catalog.filter_invalid_APOGEE_entries(apokasc, "RADIUS_DW")
-        self.indices[astero_names[0]] = au.mark_selections_in_columns(
+        astero_indices = au.mark_selections_in_columns(
             self.data[apid_col], ast_dwarf["2MASS_ID"])
-        self.indices[astero_names[1]] = np.logical_not(
-            self.indices[astero_names[0]])
-        self.splitgroups[astero_crit] = set(astero_names)
-        self._check_indices_partition(astero_crit)
+        self._setup_complement_index(splitnames, astero_indices, astero_crit)
 
     def split_McQuillan_periods(
         self, mcq_names=("Mcq", "No Mcq", "Unknown Mcq"), kiccol="KIC", 
@@ -630,14 +688,13 @@ class APOGEESplitter(KeplerSplitter):
         '''
         mcq = catin.read_McQuillan_catalog()
         undet = catin.read_McQuillan_nondetections()
-        self.indices[mcq_names[0]] = au.mark_selections_in_columns(
-            self.data[kiccol], mcq["KIC"])
-        self.indices[mcq_names[1]] = au.mark_selections_in_columns(
+        mcq_period = au.mark_selections_in_columns(self.data[kiccol], mcq["KIC"])
+        mcq_noperiod = au.mark_selections_in_columns(
             self.data[kiccol], undet["KIC"])
-        self.indices[mcq_names[2]] = np.logical_not(np.logical_or(
+        no_mcq = np.logical_not(np.logical_or(
             self.indices[mcq_names[0]], self.indices[mcq_names[1]]))
-        self.splitgroups[mcq_crit] = set(mcq_names)
-        self._check_indices_partition(mcq_crit)
+        indexarr = [mcq_period, mcq_noperiod, no_mcq]
+        self._setup_indices(splitnames, indexarr, mcq_crit)
 
     def split_by_ASPCAP_flags(
         self, qual_names=("Bad", "Warn", "vsini", "Good"),
@@ -653,17 +710,17 @@ class APOGEESplitter(KeplerSplitter):
         aspcap_crit flag.'''
         flags = self.data[aspcapcol]
         # Pure bad indices
-        self.indices[qual_names[0]] = catalog.bad_ASPCAP_indices(
+        bad_indices = catalog.bad_ASPCAP_indices(
             flags, warn=False)
         badwarn_indices = catalog.bad_ASPCAP_indices(flags, warn=True)
-        self.indices[qual_names[1]] = np.logical_and(
-            np.logical_not(self.indices[qual_names[0]]), badwarn_indices)
-        self.indices[qual_names[2]] = np.logical_and(
+        warn_indices = np.logical_and(
+            np.logical_not(bad_indices), badwarn_indices)
+        vsini_indices = np.logical_and(
             np.logical_not(badwarn_indices), catalog.warn_VSINI_indices(flags))
-        self.indices[qual_names[3]] = np.logical_not(np.logical_or(
-            badwarn_indices, self.indices[qual_names[2]]))
-        self.splitgroups[aspcap_crit] = set(qual_names)
-        self._check_indices_partition(aspcap_crit)
+        good_indices = np.logical_not(np.logical_or(
+            badwarn_indices, vsini_indices))
+        indexarr = [bad_indices, warn_indices, vsini_indices, good_indices]
+        self._setup_indices(splitnames, indexarr, aspcap_crit)
 
     def split_targeting(
         self, target_label, names=None, target_crit=None):
@@ -687,10 +744,7 @@ class APOGEESplitter(KeplerSplitter):
         if not target_crit:
             target_crit = target_label
 
-        self.indices[names[0]] = indices
-        self.indices[names[1]] = np.logical_not(indices)
-        self.splitgroups[target_crit] = set(names)
-        self._check_indices_partition(target_crit)
+        self._setup_complement_index(splitnames, indices, target_crit)
 
     def split_eclipsing_binaries(
             self, kiccol="kepid", splitnames=("Kepler EB", "Not EB"), 
@@ -701,10 +755,7 @@ class APOGEESplitter(KeplerSplitter):
         element of splitnames, and the label for objects not EBs should be the
         second one.'''
         eb_indices = ebs.EB_indices(self.data[kiccol])
-        self.indices[splitnames[0]] = eb_indices
-        self.indices[splitnames[1]] = np.logical_not(eb_indices)
-        self.splitgroups[eb_crit] = set(splitnames)
-        self._check_indices_partition(eb_crit)
+        self._setup_complement_index(splitnames, eb_indices, eb_crit)
 
     def split_KOIs(
             self, kiccol="kepid", splitnames=("KOI", "Not KOI"),
@@ -715,11 +766,47 @@ class APOGEESplitter(KeplerSplitter):
         splitnames, and the label for objects not KOIs should be the second
         one.'''
         koi_indices = catalog.KOI_indices(self.data[kiccol])
-        self.indices[splitnames[0]] = koi_indices
-        self.indices[splitnames[1]] = np.logical_not(koi_indices)
-        self.splitgroups[koi_crit] = set(splitnames)
-        self._check_indices_partition(koi_crit)
+        self._setup_complement_index(splitnames, koi_indices, koi_crit)
 
+    def split_cool_dwarfs(
+            self, splitnames=("Cool Sample", "Not Cool Sample"), 
+            apogee1_flag="APOGEE_KEPLER_COOLDWARF", 
+            apogee2_flag="APOGEE2_APOKASC_DWARF", dwarf_flag="Jen Dwarf",
+            hlim_flag="H Jen", sdss_cool_flag="Jen Cool", 
+            no_sdss_flag="No SDSS Teff", kic_cool_flag="KIC Jen Cool"):
+        '''Split off the cool dwarf sample from the rest of the apogee sample.
+
+        This split relies on the following splits to already have occurred on
+        this dataset:
+        self.split_targeting() for apogee1_flag
+        self.split_targeting() for apogee2_flag
+        self.split_logg() for dwarf_flag
+        self.split_mag() for hlim_flag
+        self.split_teff() for sdss_cool_flag and no_sdss_flag
+        self.split_teff() for kic_cool_flag
+
+        The first two targeting flags automatically take the
+        APOGEE_KEPLER_COOLDWARF targets, and set the APOGEE2_APOKASC_DWARF
+        targets as the sample for targets observed in APOGEE2. The dwarf_flag
+        should correspond to targets with original KIC log(g) > 4.0. The
+        hlim_flag should pick out targets with 7 < H < 11 mag. The
+        sdss_cool_flag should pick out targets with Pinsonneault et al (2012)
+        SDSS Teff < 5500 K, and the no_sdss_flag should mark targets which
+        don't have SDSS Teff values. For those cases, targets with
+        kic_cool_flag values, which should be KIC Teff < 5500 K should be
+        used.'''
+        orig_targets = self.indices[apogee1_flag]
+        apogee2_sdss = au.multi_logical_and(
+            self.indices[apogee2_flag], self.indices[dwarf_flag],
+            self.indices[hlim_flag], self_indices[sdss_cool_flag])
+        apogee2_nosdss = au.multi_logical_and(
+            self.indices[apogee2_flag], self.indices[dwarf_flag],
+            self.indices[hlim_flag], self_indices[no_sdss_flag],
+            self.indices[kic_cool_flag])
+        full_sample = au.multi_logical_or(
+            orig_targets, apogee2_sdss, apogee2_nosdss)
+
+        self._setup_complement_index(splitnames, full_sample, orig_crit)
 
     def subsample_len(self, namelist):
         '''Get the size of a subsample.
@@ -758,11 +845,7 @@ class APOKASCSplitter(APOGEESplitter):
         for objects that have been run through the dwarf pipeline, and null for
         objects that don't.'''
         invalid = catalog.invalid_indices(self.data, dwarfcol)
-        apodwarfs = np.logical_not(invalid)
-        self.indices[splitnames[0]] = apodwarfs
-        self.indices[splitnames[1]] = invalid
-        self.splitgroups[apodwarf_crit] = set(splitnames)
-        self._check_indices_partition(apodwarf_crit)
+        self._setup_complement_index(splitnames[::-1], invalid, apodwarf_crit)
 
     def split_Jen_targets(
             self, jencol="VANSADERS", 
@@ -775,11 +858,9 @@ class APOKASCSplitter(APOGEESplitter):
         be splitnames[1].'''
         jentargs = self.data[jencol] == "T"
         notjentargs = self.data[jencol] == "F"
-        self.indices[splitnames[0]] = jentargs
-        self.indices[splitnames[1]] = notjentargs
-        self.splitgroups[jen_crit] = set(splitnames)
-        self._check_indices_partition(jen_crit)
-    
+
+        indexarr = [jentargs, notjentargs]
+        self._setup_indices(splitnames, indexarr, jen_crit)
 
     def subsample_len(self, namelist):
         '''Get the size of a subsample.
