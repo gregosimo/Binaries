@@ -390,14 +390,16 @@ class KeplerSplitter(DataSplitter):
 
     Current stellar properties are: Teff and Log(g).'''
 
-    def __init__(self, data, kic_col="kepid", tm_col="tm_designation"):
+    def __init__(
+            self, data, splitgroups=None, indices=None, kic_col="kepid", 
+            tm_col="tm_designation"):
         '''Initialize the splitter for a dataset specifying the index columns.
 
         Set up the Splitter with the given data. The splitter is also indexed
         both by KIC IDs as well as 2MASS IDs. The columns specifying those
         should be given in kic_col and tm_col. They'll be available as
         self.kic_col and self.tm_col.'''
-        super().__init__(data)
+        super().__init__(data, splitgroups=splitgroups, indices=indices)
         self.kic_col = kic_col
         self.tm_col = tm_col
 
@@ -543,11 +545,14 @@ class KeplerSplitter(DataSplitter):
 class McQuillanSplitter(KeplerSplitter):
     '''Keep an organized database of various cuts on McQuillan data.'''
 
-    def __init__(self, data=None, kic_col="kepid", tm_col="tm_designation"):
+    def __init__(self, data=None, splitgroups=None, indices=None, 
+                 kic_col="kepid", tm_col="tm_designation"):
         '''Initialize a splitter of McQuillan data.'''
         if not data:
             data = catin.mcquillan_with_stelparms()
-        super().__init__(data, kic_col=kic_col, tm_col=tm_col)
+        super().__init__(
+            data, splitgroups=splitgroups, indices=indices, kic_col=kic_col, 
+            tm_col=tm_col)
 
     def split_period(self, splitvalues, splitnames, pcol="Prot", 
                      period_crit="period", invert_inequality=False):
@@ -568,7 +573,8 @@ class McQuillanSplitter(KeplerSplitter):
 class APOGEESplitter(KeplerSplitter):
     '''Keep an organized database of various cuts on APOGEE data.'''
 
-    def __init__(self, data=None, kic_col="kepid", tm_col="APOGEE_ID"):
+    def __init__(self, data=None, splitgroups=None, indices=None, 
+                 kic_col="kepid", tm_col="APOGEE_ID"):
         '''Initialize a splitter of APOGEE data.
         
         If the data parameter is passed, then it will be set to the full data
@@ -576,7 +582,8 @@ class APOGEESplitter(KeplerSplitter):
         if not data:
             data = catin.dr14_with_KIC_stelparms()
             data["LOGG_FIT"] = data["FPARAM"][:,1]
-        super().__init__(data, kic_col=kic_col, tm_col=tm_col)
+        super().__init__(data, splitgroups=splitgroups, indices=indices, 
+                         kic_col=kic_col, tm_col=tm_col)
 
     def split_vscatter(self, splitvalues, splitnames, col="VSCATTER",
                        vscatter_crit="VSCATTER", invert_inequality=False):
@@ -688,13 +695,14 @@ class APOGEESplitter(KeplerSplitter):
         '''
         mcq = catin.read_McQuillan_catalog()
         undet = catin.read_McQuillan_nondetections()
-        mcq_period = au.mark_selections_in_columns(self.data[kiccol], mcq["KIC"])
+        mcq_period = au.mark_selections_in_columns(
+            self.data[kiccol], mcq["KIC"])
         mcq_noperiod = au.mark_selections_in_columns(
             self.data[kiccol], undet["KIC"])
         no_mcq = np.logical_not(np.logical_or(
-            self.indices[mcq_names[0]], self.indices[mcq_names[1]]))
+            mcq_period, mcq_noperiod))
         indexarr = [mcq_period, mcq_noperiod, no_mcq]
-        self._setup_indices(splitnames, indexarr, mcq_crit)
+        self._setup_indices(mcq_names, indexarr, mcq_crit)
 
     def split_by_ASPCAP_flags(
         self, qual_names=("Bad", "Warn", "vsini", "Good"),
@@ -720,10 +728,10 @@ class APOGEESplitter(KeplerSplitter):
         good_indices = np.logical_not(np.logical_or(
             badwarn_indices, vsini_indices))
         indexarr = [bad_indices, warn_indices, vsini_indices, good_indices]
-        self._setup_indices(splitnames, indexarr, aspcap_crit)
+        self._setup_indices(qual_names, indexarr, aspcap_crit)
 
     def split_targeting(
-        self, target_label, names=None, target_crit=None):
+        self, target_label, splitnames=None, target_crit=None):
         '''Select the objects which fall under the targeting flag.
 
         The target_label should be the label passed to catalog.target_indices.
@@ -739,8 +747,8 @@ class APOGEESplitter(KeplerSplitter):
         "APOGEE_KEPLER_COOLDWARF".'''
 
         indices = catalog.target_indices(self.data, target_label)
-        if not names:
-            names = (target_label, "Not " + target_label)
+        if not splitnames:
+            splitnames = (target_label, "Not " + target_label)
         if not target_crit:
             target_crit = target_label
 
@@ -769,8 +777,8 @@ class APOGEESplitter(KeplerSplitter):
         self._setup_complement_index(splitnames, koi_indices, koi_crit)
 
     def split_cool_dwarfs(
-            self, splitnames=("Cool Sample", "Not Cool Sample"), 
-            apogee1_flag="APOGEE_KEPLER_COOLDWARF", 
+            self, splitnames=("Cool Sample", "Not Cool Sample"),
+            cool_crit="Cool Dwarfs", apogee1_flag="APOGEE_KEPLER_COOLDWARF", 
             apogee2_flag="APOGEE2_APOKASC_DWARF", dwarf_flag="Jen Dwarf",
             hlim_flag="H Jen", sdss_cool_flag="Jen Cool", 
             no_sdss_flag="No SDSS Teff", kic_cool_flag="KIC Jen Cool"):
@@ -798,15 +806,15 @@ class APOGEESplitter(KeplerSplitter):
         orig_targets = self.indices[apogee1_flag]
         apogee2_sdss = au.multi_logical_and(
             self.indices[apogee2_flag], self.indices[dwarf_flag],
-            self.indices[hlim_flag], self_indices[sdss_cool_flag])
+            self.indices[hlim_flag], self.indices[sdss_cool_flag])
         apogee2_nosdss = au.multi_logical_and(
             self.indices[apogee2_flag], self.indices[dwarf_flag],
-            self.indices[hlim_flag], self_indices[no_sdss_flag],
+            self.indices[hlim_flag], self.indices[no_sdss_flag],
             self.indices[kic_cool_flag])
         full_sample = au.multi_logical_or(
             orig_targets, apogee2_sdss, apogee2_nosdss)
 
-        self._setup_complement_index(splitnames, full_sample, orig_crit)
+        self._setup_complement_index(splitnames, full_sample, cool_crit)
 
     def subsample_len(self, namelist):
         '''Get the size of a subsample.
@@ -825,14 +833,16 @@ class APOGEESplitter(KeplerSplitter):
 class APOKASCSplitter(APOGEESplitter):
     '''A splitter for the APOKASC dataset.'''
 
-    def __init__(self, data=None, kic_col="KEPLER_INT", tm_col="2MASS_ID"):
+    def __init__(self, data=None, splitgroups=None, indices=None, 
+                 kic_col="KEPLER_INT", tm_col="2MASS_ID"):
         '''Initialize a splitter of APOKASC data.
         
         If the data parameter is passed, then it will be set to the full data
         sample. If not, then it will be read in manually.'''
         if not data:
             data = catin.APOKASC_with_KIC_stelparms()
-        super().__init__(data, kic_col=kic_col, tm_col=tm_col)
+        super().__init__(data, splitgroups=splitgroups, indices=indices, 
+                         kic_col=kic_col, tm_col=tm_col)
 
     def split_asteroseismic_dwarfs(
         self, dwarfcol="RADIUS_DW", splitnames=(
@@ -881,14 +891,16 @@ class CombinedRotationSplitter(APOGEESplitter,McQuillanSplitter):
 
     This splitter will be useful for unifying parts of the Kepler sample which
     overlap when observed with McQuillan and APOGEE.'''
-    def __init__(self, data=None, kic_col="kepid", tm_col="tm_designation"):
+    def __init__(self, data=None, splitgroups=None, indices=None, 
+                 kic_col="kepid", tm_col="tm_designation"):
         '''A class for overlapping spectroscopic and photometric data.
 
         These objects ought to have both vsinis and rotational periods.'''
         if not data:
             data = catin.dr14_with_KIC_stelparms()
             data["LOGG_FIT"] = data["FPARAM"][:,1]
-        super().__init__(data, kic_col=kic_col, tm_col=tm_col)
+        super().__init__(data, splitgroups=splitgroups, indices=indices, 
+                         kic_col=kic_col, tm_col=tm_col)
 
 def initialize_APOGEE_splitter_with_bins(aposplit):
     '''Initialize the APOGEE splitter with Teff bins.'''
@@ -1007,7 +1019,43 @@ def initialize_cool_dwarfs(aposplit):
 
     newsplitter.split_McQuillan_periods()
 
+    newsplitter.split_cool_dwarfs()
+
     return newsplitter
+
+def initialize_general_APOGEE(aposplit):
+    '''Initialize the most general and applicable cuts to APOGEE'''
+    aposplit.split_teff(
+        "TEFF", [4500, 5450, 5500], (
+            "Too Cool", "Right Teff", "Teff Age Evolution", "Too Hot"),
+        teff_crit="APOGEE Teff")
+    aposplit.split_logg("LOGG_FIT", 4.2, ("Giant", "Dwarf"),
+                           logg_crit="Subgiant Split")
+    
+    aposplit.split_mag(
+        "hmag", [7, 11], ("H Bright", "H Jen", "H Faint"), mag_crit="H")
+
+    aposplit.split_targeting("APOGEE_KEPLER_COOLDWARF")
+    aposplit.split_targeting("APOGEE2_APOKASC_DWARF")
+    aposplit.split_by_ASPCAP_flags()
+
+    aposplit.split_original_KIC_params()
+
+    aposplit.split_McQuillan_periods()
+
+
+def initialize_cool_KICs(kicsplit):
+    '''Initialize cool dwarfs that have KIC values.'''
+    kicsplit.split_teff(
+        "SDSS-Teff", [0, 5500], ("No SDSS Teff", "Jen Cool", "Jen Hot"), 
+        teff_crit="SDSS Teff")
+    kicsplit.split_teff(
+        "K-Teff", 5500, ("KIC Jen Cool", "KIC Jen Hot"), 
+        teff_crit="KIC Teff")
+    kicsplit.split_logg("log(g)", 4.0, ("Jen Giant", "Jen Dwarf"),
+                           logg_crit="KIC logg")
+
+    kicsplit.split_cool_dwarfs()
 
 def initialize_apogee_dwarf_rotation_sample(aposplit):
     '''Initialize the dwarf rotation sample.
@@ -1327,10 +1375,30 @@ def jen_cool_splitter():
     the APOGEE2_APOKASC_DWARF targets. These targets mostly have Teff < 5500
     and H < 11.'''
     
-    jendata = catalog.build_cool_dwarf_sample()
-    jensplitter = APOGEESplitter(data=jendata)
-    initialize_Jen_Sample_Splitter(jensplitter)
-    return jensplitter
+    fullapogee = APOGEESplitter()
+    initialize_general_APOGEE(fullapogee)
+    kicsplit = fullapogee.split_subsample(["Orig KIC Present"])
+    initialize_cool_KICs(kicsplit)
+    return kicsplit.split_subsample(["Cool Sample"])
+
+def general_to_cool_sample(apogeesplitter):
+    '''Separate the cool sample from a generalized APOGEE splitter.'''
+    kicsplit = apogeesplitter.split_subsample(["Orig KIC Present"])
+    initialize_cool_KICs(kicsplit)
+    cooldwarfs = kicsplit.split_subsample(["Cool Sample"])
+    return cooldwarfs
+
+def general_to_hot_kic_sample(apogeesplitter):
+    '''Get the subset of the hot sample that has KIC parameters.'''
+    hot_kic = apogeesplitter.split_subsample([
+        "APOGEE2_APOKASC_DWARF", "Orig KIC Present"])
+    return hot_kic
+
+def general_to_hot_nonkic_sample(apogeesplitter):
+    '''Get the subset of the hot sample without KIC parameters.'''
+    hot_kic = apogeesplitter.split_subsample([
+        "APOGEE2_APOKASC_DWARF", "Orig KIC Not Present"])
+    return hot_kic
 
 def jen_cool_apodwarf_splitter():
     '''Create a Datasplitter with the good dwarf subset of Jen's sample.
