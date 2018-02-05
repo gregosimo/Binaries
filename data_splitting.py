@@ -662,10 +662,10 @@ class APOGEESplitter(KeplerSplitter):
         known_nondlsbs = catalog.mark_non_DLSB_indices(
             apids, nodl_db=nodl_db)
         unknown_dlsbs = np.logical_not(np.logical_or(
-            self.indices[dl_names[0]], self.indices[dl_names[1]]))
+            known_dlsbs, known_nondlsbs))
 
         indexarr = [known_dlsbs, known_nondlsbs, unknown_dlsbs]
-        self._setup_indices(splitnames, indexarr, dlsb_crit)
+        self._setup_indices(dl_names, indexarr, dlsb_crit)
 
     def split_asteroseismic_dwarfs(
         self, splitnames=("Asteroseismic", "Non-asteroseismic"), 
@@ -1029,7 +1029,7 @@ def initialize_general_APOGEE(aposplit):
         "TEFF", [4500, 5450, 5500], (
             "Too Cool", "Right Teff", "Teff Age Evolution", "Too Hot"),
         teff_crit="APOGEE Teff")
-    aposplit.split_logg("LOGG_FIT", 4.2, ("Giant", "Dwarf"),
+    aposplit.split_logg("LOGG_FIT", [3.5, 4.2], ("Giant", "Subgiant", "Dwarf"),
                            logg_crit="Subgiant Split")
     
     aposplit.split_mag(
@@ -1043,6 +1043,10 @@ def initialize_general_APOGEE(aposplit):
 
     aposplit.split_McQuillan_periods()
 
+    aposplit.split_vsini(
+        [7, 10], ("Vsini nondet", "Vsini marginal", "Vsini det"))
+
+    aposplit.split_dlsb()
 
 def initialize_cool_KICs(kicsplit):
     '''Initialize cool dwarfs that have KIC values.'''
@@ -1101,6 +1105,7 @@ def initialize_combined_rotation_sample(aposplit):
     The dwarf rotation sample consists of those targets in Jen's cool dwarf
     sample that meet the APOGEE criteria of having log(g) > 4.0, and that have
     Teff > 4250 in order to avoid bad ASPCAP fits.
+
     
     This function deals with those targets which have McQuillan detections!'''
     aposplit.split_logg(
