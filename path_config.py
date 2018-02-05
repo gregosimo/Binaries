@@ -77,6 +77,9 @@ APOGEE_ANCILLARY_TARGETS_TABLE = PROPOSAL_PATH / "ancillary_targets.txt"
 DR14_ALLVISIT_PATH = HEAD_DIR / "allVisit-l31c.2.fits"
 DR14_ALLSTAR_PATH = HEAD_DIR / "allStar-l31c.2.fits"
 
+DLSB_DB = HEAD_DIR / "scripts" / "DLSB.txt"
+NODL_DB = HEAD_DIR / "scripts" / "noDL.txt"
+
 # SHORTCUT PATHS
 # These are for subsets of table that take a really long time to generate.
 # Since disk space is cheap, I think it will be much more valuable to just

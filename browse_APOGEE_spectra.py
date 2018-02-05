@@ -9,9 +9,10 @@ import numpy.core.defchararray as npstr
 import numpy as np
 
 import astropy_util as au
+import path_config as paths
 
-DEFAULT_DLSB_DB = "./DLSB.txt"
-DEFAULT_NULL_DB = "./noDL.txt"
+DEFAULT_DLSB_DB = paths.DLSB_DB
+DEFAULT_NULL_DB = paths.NODL_DB
 
 # Maybe this isn't the correct way to do things.
 class DLSB_prompt(cmd.Cmd):
