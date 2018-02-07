@@ -651,10 +651,11 @@ class APOGEESplitter(KeplerSplitter):
         Split the sample based on previous observations of double-lined
         spectroscopic binaries. The matching is done via the APOGEE ID of the
         targets. Databases which contain APOGEE IDs of confirmed DLSBs and
-        non-DLSBs are in dlsb_db and nodl_db. Labels for the confirmed DLSB,
-        confirmed non-DLSB, and unconfirmed classes should be given as a tuple
-        in dl_names. Other analyses of double-lined spectroscopic binaries can
-        be specified by dlsb_crit.
+        non-DLSBs are in dlsb_db and nodl_db.
+        
+        Labels for the confirmed DLSB, confirmed non-DLSB, and unconfirmed 
+        classes should be given as a tuple in dl_names. Other analyses of 
+        double-lined spectroscopic binaries can be specified by dlsb_crit.
         '''
         apids = self.data[apid_col]
         known_dlsbs = catalog.mark_DLSB_indices(
