@@ -1016,7 +1016,7 @@ def initialize_cool_dwarfs(aposplit):
                            logg_crit="KIC logg")
 
     newsplitter.split_mag(
-        "hmag", [7, 11], ("H Bright", "H Jen", "H Faint"), mag_crit="H")
+        "H", [7, 11], ("H Bright", "H Jen", "H Faint"), mag_crit="H")
 
     newsplitter.split_targeting("APOGEE_KEPLER_COOLDWARF")
     newsplitter.split_targeting("APOGEE2_APOKASC_DWARF")

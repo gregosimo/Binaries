@@ -585,7 +585,8 @@ def stelparms_triple_KIC(
     uncertainties using DSEP isochrones.'''
     hubercat = read_KIC_DR25_catalog(huberpath)
     pinsonneaultcat = read_Pinsonneault_2012_catalog(pinpath)
-    joinedcat = au.join_by_id(hubercat, pinsonneaultcat, "kepid", "KIC")
+    joinedcat = au.join_by_id(
+        hubercat, pinsonneaultcat, "kepid", "KIC", join_type="left")
     return joinedcat
 
 
