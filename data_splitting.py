@@ -274,6 +274,10 @@ class DataSplitter:
         indexlen = np.count_nonzero(indices)
         return indexlen
 
+    def __len__(self):
+        '''Get the size of the full sample.'''
+        return self.subsample_len([])
+
     def names(self):
         '''Print out all the valid subsamples in this dataset.'''
         print(str(self))
