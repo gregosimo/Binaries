@@ -1583,3 +1583,119 @@ def add_APOGEE_Binary_column(datatab, apidcol="APOGEE_ID", newcol="Binarity"):
     targets will be identified by the APOGEE_IDs in apidcol.'''
     binarray = APOGEE_Binary_Classification(datatab[apidcol])
     datatab[newcol] = binarray
+
+###############################################################################
+# Tables for Don #
+###############################################################################
+
+def write_Garcia_with_McQuillan_overlap():
+    '''Write a table for Garcia with the McQuillan overlap.'''
+    garcia = catin.read_Garcia_periods()
+    garcia_cols = garcia[["KIC", "Prot", "e_Prot", "Sph", "e_Sph", "Type"]]
+    del(garcia)
+    mcq = catin.read_McQuillan_catalog()
+    mcq_cols = mcq[["KIC", "Prot", "e_Prot", "Rper"]]
+    del(mcq)
+    joined_garcia_mcq = au.join_by_id(
+        garcia_cols, mcq_cols, "KIC", "KIC", join_type="left", 
+        conflict_suffixes=["_Garcia", "_McQuillan"])
+    huber = catin.read_KIC_DR25_catalog()
+    huber_cols = huber[[
+        "kepid", "teff", "teff_err1", "teff_err2", "logg", "logg_err1",
+        "logg_err2", "teff_prov", "logg_prov"]]
+    del(huber)
+    joined_garcia_mcq_huber = au.join_by_id(
+        joined_garcia_mcq, huber_cols, "KIC", "kepid", join_type="left")
+
+    comment = [
+        "The Garcia sample with accompanying McQuillan and Huber entries.",
+        "", 
+        "This table contains the rotational period and activity measure of", 
+        "the spot oscillation for the Garcia sample. The activity measure in",
+        'this case is labeled as "Sph", which is the average standard',
+        "deviation of the light curve in 5*Prot intervals.",
+        "",
+        "It also contains the rotational period and activity measure of the", 
+        "spot oscillation for the McQuillan overlap sample. Around 1/3 of the",
+        "Garcia sample has McQuillan periods. The activity measure in this",
+        "case is labeled as Rper, and is the height of the autocorrelation",
+        "peak.",
+        "",
+        "The Teff and log(g) included in this table were derived from the",
+        "Huber et al (2014) methodology, and include asymmetric",
+        "uncertainties. The teff_prov and logg_prov columns describe the", 
+        "inputs for the analysis: whether they use KIC photometry, J-K",
+        "photometry, spectroscopy, or asteroseismology, to name a few.",
+        "",
+        "The codes for the provenances can be found:",
+        "https://exoplanetarchive.ipac.caltech.edu/docs/API_keplerstellar_columns.html#stellar"
+    ]
+    joined_garcia_mcq_huber.meta["comments"] = comment
+
+    joined_garcia_mcq_huber.write(
+        str(paths.HEAD_DIR / "Don_Garcia_Table.txt"), 
+        format="ascii.fixed_width", include_names=
+    ["KIC", "Prot_Garcia", "e_Prot_Garcia", "Sph", "e_Sph", "Type",
+     "Prot_McQuillan", "e_Prot_McQuillan", "Rper", "Huber teff", "teff_err1", 
+     "teff_err2", "Huber logg", "logg_err1", "logg_Err2", "teff_prov",
+     "logg_prov"])
+
+def combined_huber_apogee_table():
+    '''Write a table with APOGEE targets and Huber et al parameters.'''
+    huber = catin.read_KIC_DR25_catalog()
+    huber_cols = huber[[
+        "kepid", "tm_designation", "teff", "teff_err1", "teff_err2", "logg", 
+        "logg_err1", "logg_err2", "teff_prov", "logg_prov"]]
+    huber_cols.rename_column("teff", "Huber teff")
+    huber_cols.rename_column("logg", "Huber logg")
+    huber_cols.rename_column("kepid", "KIC")
+    del(huber)
+    apogee = catin.read_dr14_allStar()
+    apogee["LOGG_FIT"] = apogee["FPARAM"][:,1]
+    apogee_cols = apogee[[
+        "APOGEE_ID", "TEFF", "LOGG_FIT", "VSINI", "VHELIO_AVG", "VERR",
+        "VSCATTER", "NVISITS", "M_H", "M_H_ERR", "FE_H", "FE_H_ERR", 
+        "ASPCAPFLAGS"]]
+    del(apogee)
+    apogee_cols.rename_column("TEFF", "APOGEE teff")
+    apogee_cols.rename_column("LOGG_FIT", "APOGEE logg")
+    joined_apogee_huber = join_by_2MASS_key(
+        huber_cols, apogee_cols, "tm_designation", "APOGEE_ID", join_type="inner")
+
+    comment = [
+        "The APOGEE Kepler sample with Huber parameters.",
+        "",
+        "This is the intersection of targets with APOGEE observations and", 
+        "Huber et al (2014) parameters (which should be all Kepler targets).",
+        "",
+        "The Huber et al (2014) parameters include the effective and log(g)",
+        "including the asymmetric uncertainties. The teff_prov and logg_prov",
+        "columns describe the inputs for the analysis. The codes for the",
+        "provenances can be found:",
+        "https://exoplanetarchive.ipac.caltech.edu/docs/API_keplerstellar_columns.html#stellar",
+        "",
+        "The APOGEE parameters have the Teff and log(g) as inferred from the",
+        "APOGEE spectra. There is also a radial velocity (given in the",
+        '"VHELIO_AVG" column) and its error ("VERR"). For targets with more',
+        'than one visit, there is also a "VSCATTER" computed to reflect RV',
+        'variability.',
+        "",
+        "Metallicity can be described in two quantities: [Fe/H] and [M/H].",
+        "The usual iron abundance and its error are associated with [Fe/H].",
+        "A combined metallicity (which should essentially be [Z/H]) and its",
+        "error is also provided."
+    ]
+    joined_apogee_huber.meta["comments"] = comment
+
+    joined_apogee_huber.write(
+        str(paths.HEAD_DIR / "Don_APOGEE_Table.txt"), 
+        format="ascii.fixed_width", include_names=[
+            "KIC", "APOGEE_ID", "APOGEE teff", "APOGEE logg", "VSINI",
+            "VHELIO_AVG", "VERR", "VSCATTER", "NVISITS", "M_H", "M_H_ERR",
+            "FE_H", "FE_H_ERR", "ASPCAPFLAGS", "Huber teff", "teff_err1", 
+             "teff_err2", "Huber logg", "logg_err1", "logg_Err2", "teff_prov",
+             "logg_prov"])
+
+
+    
+
