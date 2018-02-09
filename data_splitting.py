@@ -851,7 +851,7 @@ class APOKASCSplitter(APOGEESplitter):
 
     def split_asteroseismic_dwarfs(
         self, dwarfcol="RADIUS_DW", splitnames=(
-            "Asteroseismic Dwarfs", "Asteroseismic Giants"), 
+            "Asteroseismic Giants", "Asteroseismic Dwarfs"), 
         apodwarf_crit="Asteroseismic Dwarf"):
         '''Split stars with dwarf pipeline asteroseismic parameters.
 
@@ -860,7 +860,7 @@ class APOKASCSplitter(APOGEESplitter):
         for objects that have been run through the dwarf pipeline, and null for
         objects that don't.'''
         invalid = catalog.invalid_indices(self.data, dwarfcol)
-        self._setup_complement_index(splitnames[::-1], invalid, apodwarf_crit)
+        self._setup_complement_index(splitnames, invalid, apodwarf_crit)
 
     def split_Jen_targets(
             self, jencol="VANSADERS", 
@@ -1038,7 +1038,7 @@ def initialize_general_APOGEE(aposplit):
                            logg_crit="Subgiant Split")
     
     aposplit.split_mag(
-        "hmag", [7, 11], ("H Bright", "H Jen", "H Faint"), mag_crit="H")
+        "H", [7, 11], ("H Bright", "H Jen", "H Faint"), mag_crit="H")
 
     aposplit.split_targeting("APOGEE_KEPLER_COOLDWARF")
     aposplit.split_targeting("APOGEE2_APOKASC_DWARF")
@@ -1142,7 +1142,7 @@ def initialize_asteroseismic_sample(aposplit):
     
     This will set aside the asteroseismic dwarfs from the rest of the sample.'''
     # First split the asteroseismic targets
-    aposplit.split_asteroseismic_dwarfs(apid_col=aposplit.tm_col)
+    aposplit.split_asteroseismic_dwarfs()
 
     # Now split the spectroscopic targets
     aposplit.split_logg("LOGG_FIT", [3.5, 4.0], (
@@ -1151,6 +1151,13 @@ def initialize_asteroseismic_sample(aposplit):
 
     # Split  by quality.
     aposplit.split_by_ASPCAP_flags()
+
+    # Split by vsini
+    aposplit.split_vsini(
+        [7, 10], ["Vsini nondet", "Vsini marginal", "Vsini det"])
+
+    # Split by DLSB presence.
+    aposplit.split_dlsb(apid_col="2MASS_ID")
 
     # Split by McQuillan Periods
     aposplit.split_McQuillan_periods(kiccol=aposplit.kic_col)
