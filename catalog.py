@@ -1296,7 +1296,8 @@ def good_aspcap_fits(apotable, aspcapcol="ASPCAPFLAG"):
 # Have a lookup dictionary that has the column and bitmask information.
 target_dict = {
     "APOGEE_KEPLER_COOLDWARF": ("APOGEE_TARGET2", 16), 
-    "APOGEE2_APOKASC_DWARF": ("APOGEE2_TARGET1", 28)}
+    "APOGEE2_APOKASC_DWARF": ("APOGEE2_TARGET1", 28),
+    "APOGEE_KEPLER_SEISMO": ("APOGEE_TARGET1", 27)}
 
 def target_indices(fulltable, targetlabel):
     '''Select the objects in fulltable that are specified by targetlabel.
