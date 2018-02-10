@@ -887,142 +887,33 @@ class APOKASCSplitter(APOGEESplitter):
         indexlen = len(np.unique(names))
         return indexlen
 
-class CombinedRotationSplitter(APOGEESplitter,McQuillanSplitter):
-    '''A splitter for a dataset containing both APOGEE and McQuillan data.
-
-    This splitter will be useful for unifying parts of the Kepler sample which
-    overlap when observed with McQuillan and APOGEE.'''
-    def __init__(self, data=None, splitgroups=None, indices=None, 
-                 kic_col="kepid", tm_col="tm_designation"):
-        '''A class for overlapping spectroscopic and photometric data.
-
-        These objects ought to have both vsinis and rotational periods.'''
-        if not data:
-            data = catin.dr14_with_KIC_stelparms()
-            data["LOGG_FIT"] = data["FPARAM"][:,1]
-        super().__init__(data, splitgroups=splitgroups, indices=indices, 
-                         kic_col=kic_col, tm_col=tm_col)
-
-def initialize_APOGEE_splitter_with_bins(aposplit):
-    '''Initialize the APOGEE splitter with Teff bins.'''
-
-    aposplit.split_logg(
-        "logg", [3.5, 4], ["Huber giant", "Huber subgiant", "Huber dwarf"], 
-        logg_crit="Huber logg")
-    aposplit.split_logg(
-        "LOGG_FIT", [3.5, 4], ["APOGEE giant", "APOGEE subgiant", "APOGEE dwarf"], 
-        logg_crit="APOGEE logg")
-
-    tempbins = np.linspace(3500, 6500, 6, endpoint=True)
-    tempnames = (["<{0:.0f}".format(tempbins[0])] + 
-                 ["{0:.0f}-{1:.0f}".format(temp1, temp2) for temp1, temp2 in
-                  zip(tempbins[:-1], tempbins[1:])] +
-                 [">{0:.0f}".format(tempbins[-1])])
-    aposplit.split_teff(
-        "teff", tempbins, tempnames, teff_crit="Huber Teff")
-
-    aposplit.split_vscatter(1, ["RV Nonvar", "RV Var"])
-
-    aposplit.split_vsini(
-        [0, 7, 10], ["No Vsini", "Vsini nondet", "Vsini marginal", "Vsini det"])
-
-    aposplit.split_spectroscopic_rapid_rotators(
-        [1, 5], ["Very rapid rotators", "Rapid rotators", "Slow rotators"])
-
-    aposplit.split_dlsb()
-
-    aposplit.split_asteroseismic_dwarfs()
-
-    aposplit.split_McQuillan_periods(kiccol=aposplit.kic_col)
-
-    aposplit.split_by_ASPCAP_flags()
-
-    aposplit.split_apogee_targeting()
-
-def initialize_Jen_Sample_Splitter(aposplit):
-    '''Initialize a splitter for Jen's cool dwarf sample.
-
-    This splitter will make the usual splits for Jen's cool dwarf sample.
+def create_combined_rotation_splitter(baseclass):
+    '''Create a custom CombinedRotationSplitter.
     
-    * Splits between dwarfs, subgiants, and giants in both APOGEE and Huber
-      space. 
+    Return a class which inherits from both the given base class and a
+    McQuillanSplitter.'''
 
-    * Splits at 4250 or so in Teff space where APOGEE models start getting
-      funky (but verify these.
+    class CombinedRotationSplitter(baseclass,McQuillanSplitter):
+        '''A splitter for a dataset containing both APOGEE and McQuillan data.
 
-    * A VSCATTER split to discern RV variable from RV nonvariable objects.
+        This splitter will be useful for unifying parts of the Kepler sample which
+        overlap when observed with McQuillan and APOGEE.'''
+        def __init__(self, data=None, splitgroups=None, indices=None, 
+                     kic_col="kepid", tm_col="tm_designation"):
+            '''A class for overlapping spectroscopic and photometric data.
 
-    * A split in vsini at various detection levels.
+            These objects ought to have both vsinis and rotational periods.'''
+            if not data:
+                data = catin.dr14_with_KIC_stelparms()
+                data["LOGG_FIT"] = data["FPARAM"][:,1]
+            super().__init__(data, splitgroups=splitgroups, indices=indices, 
+                             kic_col=kic_col, tm_col=tm_col)
 
-    * A split to separate rapid rotators from slow rotators.
+    return CombinedRotationSplitter
 
-    * A split to separate know DLSBs (which should be complete).
-
-    * A split to separate those with McQuillan periods and those without.
-
-    * A split by ASPCAP quality.'''
-
-    aposplit.split_logg(
-        "LOGG_FIT", [3.5, 4], [
-            "APOGEE giant", "APOGEE subgiant", "APOGEE dwarf"],
-        logg_crit="APOGEE_logg")
-    
-    aposplit.split_teff(
-        "TEFF", 4250, ["Bad Teff", "Good Teff"], teff_crit="APOGEE Models")
-
-    aposplit.split_vscatter(
-        [0, 1], ["Single epoch", "RV Nonvar", "RV Var"], invert_inequality=True)
-
-    aposplit.split_vsini([0, 7, 10], [
-        "No Vsini", "Vsini nondet", "Vsini marginal", "Vsini det"])
-
-    aposplit.split_dlsb()
-
-    aposplit.split_McQuillan_periods(kiccol=aposplit.kic_col)
-
-    aposplit.split_by_ASPCAP_flags()
-
-    aposplit.split_apogee_targeting()
-
-def initialize_cool_dwarfs(aposplit):
-    '''Get the cool dwarfs.
-
-    Set a quality Teff cut between 4500 and 5450 K. The former is where fits
-    start to all be flagged as STAR_BAD. The latter is where the radius starts
-    experiencing significant age evolution.'''
-    # I want all of these to be in the original KIC.
-    aposplit.split_original_KIC_params()
-    origteffs = aposplit.subsample(["Orig KIC Present"])
-    newsplitter = APOGEESplitter(origteffs)
-
-    newsplitter.split_teff(
-        "TEFF", [4500, 5450, 5500], (
-            "Too Cool", "Right Teff", "Teff Age Evolution", "Too Hot"),
-        teff_crit="APOGEE Teff")
-    newsplitter.split_logg("LOGG_FIT", 4.2, ("Giant", "Dwarf"),
-                           logg_crit="Subgiant Split")
-
-    newsplitter.split_teff(
-        "SDSS-Teff", [0, 5500], ("No SDSS Teff", "Jen Cool", "Jen Hot"), 
-        teff_crit="SDSS Teff")
-    newsplitter.split_teff(
-        "K-Teff", 5500, ("KIC Jen Cool", "KIC Jen Hot"), 
-        teff_crit="KIC Teff")
-    newsplitter.split_logg("log(g)", 4.0, ("Jen Giant", "Jen Dwarf"),
-                           logg_crit="KIC logg")
-
-    newsplitter.split_mag(
-        "H", [7, 11], ("H Bright", "H Jen", "H Faint"), mag_crit="H")
-
-    newsplitter.split_targeting("APOGEE_KEPLER_COOLDWARF")
-    newsplitter.split_targeting("APOGEE2_APOKASC_DWARF")
-    newsplitter.split_by_ASPCAP_flags()
-
-    newsplitter.split_McQuillan_periods()
-
-    newsplitter.split_cool_dwarfs()
-
-    return newsplitter
+################################################################################
+# Initialize Splitters #
+###############################################################################
 
 def initialize_general_APOGEE(aposplit):
     '''Initialize the most general and applicable cuts to APOGEE'''
@@ -1062,77 +953,6 @@ def initialize_cool_KICs(kicsplit):
 
     kicsplit.split_cool_dwarfs()
 
-def initialize_apogee_dwarf_rotation_sample(aposplit):
-    '''Initialize the dwarf rotation sample.
-
-    The dwarf rotation sample consists of those targets in Jen's cool dwarf
-    sample that meet the APOGEE criteria of having log(g) > 4.0, and that have
-    Teff > 4250 in order to avoid bad ASPCAP fits.'''
-    aposplit.split_logg(
-        "logg", [3.6, 4.2], ["Huber giant", "Huber subgiant", "Huber dwarf"],
-        logg_crit="Huber logg")
-    aposplit.split_logg(
-        "LOGG_FIT", [3.6, 4.2], 
-        ["APOGEE Giant", "APOGEE Subgiant", "APOGEE Dwarf"], 
-        logg_crit="APOGEE logg")
-
-    aposplit.split_teff(
-        "TEFF", 5250, ["ZAMS", "Age-evolved"], teff_crit="Age Evolution")
-    # Split using the original KIC parameters.
-    aposplit.split_teff("K-Teff", 5500, ("Too Hot For Jen", "Jen Cool"),
-                        teff_crit="Original KIC Teff")
-    aposplit.split_logg("KIC logg", 4.0, ("Too giant for Jen", "Jen Dwarf"),
-                        logg_crit="Original KIC Logg")
-
-    aposplit.split_vscatter(
-        [0, 1], ["Single epoch", "RV Nonvar", "RV Var"], invert_inequality=True)
-
-    aposplit.split_vsini([0, 7, 10], [
-        "No Vsini", "Vsini nondet", "Vsini marginal", "Vsini det"])
-
-    aposplit.split_spectroscopic_rapid_rotators(
-        [1, 5], ["Very rapid rotators", "Rapid rotators", "Slow rotators"],
-        radius_col="APOGEE radius")
-
-    aposplit.split_dlsb()
-
-    aposplit.split_McQuillan_periods(kiccol=aposplit.kic_col)
-
-    aposplit.split_by_ASPCAP_flags()
-
-def initialize_combined_rotation_sample(aposplit):
-    '''Initialize the dwarf rotation sample with McQuillan targets.
-
-    The dwarf rotation sample consists of those targets in Jen's cool dwarf
-    sample that meet the APOGEE criteria of having log(g) > 4.0, and that have
-    Teff > 4250 in order to avoid bad ASPCAP fits.
-
-    
-    This function deals with those targets which have McQuillan detections!'''
-    aposplit.split_logg(
-        "logg", [3.6, 4.2], ["Huber giant", "Huber subgiant", "Huber dwarf"],
-        logg_crit="Huber logg")
-
-    aposplit.split_teff(
-        "TEFF", 5250, ["ZAMS", "Age-evolved"], teff_crit="Age Evolution")
-
-    aposplit.split_vscatter(
-        [0, 1], ["Single epoch", "RV Nonvar", "RV Var"], invert_inequality=True)
-
-    aposplit.split_vsini([0, 7, 10], [
-        "No Vsini", "Vsini nondet", "Vsini marginal", "Vsini det"])
-
-    aposplit.split_spectroscopic_rapid_rotators(
-        [1, 5], ["Very rapid rotators", "Rapid rotators", "Slow rotators"],
-        radius_col="APOGEE radius")
-
-    aposplit.split_dlsb()
-
-    aposplit.split_period([1, 5], [
-        "Very rapid period", "Rapid period", "Slow period"])
-
-    aposplit.split_by_ASPCAP_flags()
-
 def initialize_asteroseismic_sample(aposplit):
     '''Initialize the sample for asteroseismic targets.
     
@@ -1151,12 +971,15 @@ def initialize_asteroseismic_sample(aposplit):
     # Split by McQuillan Periods
     aposplit.split_McQuillan_periods(kiccol=aposplit.kic_col)
 
-def gen_samp(name):
-    '''Function to generate the given sample objects which was broken down.'''
-    try:
-        return globals()[name]
-    except KeyError:
-        return vstack([gen_samp(ob) for ob in gendict[name]])
+def initialize_mcquillan_sample(mcqsplit):
+    '''Makes a series of cuts related to the rotation period of the targets.'''
+    mcqsplit.split_period([1, 3], ["Too rapid", "Rapid", "Slow"])
+
+def initialize_asteroseismic_periods(aposplit):
+    '''Initialize the asteroseismic sample with McQuillan periods.'''
+    initialize_asteroseismic_sample(aposplit)
+    initialize_mcquillan_sample(aposplit)
+
 
 def HR_Param_Check():
     '''Check how logg and teff parameters match with each other.'''
@@ -1189,6 +1012,26 @@ def KIC_APOGEE_Param_Diff():
     ax2.set_xlabel("KIC Teff")
     ax2.set_ylabel("KIC - APOGEE Log(g) Difference")
     hr.invert_x_axis(ax2)
+
+###############################################################################
+# Join period table to DataSplitter #
+###############################################################################
+
+def add_periods_to_datasplitter(split, kic_col="KIC"):
+    '''Add the McQuillan periods to the given splitter.
+    
+    This will return a brand new splitter which inherits from the original
+    splitter as well as the McQuillanSplitter.'''
+
+    mcq = catin.read_McQuillan_catalog()
+    catin.trim_McQuillan_catalog(mcq)
+    newdata = au.join_by_id(split.data, mcq, kic_col, "KIC")
+    NewRotationClass = create_combined_rotation_splitter(split.__class__)
+    combosplit = NewRotationClass(
+        data=newdata, kic_col=kic_col, tm_col=split.tm_col)
+    return combosplit
+
+
 
 ################################################################################
 # Datasplitter Functions #

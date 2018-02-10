@@ -375,7 +375,7 @@ def mcquillan_with_stelparms(
     stellcat = read_KIC_DR25_catalog(kic_path)
     mcquillancat = au.join_by_id(
         mcq, stellcat, "KIC", "kepid", join_type="left")
-    mcquillancat.remove_columns(["Teff", "log_g_", "Mass", "_RA", "_DE", "Ref"])
+    trim_McQuillan_catalog(mcquillancat)
     return mcquillancat
 
 @au.shortcut_file(paths.SHORTCUT_MCQUILLAN_NONDET_STELLPARM)
@@ -394,8 +394,7 @@ def mcquillan_nondetections_with_stelparms(
         mcquillancat["teff"].mask]
     mcquillancat["logg"][mcquillancat["logg"].mask] = mcquillancat["log_g_"][
         mcquillancat["logg"].mask]
-    mcquillancat.remove_columns(
-        ["Teff", "log_g_", "Mass", "_RA", "_DE", "Ref"])
+    trim_McQuillan_catalog(mcquillancat)
     return mcquillancat
 
 @au.shortcut_file(paths.SHORTCUT_MCQUILLAN_FLICKER)
@@ -442,7 +441,7 @@ def APOKASC_with_McQuillan_KIC(
     This function will also have the Huber KIC stellar parameters.'''
     apocat = APOKASC_Huber_KIC(apofile, huberfile)
     mcq = read_McQuillan_catalog(mcquillanfile).copy()
-    mcq.remove_columns(["Teff", "log_g_", "Mass", "_RA", "_DE", "Ref"])
+    trim_McQuillan_catalog(mcq)
     combined_table = au.join_by_id(
         apocat, mcq, "KEPLER_INT", "KIC", join_type="left")
 
@@ -587,7 +586,21 @@ def stelparms_triple_KIC(
     pinsonneaultcat = read_Pinsonneault_2012_catalog(pinpath)
     joinedcat = au.join_by_id(
         hubercat, pinsonneaultcat, "kepid", "KIC", join_type="left")
+    del(joinedcat["KIC"])
     return joinedcat
+
+###########
+# Helpers #
+###########
+
+def trim_McQuillan_catalog(cat):
+    '''Limit McQuillan catatalog to just period information.
+
+    Remove the KIC parameters and other not-as-important parameters from the
+    McQuillan catalog. Useful if supplementing an existing table with the
+    McQuillan periods.'''
+    cat.remove_columns(["Teff", "log_g_", "Mass", "_RA", "_DE", "Ref"])
+    
 
 
 ################################################################################
