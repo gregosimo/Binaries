@@ -1603,8 +1603,10 @@ def write_Garcia_with_McQuillan_overlap():
     huber = catin.read_KIC_DR25_catalog()
     huber_cols = huber[[
         "kepid", "teff", "teff_err1", "teff_err2", "logg", "logg_err1",
-        "logg_err2", "teff_prov", "logg_prov"]]
+        "logg_err2", "teff_prov", "logg_prov", "jmag", "hmag", "kmag"]]
     del(huber)
+    huber_cols.rename_column("teff", "Huber teff")
+    huber_cols.rename_column("logg", "Huber logg")
     joined_garcia_mcq_huber = au.join_by_id(
         joined_garcia_mcq, huber_cols, "KIC", "kepid", join_type="left")
 
@@ -1629,7 +1631,9 @@ def write_Garcia_with_McQuillan_overlap():
         "photometry, spectroscopy, or asteroseismology, to name a few.",
         "",
         "The codes for the provenances can be found:",
-        "https://exoplanetarchive.ipac.caltech.edu/docs/API_keplerstellar_columns.html#stellar"
+        "https://exoplanetarchive.ipac.caltech.edu/docs/API_keplerstellar_columns.html#stellar",
+        "",
+        "Also included are 2MASS JHK photometry for all of the targets."
     ]
     joined_garcia_mcq_huber.meta["comments"] = comment
 
@@ -1638,8 +1642,8 @@ def write_Garcia_with_McQuillan_overlap():
         format="ascii.fixed_width", include_names=
     ["KIC", "Prot_Garcia", "e_Prot_Garcia", "Sph", "e_Sph", "Type",
      "Prot_McQuillan", "e_Prot_McQuillan", "Rper", "Huber teff", "teff_err1", 
-     "teff_err2", "Huber logg", "logg_err1", "logg_Err2", "teff_prov",
-     "logg_prov"])
+     "teff_err2", "Huber logg", "logg_err1", "logg_err2", "teff_prov",
+     "logg_prov", "jmag", "hmag", "kmag"])
 
 def combined_huber_apogee_table():
     '''Write a table with APOGEE targets and Huber et al parameters.'''
@@ -1655,8 +1659,8 @@ def combined_huber_apogee_table():
     apogee["LOGG_FIT"] = apogee["FPARAM"][:,1]
     apogee_cols = apogee[[
         "APOGEE_ID", "TEFF", "LOGG_FIT", "VSINI", "VHELIO_AVG", "VERR",
-        "VSCATTER", "NVISITS", "M_H", "M_H_ERR", "FE_H", "FE_H_ERR", 
-        "ASPCAPFLAGS"]]
+        "VSCATTER", "NVISITS", "M_H", "M_H_ERR", "FE_H", "FE_H_ERR", "J", "H",
+        "K", "ASPCAPFLAGS"]]
     del(apogee)
     apogee_cols.rename_column("TEFF", "APOGEE teff")
     apogee_cols.rename_column("LOGG_FIT", "APOGEE logg")
@@ -1684,7 +1688,13 @@ def combined_huber_apogee_table():
         "Metallicity can be described in two quantities: [Fe/H] and [M/H].",
         "The usual iron abundance and its error are associated with [Fe/H].",
         "A combined metallicity (which should essentially be [Z/H]) and its",
-        "error is also provided."
+        "error is also provided.",
+        "",
+        "Also included are 2MASS JHK photometry of the targets. When the",
+        "Huber et al (2014) pipeline fails (in rare cases), the catalog does",
+        "not include 2MASS photometry, even when it exists and is available",
+        "from the APOGEE catalog. Therefore, all 2MASS photometry in this", 
+        "table is taken from the APOGEE catalog instead of the Huber catalog."
     ]
     joined_apogee_huber.meta["comments"] = comment
 
@@ -1693,9 +1703,9 @@ def combined_huber_apogee_table():
         format="ascii.fixed_width", include_names=[
             "KIC", "APOGEE_ID", "APOGEE teff", "APOGEE logg", "VSINI",
             "VHELIO_AVG", "VERR", "VSCATTER", "NVISITS", "M_H", "M_H_ERR",
-            "FE_H", "FE_H_ERR", "ASPCAPFLAGS", "Huber teff", "teff_err1", 
-             "teff_err2", "Huber logg", "logg_err1", "logg_Err2", "teff_prov",
-             "logg_prov"])
+            "FE_H", "FE_H_ERR", "J", "H", "K","ASPCAPFLAGS", "Huber teff", 
+            "teff_err1", "teff_err2", "Huber logg", "logg_err1", "logg_err2", 
+            "teff_prov", "logg_prov"])
 
 
     
