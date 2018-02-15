@@ -994,8 +994,17 @@ def initialize_cool_KICs(kicsplit):
                            logg_crit="KIC logg")
 #   kicsplit.split_logg("LOGG_FIT", [3.5, 4.2], ("Giant", "Subgiant", "Dwarf"))
     kicsplit.split_evstate(crit="Subgiant Split")
+    # I want to split by the huber log(g)s as well.
+    kicsplit.split_evstate(
+        teff_col="teff", logg_col="logg", topdiv_slope=0, 
+        topdiv_coord=(3.5, 5000), bottomdiv_slope=0, 
+        bottomdiv_coord=(4.2, 5000), splitnames=(
+            "Huber giants", "Huber subgiants", "Huber dwarfs", "No Huber EV"),
+        crit="Huber evolutionary state")
 
     kicsplit.split_cool_dwarfs()
+    radius_fit = samp.huber_dwarf_radius_relation()
+    add_radius_column_to_splitter(kicsplit, radius_fit)
 
 def initialize_asteroseismic_sample(aposplit):
     '''Initialize the sample for asteroseismic targets.
@@ -1256,16 +1265,15 @@ def rapid_rotator_det_test(
 ###############################################################################
 
 def add_radius_column_to_splitter(
-    split, teff_col="TEFF", radius_col="APOGEE RADIUS"):
+    split, teff_rad, teff_col="TEFF", radius_col="APOGEE RADIUS"):
     '''Add a radius column to the APOGEESplitter.
     
     The radius is derived by fitting the Huber radii of dwarfs to a cubic 
     function over Teff. Note that this does not take any scatter due to
     metallicity into account.'''
-    rad_fit = samp.fit_teff_radius_relation(split["teff"], split["radius"]
-
+    rad_fit = samp.huber_dwarf_radius_relation()
     samp.generate_radius_column(
-        split.data, rad_fit, teff_col="TEFF", radcol="APOGEE radius")
+        split.data, rad_fit, teffcol="TEFF", radcol="APOGEE MS radius")
 
     
 ################################################################################

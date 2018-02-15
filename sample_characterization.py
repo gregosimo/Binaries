@@ -33,6 +33,7 @@ rapid_fraction_multiple_limits:
 import numpy as np
 import matplotlib.pyplot as plt
 from astropy.modeling import models, fitting
+from astropy.modeling.polynomial import Polynomial1D
 import astropy_util as au
 
 import catalog
@@ -350,6 +351,28 @@ def fit_teff_radius_relation(teffs, radii):
     new_model = fit_model(init_model, teffs, radii)
 
     return new_model
+
+def huber_dwarf_radius_relation():
+    '''Return a relationship between Teff and Radius calibrated to Huber.
+
+    This is essentially a hard-coded polynomial that was already fit to the
+    region of parameters space of interest for APOGEE.'''
+    # In order to generate the polynomial down below, a procedure similar to
+    # this should be followed:
+    # 
+    # apogee = data.APOGEESplitter()
+    # data.initialize_general_APOGEE()
+    # cool = data.general_to_cool_sample(apogee)
+    # data.initialize_cool_KICs(cool)
+    # cool.split_teff("teff", 5450, ["Unevolved", "Age evolved"],
+    #                 teff_crit="Age evolution split")
+    # cool_dwarfs = cool.subsample(["Huber dwarfs", "Unevolved"])
+    # teff_rad = fit_teff_radius_relation(cool_dwarfs["teff"],
+    #                                     cool_dwarfs["radius"])
+    teff_rad = Polynomial1D(
+        3, c0=-14.308397276533105, c1=0.009841383596450669, 
+        c2=-2.1820621757986364e-06, c3=1.6294313395008525e-10)
+    return teff_rad
 
 def plot_teff_radius_relation(dwarf_teff, dwarf_radius, subgiant_teff,
                               subgiant_radius, dwarf_metallicity):
