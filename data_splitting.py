@@ -1241,6 +1241,23 @@ def rapid_rotator_det_test(
                     "are rapid.").format(
                         teff, i, num, denom, num*100//denom))
 
+###############################################################################
+# APOGEE Radii #
+###############################################################################
+
+def add_radius_column_to_splitter(
+    split, teff_col="TEFF", radius_col="APOGEE RADIUS"):
+    '''Add a radius column to the APOGEESplitter.
+    
+    The radius is derived by fitting the Huber radii of dwarfs to a cubic 
+    function over Teff. Note that this does not take any scatter due to
+    metallicity into account.'''
+    rad_fit = samp.fit_teff_radius_relation(split["teff"], split["radius"]
+
+    samp.generate_radius_column(
+        split.data, rad_fit, teff_col="TEFF", radcol="APOGEE radius")
+
+    
 ################################################################################
 # Making Narrow-purpose datasplitters #
 ################################################################################
