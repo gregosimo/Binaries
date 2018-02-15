@@ -824,8 +824,8 @@ class APOGEESplitter(KeplerSplitter):
     def split_evstate(
         self, teff_col="TEFF", logg_col="LOGG_FIT", 
         topdiv_slope=0, topdiv_coord=(5000, 3.5), 
-        bottomdiv_slope=(5690-4640)/(4.43-3.72), bottomdiv_coord=(4640, 3.72), 
-        splitnames=("Giant", "Subgiant", "Dwarf"), 
+        bottomdiv_slope=(4.43-3.72)/(5690-4640), bottomdiv_coord=(4640, 3.72), 
+        splitnames=("Giant", "Subgiant", "Dwarf", "NO_EV"), 
         crit="APOGEE Evolutionary State"):
         '''Split the cool dwarf sample by evolutionary state.
 
@@ -837,19 +837,28 @@ class APOGEESplitter(KeplerSplitter):
         cut of 3.5. The default cut between subgiants and dwarfs is a linear
         cut calibrated to an APOGEE HR diagram.
         '''
-        giant_indices = (self.data[logg_col] < topdiv_slope * (
-            self.data[teff_col] - topdiv_coord[0]) + topdiv_coord[1])
+        giant_subgiant_div = topdiv_slope * (
+            self.data[teff_col] - topdiv_coord[0]) + topdiv_coord[1]
+        subgiant_dwarf_div = bottomdiv_slope * (
+            self.data[teff_col] - bottomdiv_coord[0]) + bottomdiv_coord[1]
+
+        unclassified_indices = self.data[teff_col] < 0
+        giant_indices = np.logical_and(
+            self.data[logg_col] < giant_subgiant_div,
+            np.logical_not(unclassified_indices))
 
         subgiant_indices = np.logical_and(
-            self.data[logg_col] >= topdiv_slope * (
-                self.data[teff_col] - topdiv_coord[0]) + topdiv_coord[1],
-            self.data[logg_col] < bottomdiv_slope * (
-                self.data[teff_col] - bottomdiv_coord[0]) + bottomdiv_coord[1])
+            np.logical_and(
+                self.data[logg_col] >= giant_subgiant_div, 
+                self.data[logg_col] < subgiant_dwarf_div), 
+            np.logical_not(unclassified_indices))
 
-        dwarf_indices = (self.data[logg_col] >= bottomdiv_slope * (
-                self.data[teff_col] - bottomdiv_coord[0]) + bottomdiv_coord[1])
+        dwarf_indices = np.logical_and(
+            self.data[logg_col] >= subgiant_dwarf_div,
+            np.logical_not(unclassified_indices))
 
-        indexarr = [dwarf_indices, subgiant_indices, giant_indices]
+        indexarr = [giant_indices, subgiant_indices, dwarf_indices,
+                    unclassified_indices]
         self._setup_indices(splitnames, indexarr, crit)
 
     def subsample_len(self, namelist):
@@ -983,7 +992,8 @@ def initialize_cool_KICs(kicsplit):
         teff_crit="KIC Teff")
     kicsplit.split_logg("log(g)", 4.0, ("Jen Giant", "Jen Dwarf"),
                            logg_crit="KIC logg")
-    aposplit.split_evstate(crit="Subgiant Split")
+#   kicsplit.split_logg("LOGG_FIT", [3.5, 4.2], ("Giant", "Subgiant", "Dwarf"))
+    kicsplit.split_evstate(crit="Subgiant Split")
 
     kicsplit.split_cool_dwarfs()
 
