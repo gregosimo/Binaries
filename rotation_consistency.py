@@ -185,7 +185,7 @@ def compare_rapid_rotator_period_vsini(
     non_rapid = np.logical_not(np.logical_or(definite_rapid_rotators,
                                              possible_rapid_rotators))
 
-    max_vsini_period, rep_vsini_period, min_vsini_period = vsini_to_period(
+    max_vsini_period, rep_vsini_period, min_vsini_period = vsini_to_spot_period_range(
         vsini, radii)
 
     max_period_ratio = max_vsini_period / period
@@ -240,7 +240,7 @@ def rapid_rotation_vsini_comparison_histogram(
     periods over the xvalues distribution.'''
     assert(len(period) == len(xvalues))
 
-    high_period, rep_period, low_period = vsini_to_period(vsini, radii)
+    high_period, rep_period, low_period = vsini_to_spot_period_range(vsini, radii)
 
     high_period_ratio = high_period / period
     rep_period_ratio = rep_period / period
@@ -420,20 +420,31 @@ def apokasc_logg_rotation_trend(apogee_logg, asteroseismic_logg, vsini):
 # Vsini, period, radius conversions #
 #####################################
 
-def vsini_to_spot_period(vsini, radii):
+def vsini_to_spot_period_range(vsini, radii):
     '''Converts vsinis to predicted periods using radii.
     
     Returns a 3-tuple containing the high-limit to the period, the 
-    representative period, and the low-limit to the period.'''
-    km_per_sec_to_solRad_per_day = 1e5 / 7e10 *60*60*24
+    representative period, and the low-limit to the period assuming that
+    starspots are not seen at sin(i) < 0.5.'''
     representative_norm = np.sin(np.pi/4)
 
-    max_vsini_period = 2 * np.pi * radii / (vsini  *
-                                            km_per_sec_to_solRad_per_day)
+    max_vsini_period = vsini_to_max_period(vsini, radii)
     representative_vsini_period = representative_norm * max_vsini_period
     vsini_period_range = 0.5 * max_vsini_period
 
     return max_vsini_period, representative_vsini_period, vsini_period_range
+
+def vsini_to_max_period(vsini, radii):
+    '''Converts vsinis to maximum periods using radii.
+
+    The given period is a maximum period because if the period was smaller, the
+    same vsini value could be accounted for by having a less favorable
+    inclination. The returned periods are given in days.'''
+    km_per_sec_to_solRad_per_day = 1e5 / 7e10 *60*60*24
+
+    max_period = 2 * np.pi * radii / (vsini * km_per_sec_to_solRad_per_day)
+
+    return max_period
 
 def period_to_velocities(period, radii):
     '''Convert periods to predicted velocities.
@@ -637,7 +648,7 @@ def compare_rotation_velocity_radius(
     ax2.set_xlabel("Radius (Rsun)")
     ax2.set_ylabel("Inferred R sini (Rsun)")
 
-    inferred_period = vsini_to_period(valid_vsini, valid_radii)[1]
+    inferred_period = vsini_to_spot_period_range(valid_vsini, valid_radii)[1]
     # Dealing with errors is difficult because the vsini and radius errors have
     # a unspecified interplay, especially since radius is asymmetric. Instead
     # of trying to calculate some form, I'll take the maximum of either the
@@ -647,15 +658,15 @@ def compare_rotation_velocity_radius(
     vsini_fractional_errors = 0.1
     inferred_period_err_up = np.where(
         radius_fractional_errors >= vsini_fractional_errors, 
-        vsini_to_period(
+        vsini_to_spot_period_range(
             valid_vsini, valid_radii + valid_raderr_above)[1] - inferred_period, 
-        vsini_to_period(
+        vsini_to_spot_period_range(
             valid_vsini*(1-vsini_fractional_errors), valid_radii)[1] - inferred_period)
     inferred_period_err_down = np.where(
         radius_fractional_errors >= vsini_fractional_errors, 
-        vsini_to_period(
+        vsini_to_spot_period_range(
             valid_vsini, valid_radii + valid_raderr_below)[1] - inferred_period, 
-        vsini_to_period(
+        vsini_to_spot_period_range(
             valid_vsini*(1+vsini_fractional_errors), valid_radii)[1] - inferred_period)
     ax3.errorbar(
         valid_period[valid_subgiant_indices],
@@ -1251,18 +1262,25 @@ def vsini_cut_to_period_space(rad_from_teff, vsini_cut=10):
     tefflims = np.linspace(4250, 5500, 100)
 
     radii = rad_from_teff(tefflims)
-    vsini_maxima = np.array([7, 10])
-    max_periods, _, _ = vsini_to_period(vsini_maxima[:,np.newaxis], radii)
+    max_periods = vsini_to_max_period(vsini_cut, radii)
 
-    plt.plot(tefflims, max_periods[0,:], 'b-', 
-             label="Vsini limit {0} km/s".format(vsini_maxima[0]))
-    plt.plot(tefflims, max_periods[1,:], 'r-', 
-             label="Vsini limit {0} km/s".format(vsini_maxima[1]))
-    plt.legend(loc="upper right")
-    plt.xlabel("Teff")
+    plt.plot(tefflims, max_periods, 'k-')
+    plt.xlabel("Teff (K)")
     hr.invert_x_axis()
-    plt.ylabel("(P/sini)max")
+    plt.ylabel("Maximum period (day)")
     plt.ylim([0, 7])
-    plt.title("Vsini detection limits in period space")
+    plt.title("Vsini = {0:.1f} cut in period space".format(vsini_cut))
 
-def plot_velocity_limit_in_period_space
+def plot_velocity_limit_in_period_space(rad_from_teff, period_cut=3):
+    '''Plot the effect of a period_cut in vsini space'''
+    tefflims = np.linspace(4250, 5500, 100)
+    
+    radii = rad_from_teff(tefflims)
+    eq_vels = period_to_velocities(period_cut, radii)
+
+    plt.plot(tefflims, eq_vels, 'k-')
+    plt.xlabel("Teff (K)")
+    hr.invert_x_axis()
+    plt.ylabel("Predicted V_eq (km/s)")
+    plt.ylim([0, 20])
+    plt.title("P = {0:.1f} cut in velocity space".format(period_cut))
