@@ -420,7 +420,7 @@ def apokasc_logg_rotation_trend(apogee_logg, asteroseismic_logg, vsini):
 # Vsini, period, radius conversions #
 #####################################
 
-def vsini_to_period(vsini, radii):
+def vsini_to_spot_period(vsini, radii):
     '''Converts vsinis to predicted periods using radii.
     
     Returns a 3-tuple containing the high-limit to the period, the 
@@ -1240,14 +1240,14 @@ def expected_rotation_fraction_hist(ebperiods, obsperiods, nbins=20,
     plt.xlim(binrange)
     
 ################################################################################
-# Vsini limits #
+# Map rotation cuts #
 ################################################################################
 
-def plot_period_limit_in_velocity_space(rad_from_teff):
-    '''Plot the maximum period observable for dwarfs.
+def vsini_cut_to_period_space(rad_from_teff, vsini_cut=10):
+    '''Plot the effect of a vini cut in period space.
 
-    This function will plot the maximum rotation period corresponding to the
-    potential vsini detection limits in APOGEE.'''
+    Show how a flat vsini cut translates to to period space as a function of
+    stellar effective temperature.'''
     tefflims = np.linspace(4250, 5500, 100)
 
     radii = rad_from_teff(tefflims)
@@ -1264,3 +1264,5 @@ def plot_period_limit_in_velocity_space(rad_from_teff):
     plt.ylabel("(P/sini)max")
     plt.ylim([0, 7])
     plt.title("Vsini detection limits in period space")
+
+def plot_velocity_limit_in_period_space
