@@ -9,7 +9,7 @@ import collections
 
 import numpy as np
 import numpy.core.defchararray as npstr
-from scipy.interpolate import interp1d
+from scipy.interpolate import interp1d,InterpolatedUnivariateSpline
 from scipy.optimize import minimize
 from scipy.stats import chi2, norm, multivariate_normal
 from astropy.table import Table
@@ -332,6 +332,139 @@ def Casagrande_Bolometric_Flux(
 # DSEP-specific routines #
 ###############################################################################
 
+DSEP_lookup = {"M/Mo": -1, "LogLum": -1, "LogTeff": -1, "LogG": -1, "B": 1, 
+               "V": 1, "J": 1, "H": 1, "K": 1, "Ks": 1}
+
+# Move to DSEP Interpolation Object #
+#####################################
+
+class DSEPInterpolator(object):
+    '''Class to automatically handle interpolation of DSEP isochrones.'''
+
+    def __init__(self, age, metallicity, Y=1, afe=2, lowT=3500, highT=6000,
+                 minlogG=4.2):
+        '''Create DSEP Interpolator object set to a given age and metallicity.'''
+        self.iso = {}
+        self.age = age
+        self.metallicity = metallicity
+        self.bands = bands
+        self.Y = Y
+        self.afe = afe
+        self.interpdicts = {}
+
+    def teff_to_logg_interpolator(teffvals):
+        '''Interpolate teffvals to corresponding log(g) on this isochrone.
+
+        In the case where the teff and log(g) are double-valued.'''
+        pass
+
+    def _single_valued_interpolator(self, fromcol, tocol):
+        '''Create an interpolator for a well-behaved single-valued function.
+        
+        Fromcol and tocol should be columns in the DSEP Interpolator
+        data. Note that fromcol or tocol can be colors.'''
+        try:
+            interper = self.interpdicts[(fromcol, tocol)]
+        except KeyError:
+            try:
+                fromblue, fromred = split_color(fromcol)
+            except IndexError:
+                fromiso = self._get_isochrone_data(fromcol)
+                fromdata = fromiso[fromcol]
+            else:
+                fromisoblue = self._get_isochrone_data(fromblue)
+                fromisored = self._get_isochrone_data(fromred)
+                fromdata = fromisoblue[fromblue] - fromisored[fromred]
+            try:
+                toblue, tored = split_color(tocol)
+            except IndexError:
+                toiso = self._get_isochrone_data(tocol)
+                todata = toiso[tocol]
+            else:
+                toisoblue = self._get_isochrone_data(toblue)
+                toisored = self._get_isochrone_data(tored)
+                todata = toisoblue[toblue] - toisored[tored]
+            interper = InterpolatedUnivariateSpline(todata, todata)
+            self.interpdicts[(fromcol, tocol)] = interper
+        return interper
+
+    def _check_if_double_valued(self, vals):
+        '''Perform check if the vals are sequential
+
+        This function assumes that vals is a coordinate that ought to be
+        monotonic. If the function is double-valued, then it will not be
+        monotonic and either the minimum or maximum do not lie on the endpoints.'''
+        max_index = np.argmax(xvals)
+        min_index = np.argmin(xvals)
+        maximum_present = not (max_index == 0 or max_index == len(xvals)-1)
+        minimum_present = not (min_index == 0 or min_index == len(xvals)-1)
+        if maximum_present and minimum_present:
+            raise ValueError("Color {0} is too complicated to "
+                             "interpolate".format(color))
+        elif maximum_present and not minimum_present:
+            return (xvals[max_index], "max")
+        elif not maximum_present and minimum_present:
+            return (xvals[min_index], "min")
+        else:
+            return False
+
+    def _double_valued_interpolator(
+            self, fromcol, tocol, splitindex, branch="left"):
+        '''Select from either of the branches for a double-valued function.'''
+        try:
+            interper = self.interpdicts[(fromcol, tocol, branch)]
+        except KeyError:
+            try:
+                fromblue, fromred = split_color(fromcol)
+            except IndexError:
+                fromiso = self._get_isochrone_data(fromcol)
+                fromdata = fromiso[fromcol]
+            else:
+                fromisoblue = self._get_isochrone_data(fromblue)
+                fromisored = self._get_isochrone_data(fromred)
+                fromdata = fromisoblue[fromblue] - fromisored[fromred]
+            try:
+                toblue, tored = split_color(tocol)
+            except IndexError:
+                toiso = self._get_isochrone_data(tocol)
+                todata = toiso[tocol]
+            else:
+                toisoblue = self._get_isochrone_data(toblue)
+                toisored = self._get_isochrone_data(tored)
+                todata = toisoblue[toblue] - toisored[tored]
+
+
+            interper = InterpolatedUnivariateSpline(todata, todata)
+            self.interpdicts[(fromcol, tocol)] = interper
+        return interper
+
+    def _get_isochrone_data(self, col):
+        '''Return the Table of isochrone data that has the current col.
+
+        This function handles caching in the self.iso dictionary. If the data
+        which includes col is already in self.iso, then it will pull from that.
+        If not, then it will read from the corresponding file.
+        
+        The specific isochrone file used is determined by passing col to
+        DSEP_lookup. DSEP_lookup is a dictionary which contains the
+        corresponding band number for the column. For quantities shared by all
+        band numbers, DSEP_lookup will return a negative number, and an
+        arbitrary isochrone of the given age and metallicity will be used.'''
+        band_num = DSEP_lookup[col]
+        try:
+            trimmed_table = self.iso[band_num]
+        except KeyError:
+            if len(self.iso) > 0 and band_num <= 0:
+                trimmed_table = au.nth(self.iso.keys(), 0)
+            else:
+                if band_num <= 0:
+                    band_num = 1
+                isotable = read_DSEP_isochrone(
+                    self.feh, self.age, Y=self.Y, afe=self.afe, bands=band_num)
+                trimmed_table = restrict_interpolation_table(isotable)
+                self.iso[band_num] = trimmed_table
+        return trimmed_table
+
 # Internal DSEP Routines #
 ##########################
 
@@ -552,6 +685,59 @@ def read_DSEP_isochrone(
 # Plotting without Interpolation #
 ##################################
 
+def teff_logg_age_evolution(
+        ages, metallicity=0.0, Y=1, afe=2, lowT=3000, highT=7000):
+    '''Plot evolution of Teff-logg diagram.
+
+    This plot shows how given masses evolve with age on the Teff-logg diagram.
+    Points of a given mass will be connected.'''
+    ages = np.sort(ages)
+    firstiso = read_DSEP_isochrone(metallicity, ages[0], bands=1, Y=Y, afe=afe)
+
+    firstiso = restrict_interpolation_table(
+        firstiso, highT=highT, lowT=lowT, minlogG=3.5)
+    standard_masses = firstiso["M/Mo"]
+    firstteff = 10**firstiso["LogTeff"]
+    firstlogg = firstiso["LogG"]
+    plt.plot(firstteff, firstlogg, marker="*", linestyle="None", ms=12,
+             label="{0:.1f} Gyr".format(ages[0]))
+    for i in range(1, len(ages), 1):
+        print("Age: {0:.1f}".format(ages[i]))
+        second_logteff_interp = mass_to_logteff_DSEP_interpolator(
+            age=ages[i], metallicity=metallicity, Y=Y, afe=afe, lowT=lowT,
+            highT=highT)
+        second_masses = standard_masses[np.where(np.logical_and(
+            standard_masses > np.amin(second_logteff_interp.x), 
+            standard_masses < np.amax(second_logteff_interp.x)))]
+        second_teff = 10**second_logteff_interp(second_masses)
+        second_logg_interp = mass_to_logg_DSEP_interpolator(
+            age=ages[i], metallicity=metallicity, Y=Y, afe=afe, lowT=lowT,
+            highT=highT)
+        test_masses = standard_masses[np.where(np.logical_and(
+            standard_masses > np.amin(second_logg_interp.x), 
+            standard_masses < np.amax(second_logg_interp.x)))]
+        assert(np.all(second_masses == test_masses))
+        second_logg = second_logg_interp(second_masses)
+
+        plt.plot(second_teff, second_logg, marker="*", linestyle="None", ms=8,
+                 label="{0:.1f} Gyr".format(ages[i]))
+        first_ind = np.where(standard_masses >= second_masses[0])[0][0]
+        for j in range(len(second_masses)):
+            plt.plot(
+                [firstteff[first_ind+j], second_teff[j]],
+                [firstlogg[first_ind+j], second_logg[j]],
+                linestyle="-", color="k", marker="None")
+            assert(standard_masses[first_ind+j] == second_masses[j])
+        standard_masses = second_masses
+        firstteff = second_teff
+        firstlogg = second_logg
+
+    hr.invert_x_axis()
+    hr.invert_y_axis()
+    plt.xlabel("Teff (K)")
+    plt.ylabel("log(g)")
+    plt.legend(loc="lower left")
+    
 def color_mag_age_evolution(ages, DSEP_lookup, metallicity=0.0, Y=1, afe=2, 
                             lowT=3000, mag="V", color="B-V"):
     '''Plots the evolution of the color-magnitude diagram.
@@ -848,7 +1034,7 @@ def restrict_interpolation_table(
         highT = np.log10(highT)
     tempcut = catalog.perform_teff_cut(
         isochrone, lowtemp=lowT, hightemp=highT, teffcol="LogTeff")
-    loggcut = catalog.perform_logg_cut(tempcut, lowlogg=minlogG)
+    loggcut = catalog.perform_logg_cut(tempcut, lowlogg=minlogG, loggcol="LogG")
     restricted_table = loggcut
     return restricted_table
 
@@ -1680,8 +1866,8 @@ def mass_to_bolometric_luminosity_DSEP_interpolator(
 
     return exponentify_interpolator(interpolator)
 
-def mass_to_teff_DSEP_interpolator(
-    age=1.5, metallicity=0.0, bands=1, Y=1, afe=2, lowT=3000):
+def mass_to_logteff_DSEP_interpolator(
+    age=1.5, metallicity=0.0, bands=1, Y=1, afe=2, lowT=3000, highT=6000):
     '''Return function to interpolate effective temperature for a given mass.
 
     This provides one of the important mappings between mass and effective
@@ -1692,9 +1878,23 @@ def mass_to_teff_DSEP_interpolator(
 
     interpolator = DSEP_interpolation(
         "M/Mo", "LogTeff", age, metallicity, bands=bands, Y=Y, afe=afe,
-        lowT=lowT)
+        lowT=lowT, highT=highT)
 
-    return exponentify_interpolator(interpolator)
+    return interpolator
+
+def mass_to_logg_DSEP_interpolator(
+        age=1.5, metallicity=0.0, bands=1, Y=1, afe=2, lowT=3000, highT=6000):
+    '''Return function to interpolate log(g) for a given mass.
+
+    This provides one of the important mappings between mass and log(g) using
+    the DSEP isochrones. The interpolator depends on having a given age and
+    metallicity.'''
+    
+    interpolator = DSEP_interpolation(
+        "M/Mo", "LogTeff", age, metallicity, bands=bands, Y=Y, afe=afe,
+        lowT=lowT, highT=highT)
+
+    return interpolator
 
 def teff_to_radius_DSEP_interpolator(
     age=1.5, metallicity=0.0, bands=1, Y=1, afe=2, lowT=3000, highT=6000,
