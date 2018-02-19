@@ -997,8 +997,8 @@ def initialize_cool_KICs(kicsplit):
     # I want to split by the huber log(g)s as well.
     kicsplit.split_evstate(
         teff_col="teff", logg_col="logg", topdiv_slope=0, 
-        topdiv_coord=(3.5, 5000), bottomdiv_slope=0, 
-        bottomdiv_coord=(4.2, 5000), splitnames=(
+        topdiv_coord=(5000, 3.5), bottomdiv_slope=0, 
+        bottomdiv_coord=(5000, 4.2), splitnames=(
             "Huber giants", "Huber subgiants", "Huber dwarfs", "No Huber EV"),
         crit="Huber evolutionary state")
 
@@ -1279,19 +1279,6 @@ def add_radius_column_to_splitter(
 ################################################################################
 # Making Narrow-purpose datasplitters #
 ################################################################################
-
-def jen_cool_sample(splitter=None):
-    '''Generate the sample of cool dwarfs from Jen's targeting program.'''
-    if not splitter:
-        splitter = APOGEESplitter()
-        splitter = initialize_cool_dwarfs(splitter)
-    apogee1_samp = splitter.subsample(["APOGEE_KEPLER_COOLDWARF"])
-    apogee2_samp = splitter.subsample([
-        "APOGEE2_APOKASC_DWARF", "Jen Dwarf", "H Jen", "Jen Cool"])
-    nosdss_samp = splitter.subsample([
-        "APOGEE2_APOKASC_DWARF", "Jen Dwarf", "H Jen", "No SDSS Teff", 
-        "KIC Jen Cool"])
-    return vstack([apogee1_samp, apogee2_samp, nosdss_samp])
 
 def jen_cool_splitter():
     '''Create a Datasplitter consisting only of Jen's cool dwarf sample.
