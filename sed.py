@@ -363,29 +363,8 @@ class DSEPInterpolator(object):
         
         Fromcol and tocol should be columns in the DSEP Interpolator
         data. Note that fromcol or tocol can be colors.'''
-        try:
-            interper = self.interpdicts[(fromcol, tocol)]
-        except KeyError:
-            try:
-                fromblue, fromred = split_color(fromcol)
-            except IndexError:
-                fromiso = self._get_isochrone_data(fromcol)
-                fromdata = fromiso[fromcol]
-            else:
-                fromisoblue = self._get_isochrone_data(fromblue)
-                fromisored = self._get_isochrone_data(fromred)
-                fromdata = fromisoblue[fromblue] - fromisored[fromred]
-            try:
-                toblue, tored = split_color(tocol)
-            except IndexError:
-                toiso = self._get_isochrone_data(tocol)
-                todata = toiso[tocol]
-            else:
-                toisoblue = self._get_isochrone_data(toblue)
-                toisored = self._get_isochrone_data(tored)
-                todata = toisoblue[toblue] - toisored[tored]
-            interper = InterpolatedUnivariateSpline(todata, todata)
-            self.interpdicts[(fromcol, tocol)] = interper
+        interper = self._load_interpdict((fromcol, tocol))
+
         return interper
 
     def _check_if_double_valued(self, vals):
@@ -408,9 +387,86 @@ class DSEPInterpolator(object):
         else:
             return False
 
+    def _load_single_interpdict(self, fromcol, tocol):
+        '''Load tuple key from interpdict if available, otherwise read it in.
+
+        Takes a tuple key for the interpdicts dictionary. If the tuple key is
+        found, the interpolator in the interpdict will be returned. If the
+        tuple key is not found, then the interpolator will be created from
+        isochrone data and then added to interpdict.'''
+        try:
+            interper = self.interpdicts[(fromcol, tocol)]
+        except KeyError:
+            try:
+                fromblue, fromred = split_color(fromcol)
+            except IndexError:
+                fromiso = self._get_isochrone_data(fromcol)
+                fromdata = fromiso[fromcol]
+            else:
+                fromisoblue = self._get_isochrone_data(fromblue)
+                fromisored = self._get_isochrone_data(fromred)
+                fromdata = fromisoblue[fromblue] - fromisored[fromred]
+            try:
+                toblue, tored = split_color(tocol)
+            except IndexError:
+                toiso = self._get_isochrone_data(tocol)
+                todata = toiso[tocol]
+            else:
+                toisoblue = self._get_isochrone_data(toblue)
+                toisored = self._get_isochrone_data(tored)
+                todata = toisoblue[toblue] - toisored[tored]
+
+            interper = InterpolatedUnivariateSpline(todata, todata)
+            self.interpdicts[(fromcol, tocol)] = interper
+        return interper
+
+    def _load_double_interpdict(self, fromcol, tocol, branch):
+        '''Load double-valued interpolator branch.
+
+        If the branch is located in interpdicts, then load that branch
+        directly. If not, then the interpolator will be created from isochrone
+        data and then added to interpdict.'''
+
+        try:
+            interper = self.interpdicts[(fromcol, tocol, branch)]
+        except KeyError:
+            masses = self._get_isochrone_data("M/Mo")["M/Mo"]
+            crit, split_massindex = self._check_if_double_valued()
+            if branch is "lower":
+                brancharr = masses <= masses[split_massindex]
+            elif branch is "upper":
+                brancharr = masses >= masses[split_massindex]
+
+            try:
+                fromblue, fromred = split_color(fromcol)
+            except IndexError:
+                fromiso = self._get_isochrone_data(fromcol)
+                fromdata = fromiso[fromcol]
+            else:
+                fromisoblue = self._get_isochrone_data(fromblue)
+                fromisored = self._get_isochrone_data(fromred)
+                fromdata = fromisoblue[fromblue] - fromisored[fromred]
+            try:
+                toblue, tored = split_color(tocol)
+            except IndexError:
+                toiso = self._get_isochrone_data(tocol)
+                todata = toiso[tocol]
+            else:
+                toisoblue = self._get_isochrone_data(toblue)
+                toisored = self._get_isochrone_data(tored)
+                todata = toisoblue[toblue] - toisored[tored]
+
+            interper = InterpolatedUnivariateSpline(
+                fromdata[brancharr], todata[brancharr])
+            self.interpdicts[(fromcol, tocol, branch)] = interper
+        return interper
+
+
+
     def _double_valued_interpolator(
-            self, fromcol, tocol, splitindex, branch="left"):
+            self, fromcol, tocol, splitindex, branch="lowmass"):
         '''Select from either of the branches for a double-valued function.'''
+        from_to_mass = self._load_interpdict(self, 
         try:
             interper = self.interpdicts[(fromcol, tocol, branch)]
         except KeyError:
