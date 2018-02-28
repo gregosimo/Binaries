@@ -6,7 +6,7 @@ import matplotlib.pyplot as plt
 # HR Diagram Classes #
 ###############################################################################
 
-def logg_teff_plot(teff, logg, style="k.", **kwargs):
+def logg_teff_plot(teff, logg, style="", **kwargs):
     '''Creates a plot in the Teff-logg space.
 
     Teff and logg are valuse which should be plotted. Style should be the plot
