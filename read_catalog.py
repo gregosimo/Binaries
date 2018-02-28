@@ -520,6 +520,7 @@ def mcquillan_ebs(
     mcq_ebs = au.join_by_id(ebs, mcq, "KIC", "KIC")
     return mcq_ebs
 
+@au.shortcut_file(paths.SHORTCUT_PLEIADES_APOGEE)
 def Stauffer_APOGEE_overlap(
     stauffer_path=paths.STAUFFER_VSINI_PATH, apopath=paths.DR14_ALLSTAR_PATH):
     '''Read targets observed by both Stauffer & Hartmann (1987) and APOGEE.'''
