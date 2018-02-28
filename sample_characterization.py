@@ -123,6 +123,32 @@ def rapid_fraction_histogram(
     plt.ylabel("Fraction of Rapid Rotators in Teff bin")
     plt.title("Fraction of rotators with P < {0} day".format(maxper))
 
+def vsini_rapid_fraction_histogram(
+        aposet, hightemp=5450, lowtemp=4250, dtemp=100, vsini_det=10,
+        teffcol="TEFF", vsini_col="VSINI", label=""):
+    '''Plot a histogram of the fraction of vsini rapid rotators.'''
+    totalhist, totbins = number_binned_by_temperature(
+        aposet, hightemp=hightemp, lowtemp=lowtemp, dtemp=dtemp,
+        teffcol=teffcol)
+    rapid_vsini = catalog.perform_vsini_cut(
+        aposet, lowv=vsini_det, vcol=vsini_col)
+    print("Rapid Rotator Number: " + str(len(rapid_vsini)))
+    rapidhist, rapidbins = number_binned_by_temperature(
+        rapid_vsini, hightemp=hightemp, lowtemp=lowtemp, dtemp=dtemp,
+        teffcol=teffcol)
+    fracs = rapidhist / totalhist
+    fracerrs = np.sqrt(rapidhist) / totalhist
+#   plt.step(totbins[:-1], rapidhist/totalhist, where="post", label=label)
+    plt.errorbar(totbins[:-1], fracs, yerr=fracerrs, marker="o", ls="",
+                 label=label)
+    totalfrac = len(rapid_vsini) / len(aposet)
+    plt.plot([hightemp, lowtemp], [totalfrac, totalfrac], 'k--')
+    plt.xlim(plt.xlim()[::-1])
+    plt.xlabel("Teff (K)")
+    plt.ylabel("Fraction of Rapid Rotatiors in Teff bin")
+    plt.title(
+        "Fraction of rotators with Vsini > {0:.1f} km/s".format(vsini_det))
+
 def rapid_fraction_multiple_limits(
     mcquillan, hightemp=6500, lowtemp=3000, dtemp=50, maxper=5, dper=1, 
     teffcol="Teff", periodcol="Prot"):
