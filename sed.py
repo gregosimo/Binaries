@@ -15,6 +15,7 @@ from scipy.stats import chi2, norm, multivariate_normal
 from astropy.table import Table
 from pathlib import Path
 import matplotlib.pyplot as plt
+import astropy_util as au
 
 import path_config as paths
 import catalog
@@ -341,51 +342,31 @@ DSEP_lookup = {"M/Mo": -1, "LogLum": -1, "LogTeff": -1, "LogG": -1, "B": 1,
 class DSEPInterpolator(object):
     '''Class to automatically handle interpolation of DSEP isochrones.'''
 
-    def __init__(self, age, metallicity, Y=1, afe=2, lowT=3500, highT=6000,
+    def __init__(self, age, feh, Y=1, afe=2, lowT=3500, highT=6000,
                  minlogG=4.2):
         '''Create DSEP Interpolator object set to a given age and metallicity.'''
         self.iso = {}
         self.age = age
-        self.metallicity = metallicity
-        self.bands = bands
+        self.feh = feh
         self.Y = Y
         self.afe = afe
         self.interpdicts = {}
 
-    def teff_to_logg_interpolator(teffvals):
+    def teff_to_logg_interpolation(teffvals):
         '''Interpolate teffvals to corresponding log(g) on this isochrone.
 
         In the case where the teff and log(g) are double-valued.'''
-        pass
+        dv_flag = check_sequence_double_valued(teffvals)
 
-    def _single_valued_interpolator(self, fromcol, tocol):
-        '''Create an interpolator for a well-behaved single-valued function.
-        
-        Fromcol and tocol should be columns in the DSEP Interpolator
-        data. Note that fromcol or tocol can be colors.'''
-        interper = self._load_interpdict((fromcol, tocol))
-
-        return interper
-
-    def _check_if_double_valued(self, vals):
-        '''Perform check if the vals are sequential
-
-        This function assumes that vals is a coordinate that ought to be
-        monotonic. If the function is double-valued, then it will not be
-        monotonic and either the minimum or maximum do not lie on the endpoints.'''
-        max_index = np.argmax(xvals)
-        min_index = np.argmin(xvals)
-        maximum_present = not (max_index == 0 or max_index == len(xvals)-1)
-        minimum_present = not (min_index == 0 or min_index == len(xvals)-1)
-        if maximum_present and minimum_present:
-            raise ValueError("Color {0} is too complicated to "
-                             "interpolate".format(color))
-        elif maximum_present and not minimum_present:
-            return (xvals[max_index], "max")
-        elif not maximum_present and minimum_present:
-            return (xvals[min_index], "min")
+        if not dv_flag:
+            interp = self._load_single_interpdict("LogTeff", "LogG")
         else:
-            return False
+            index = dv_flag[0]
+            interp = self._load_double_interpdict(
+                "LogTeff", "LogG", index, branch="lower")
+
+        return interp(teffvals)
+
 
     def _load_single_interpdict(self, fromcol, tocol):
         '''Load tuple key from interpdict if available, otherwise read it in.
@@ -416,11 +397,12 @@ class DSEPInterpolator(object):
                 toisored = self._get_isochrone_data(tored)
                 todata = toisoblue[toblue] - toisored[tored]
 
-            interper = InterpolatedUnivariateSpline(todata, todata)
+            interper = InterpolatedUnivariateSpline(fromdata, todata)
             self.interpdicts[(fromcol, tocol)] = interper
         return interper
 
-    def _load_double_interpdict(self, fromcol, tocol, branch):
+    def _load_double_interpdict(
+            self, fromcol, tocol, splitindex, branch="lower"):
         '''Load double-valued interpolator branch.
 
         If the branch is located in interpdicts, then load that branch
@@ -431,11 +413,10 @@ class DSEPInterpolator(object):
             interper = self.interpdicts[(fromcol, tocol, branch)]
         except KeyError:
             masses = self._get_isochrone_data("M/Mo")["M/Mo"]
-            crit, split_massindex = self._check_if_double_valued()
             if branch is "lower":
-                brancharr = masses <= masses[split_massindex]
+                brancharr = masses <= masses[splitindex]
             elif branch is "upper":
-                brancharr = masses >= masses[split_massindex]
+                brancharr = masses >= masses[splitindex]
 
             try:
                 fromblue, fromred = split_color(fromcol)
@@ -456,42 +437,11 @@ class DSEPInterpolator(object):
                 toisored = self._get_isochrone_data(tored)
                 todata = toisoblue[toblue] - toisored[tored]
 
+            assert np.all(np.isfinite(todata[brancharr]))
+            assert np.all(np.isfinite(fromdata[brancharr]))
             interper = InterpolatedUnivariateSpline(
                 fromdata[brancharr], todata[brancharr])
             self.interpdicts[(fromcol, tocol, branch)] = interper
-        return interper
-
-
-
-    def _double_valued_interpolator(
-            self, fromcol, tocol, splitindex, branch="lowmass"):
-        '''Select from either of the branches for a double-valued function.'''
-        from_to_mass = self._load_interpdict(self, 
-        try:
-            interper = self.interpdicts[(fromcol, tocol, branch)]
-        except KeyError:
-            try:
-                fromblue, fromred = split_color(fromcol)
-            except IndexError:
-                fromiso = self._get_isochrone_data(fromcol)
-                fromdata = fromiso[fromcol]
-            else:
-                fromisoblue = self._get_isochrone_data(fromblue)
-                fromisored = self._get_isochrone_data(fromred)
-                fromdata = fromisoblue[fromblue] - fromisored[fromred]
-            try:
-                toblue, tored = split_color(tocol)
-            except IndexError:
-                toiso = self._get_isochrone_data(tocol)
-                todata = toiso[tocol]
-            else:
-                toisoblue = self._get_isochrone_data(toblue)
-                toisored = self._get_isochrone_data(tored)
-                todata = toisoblue[toblue] - toisored[tored]
-
-
-            interper = InterpolatedUnivariateSpline(todata, todata)
-            self.interpdicts[(fromcol, tocol)] = interper
         return interper
 
     def _get_isochrone_data(self, col):
@@ -511,7 +461,7 @@ class DSEPInterpolator(object):
             trimmed_table = self.iso[band_num]
         except KeyError:
             if len(self.iso) > 0 and band_num <= 0:
-                trimmed_table = au.nth(self.iso.keys(), 0)
+                trimmed_table = au.nth(self.iso.values(), 0)
             else:
                 if band_num <= 0:
                     band_num = 1
@@ -520,6 +470,25 @@ class DSEPInterpolator(object):
                 trimmed_table = restrict_interpolation_table(isotable)
                 self.iso[band_num] = trimmed_table
         return trimmed_table
+
+def check_sequence_double_valued(vals):
+    '''Perform check if the vals are sequential
+
+    This function assumes that vals is a coordinate that ought to be
+    monotonic. If the function is double-valued, then it will not be
+    monotonic and either the minimum or maximum do not lie on the endpoints.'''
+    max_index = np.argmax(vals)
+    min_index = np.argmin(vals)
+    maximum_present = not (max_index == 0 or max_index == len(vals)-1)
+    minimum_present = not (min_index == 0 or min_index == len(vals)-1)
+    if maximum_present and minimum_present:
+        raise ValueError("Can't Interpolate")
+    elif maximum_present and not minimum_present:
+        return (max_index, "max")
+    elif not maximum_present and minimum_present:
+        return (min_index, "min")
+    else:
+        return False
 
 # Internal DSEP Routines #
 ##########################
