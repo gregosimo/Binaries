@@ -29,6 +29,7 @@ import numpy as np
 import matplotlib.pyplot as plt
 from scipy.stats import uniform
 from scipy.special import erf
+import astropy_util as au
 
 import eclipsing_binaries as ebs
 import catalog
@@ -595,37 +596,28 @@ def rotation_radius_comparison(
     plt.ylabel("Inferred R sini (Rsun)")
 
 def compare_rotation_velocity_radius(
-    vsini, period, radii, raderr_below, raderr_above, subgiant_indices):
+    vsini, period, radii, raderr_below, raderr_above, vsini_lim=10):
     '''Evaluate rotation quality in velocity and radius space.
 
     Create a double-paneled figure that plots the same data in velocity space
     and radius space for clarity of understanding.'''
-    f, (ax1, ax2, ax3) = plt.subplots(1, 3)
+    f, (ax1, ax2, ax3) = plt.subplots(1, 3, figsize=(12, 4))
 
-    valid_indices = vsini > 7
+    valid_indices = vsini > vsini_lim
     valid_vsini = vsini[valid_indices]
     valid_period = period[valid_indices]
     valid_radii = radii[valid_indices]
     valid_raderr_above = raderr_above[valid_indices]
     valid_raderr_below = raderr_below[valid_indices]
-    valid_subgiant_indices = subgiant_indices[valid_indices]
-    valid_dwarf_indices = au.get_complement_indices(
-        valid_subgiant_indices, len(valid_subgiant_indices))
 
     downvel, infvel, upvel = period_to_velocities_uncertainties(
         valid_period, valid_radii, valid_raderr_below, valid_raderr_above)
 
     ax1.errorbar(
-        infvel[valid_subgiant_indices], valid_vsini[valid_subgiant_indices],
-        xerr=[-downvel[valid_subgiant_indices], upvel[valid_subgiant_indices]],
-        yerr=0.1*valid_vsini[valid_subgiant_indices], fmt='b*',
-        label="Subgiants")
-    ax1.errorbar(
-        infvel[valid_dwarf_indices], valid_vsini[valid_dwarf_indices],
-        xerr=[-downvel[valid_dwarf_indices], upvel[valid_dwarf_indices]],
-        yerr=0.1*valid_vsini[valid_dwarf_indices], fmt='ro', label="Dwarfs")
+        infvel, valid_vsini, xerr=[-downvel, upvel], yerr=0.1*valid_vsini, 
+        fmt='b*')
     ax1.plot([0, 80], [0, 80], 'k-')
-    ax1.plot([0, 80], [7, 7], 'r--', label="Detection Limit")
+    ax1.plot([0, 80], [vsini_lim, vsini_lim], 'r--', label="Detection Limit")
     plt.sca(ax1)
 #    plt.legend(loc="upper right")
     ax1.set_xlabel("Inferred equatorial velocity (km/s)")
@@ -633,17 +625,8 @@ def compare_rotation_velocity_radius(
 
     inferred_radii = rotation_radius(valid_vsini, valid_period)
     ax2.errorbar(
-        valid_radii[valid_subgiant_indices], 
-        inferred_radii[valid_subgiant_indices], 
-        yerr=0.1*inferred_radii[valid_subgiant_indices],
-        xerr=[-valid_raderr_below[valid_subgiant_indices],
-              valid_raderr_above[valid_subgiant_indices]], fmt='b*')
-    ax2.errorbar(
-        valid_radii[valid_dwarf_indices], 
-        inferred_radii[valid_dwarf_indices], 
-        yerr=0.1*inferred_radii[valid_dwarf_indices],
-        xerr=[-valid_raderr_below[valid_dwarf_indices],
-              valid_raderr_above[valid_dwarf_indices]], fmt='ro')
+        valid_radii, inferred_radii, yerr=0.1*inferred_radii, 
+        xerr=[-valid_raderr_below, valid_raderr_above], fmt='b*')
     ax2.plot([0, 4.0], [0, 4.0], 'k-')
     ax2.set_xlabel("Radius (Rsun)")
     ax2.set_ylabel("Inferred R sini (Rsun)")
@@ -669,15 +652,8 @@ def compare_rotation_velocity_radius(
         vsini_to_spot_period_range(
             valid_vsini*(1+vsini_fractional_errors), valid_radii)[1] - inferred_period)
     ax3.errorbar(
-        valid_period[valid_subgiant_indices],
-        inferred_period[valid_subgiant_indices],
-        yerr=[-inferred_period_err_down[valid_subgiant_indices],
-              inferred_period_err_up[valid_subgiant_indices]], fmt='b*')
-    ax3.errorbar(
-        valid_period[valid_dwarf_indices],
-        inferred_period[valid_dwarf_indices],
-        yerr=[-inferred_period_err_down[valid_dwarf_indices],
-              inferred_period_err_up[valid_dwarf_indices]], fmt='ro')
+        valid_period, inferred_period, 
+        yerr=[-inferred_period_err_down, inferred_period_err_up], fmt='b*')
 
     ax3.plot([0, 15.0], [0, 15.0], 'k-')
     ax3.set_xlabel("McQuillan Period (day)")
