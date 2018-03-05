@@ -590,7 +590,7 @@ class APOGEESplitter(KeplerSplitter):
                          kic_col=kic_col, tm_col=tm_col)
 
     def split_vscatter(self, splitvalues, splitnames, col="VSCATTER",
-                       vscatter_crit="VSCATTER", invert_inequality=False):
+                       vscatter_crit="VSCATTER", invert_inequality=True):
         '''Split the data by vscatter.
 
         Split the sample based on the boundaries given in splitvalues. The
@@ -917,6 +917,31 @@ class APOKASCSplitter(APOGEESplitter):
         indexarr = [jentargs, notjentargs]
         self._setup_indices(splitnames, indexarr, jen_crit)
 
+    def split_targeting(
+        self, target_label, splitnames=None, target_crit=None,
+            aspcapcol="TARGFLAGS"):
+        '''Select the objects which fall under the targeting flag.
+
+        The target_label should be the label passed to catalog.target_indices.
+        Then the indices corresponding to that targeting flag will be placed.
+        If a 2-tuple is provided for names, then that will be the label for the
+        objects with the targeting flag, and without the targeting flag,
+        respectively. Similarly, target_crit can be specified.
+
+        If names or target_crit isn't specified, then they will use the
+        targeting flag given. For example, if the targeting flag was
+        APOGEE_KEPLER_COOLDWARF, names would be ("APOGEE_KEPLER_COOLDWARF",
+        "Not APOGEE_KEPLER_COOLDWARF") and target_crit would just be
+        "APOGEE_KEPLER_COOLDWARF".'''
+
+        indices = npstr.find(self.data[aspcapcol], target_label) >= 0
+        if not splitnames:
+            splitnames = (target_label, "Not " + target_label)
+        if not target_crit:
+            target_crit = target_label
+
+        self._setup_complement_index(splitnames, indices, target_crit)
+
     def subsample_len(self, namelist):
         '''Get the size of a subsample.
 
@@ -978,7 +1003,11 @@ def initialize_general_APOGEE(aposplit):
     aposplit.split_McQuillan_periods()
 
     aposplit.split_vsini(
-        [7, 10], ("Vsini nondet", "Vsini marginal", "Vsini det"))
+        [0, 7, 15], ("No Vsini", "Vsini nondet", "Vsini marginal", "Vsini det"))
+
+    aposplit.split_vscatter(
+        [0, 1], ("Single Visit", "RV Nonvariable", "RV Variable"), 
+        invert_inequality=True)
 
     aposplit.split_dlsb()
 
@@ -1002,10 +1031,6 @@ def initialize_cool_KICs(kicsplit):
             "Huber giants", "Huber subgiants", "Huber dwarfs", "No Huber EV"),
         crit="Huber evolutionary state")
 
-    kicsplit.split_cool_dwarfs()
-    radius_fit = samp.huber_dwarf_radius_relation()
-    add_radius_column_to_splitter(kicsplit, radius_fit)
-
 def initialize_asteroseismic_sample(aposplit):
     '''Initialize the sample for asteroseismic targets.
     
@@ -1023,7 +1048,7 @@ def initialize_asteroseismic_sample(aposplit):
 
     # Split by vsini
     aposplit.split_vsini(
-        [7, 10], ["Vsini nondet", "Vsini marginal", "Vsini det"])
+        [0, 7, 10], ["No Vsini", "Vsini nondet", "Vsini marginal", "Vsini det"])
 
     # Split by DLSB presence.
     aposplit.split_dlsb(apid_col="2MASS_ID")

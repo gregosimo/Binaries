@@ -333,7 +333,7 @@ def Casagrande_Bolometric_Flux(
 # DSEP-specific routines #
 ###############################################################################
 
-DSEP_lookup = {"M/Mo": -1, "LogLum": -1, "LogTeff": -1, "LogG": -1, "B": 1, 
+DSEP_lookup = {"M/Mo": -1, "LogL/Lo": -1, "LogTeff": -1, "LogG": -1, "B": 1, 
                "V": 1, "J": 1, "H": 1, "K": 1, "Ks": 1}
 
 # Move to DSEP Interpolation Object #
@@ -342,134 +342,166 @@ DSEP_lookup = {"M/Mo": -1, "LogLum": -1, "LogTeff": -1, "LogG": -1, "B": 1,
 class DSEPInterpolator(object):
     '''Class to automatically handle interpolation of DSEP isochrones.'''
 
-    def __init__(self, age, metallicity, Y=1, afe=2, lowT=3500, highT=6000,
+    def __init__(self, age, feh, Y=1, afe=2, lowT=3500, highT=6000,
                  minlogG=4.2):
         '''Create DSEP Interpolator object set to a given age and metallicity.'''
         self.iso = {}
         self.age = age
-        self.metallicity = metallicity
+        self.feh = feh
         self.Y = Y
         self.afe = afe
         self.interpdicts = {}
 
-    def teff_to_logg_interpolator(teffvals):
+    def teff_to_logg_interpolation(self, teffvals):
         '''Interpolate teffvals to corresponding log(g) on this isochrone.
 
         In the case where the teff and log(g) are double-valued.'''
-        pass
+        interper = self._load_interpdict("LogTeff", "LogG", branch="lower")
 
-    def _single_valued_interpolator(self, fromcol, tocol):
-        '''Create an interpolator for a well-behaved single-valued function.
-        
-        Fromcol and tocol should be columns in the DSEP Interpolator
-        data. Note that fromcol or tocol can be colors.'''
-        interper = self._load_single_interpdict(fromcol, tocol)
+        return interper(np.log10(teffvals))
 
-        return interper
+    def mass_to_radius_interpolation_logg(self, masses):
+        '''Convert mass to a radius through log(g).'''
+        mass_to_logg = self._load_interpdict("M/Mo", "LogG")
 
-    def _check_if_double_valued(self, vals):
-        '''Perform check if the vals are sequential
+        loggvals = mass_to_logg(masses)
+        radius = (masses / 10**(loggvals - 4.438))**0.5
+        return radius
 
-        This function assumes that vals is a coordinate that ought to be
-        monotonic. If the function is double-valued, then it will not be
-        monotonic and either the minimum or maximum do not lie on the endpoints.'''
-        max_index = np.argmax(xvals)
-        min_index = np.argmin(xvals)
-        maximum_present = not (max_index == 0 or max_index == len(xvals)-1)
-        minimum_present = not (min_index == 0 or min_index == len(xvals)-1)
-        if maximum_present and minimum_present:
-            raise ValueError("Color {0} is too complicated to "
-                             "interpolate".format(color))
-        elif maximum_present and not minimum_present:
-            return (xvals[max_index], "max")
-        elif not maximum_present and minimum_present:
-            return (xvals[min_index], "min")
-        else:
-            return False
+    def mass_to_radius_interpolation_sb(self, masses):
+        '''Convert mass to radius through Stefan-Boltzmann Equation.'''
+        mass_to_logluminosity = self._load_interpdict("M/Mo", "LogL/Lo")
+        mass_to_logteff = self._load_interpdict("M/Mo", "LogTeff")
 
-    def _load_single_interpdict(self, fromcol, tocol):
+        loglumvals = mass_to_logluminosity(masses)
+        logteffvals = mass_to_logteff(masses)
+        radius = 10**(loglumvals/2 - 2 * (logteffvals - np.log10(5778)))
+
+        return radius
+
+    def teff_to_radius_interpolation_sb(self, teffs):
+        '''Convert Teff to radius through Stefan-Boltzmann.'''
+        logteff_to_logluminosity = self._load_interpdict("LogTeff", "LogL/Lo")
+
+        logteffvals = np.log10(teffs)
+        loglumvals = logteff_to_logluminosity(logteffvals)
+        radius = 10**(loglumvals/2 - 2 * (logteffvals - np.log10(5778)))
+
+        return radius
+
+    def _interp_bound_values(self, fromcol, tocol, branch="lower"):
+        '''Get the boundary values the spline between the columns.'''
+        spl = self._load_interpdict(fromcol, tocol, branch=branch)
+
+        bound1, bound2 = _bounding_box_from_spline(spl)
+
+        return bound1, bound2
+
+
+    def _load_interpdict(self, fromcol, tocol, branch="lower"):
         '''Load tuple key from interpdict if available, otherwise read it in.
 
         Takes a tuple key for the interpdicts dictionary. If the tuple key is
         found, the interpolator in the interpdict will be returned. If the
         tuple key is not found, then the interpolator will be created from
         isochrone data and then added to interpdict.'''
-        try:
-            interper = self.interpdicts[(fromcol, tocol)]
-        except KeyError:
-            try:
-                fromblue, fromred = split_color(fromcol)
-            except IndexError:
-                fromiso = self._get_isochrone_data(fromcol)
-                fromdata = fromiso[fromcol]
-            else:
-                fromisoblue = self._get_isochrone_data(fromblue)
-                fromisored = self._get_isochrone_data(fromred)
-                fromdata = fromisoblue[fromblue] - fromisored[fromred]
-            try:
-                toblue, tored = split_color(tocol)
-            except IndexError:
-                toiso = self._get_isochrone_data(tocol)
-                todata = toiso[tocol]
-            else:
-                toisoblue = self._get_isochrone_data(toblue)
-                toisored = self._get_isochrone_data(tored)
-                todata = toisoblue[toblue] - toisored[tored]
+        # This scaffolding is to have a standard way of storing information
+        # about whether the isochrones are single or double-valued.
+        singlemarker = "single"
+        lowermarker = "lower"
+        uppermarker = "upper"
 
-            interper = InterpolatedUnivariateSpline(todata, todata)
-            self.interpdicts[(fromcol, tocol)] = interper
-        return interper
+        if branch.lower() in ["lower"]:
+            branchmarker = lowermarker
+        elif branch.lower() in ["upper"]:
+            branchmarker = uppermarker
+        else:
+            raise ValueError("Can't select branch {0}.".format(branch))
 
-    def _load_double_interpdict(self, fromcol, tocol, branch):
-        '''Load double-valued interpolator branch.
-
-        If the branch is located in interpdicts, then load that branch
-        directly. If not, then the interpolator will be created from isochrone
-        data and then added to interpdict.'''
+        # Useful for debugging purposes.
+        # If one branch is in the dictionary, make sure the other branch is as
+        # well.
+        if branchmarker == lowermarker:
+            altmarker = uppermarker
+        else:
+            altmarker = lowermarker
 
         try:
-            interper = self.interpdicts[(fromcol, tocol, branch)]
+            interper = self.interpdicts[(fromcol, tocol, singlemarker)]
         except KeyError:
-            masses = self._get_isochrone_data("M/Mo")["M/Mo"]
-            crit, split_massindex = self._check_if_double_valued()
-            if branch is "lower":
-                brancharr = masses <= masses[split_massindex]
-            elif branch is "upper":
-                brancharr = masses >= masses[split_massindex]
-
+            # This branch isn't a single-valued branch.
+            # Check if it's double-valued.
             try:
-                fromblue, fromred = split_color(fromcol)
-            except IndexError:
-                fromiso = self._get_isochrone_data(fromcol)
-                fromdata = fromiso[fromcol]
-            else:
-                fromisoblue = self._get_isochrone_data(fromblue)
-                fromisored = self._get_isochrone_data(fromred)
-                fromdata = fromisoblue[fromblue] - fromisored[fromred]
-            try:
-                toblue, tored = split_color(tocol)
-            except IndexError:
-                toiso = self._get_isochrone_data(tocol)
-                todata = toiso[tocol]
-            else:
-                toisoblue = self._get_isochrone_data(toblue)
-                toisored = self._get_isochrone_data(tored)
-                todata = toisoblue[toblue] - toisored[tored]
+                interper = self.interpdicts[(fromcol, tocol, branchmarker)]
+            except KeyError:
+                # Branch is neither single or double valued. This means we have
+                # to create it.
+                assert (fromcol, tocol, altmarker) not in self.interpdicts
+                # Get fromdata
+                try:
+                    fromblue, fromred = split_color(fromcol)
+                except IndexError:
+                    fromiso = self._get_isochrone_data(fromcol)
+                    fromdata = fromiso[fromcol]
+                else:
+                    fromisoblue = self._get_isochrone_data(fromblue)
+                    fromisored = self._get_isochrone_data(fromred)
+                    fromdata = fromisoblue[fromblue] - fromisored[fromred]
+                # Get todata
+                try:
+                    toblue, tored = split_color(tocol)
+                except IndexError:
+                    toiso = self._get_isochrone_data(tocol)
+                    todata = toiso[tocol]
+                else:
+                    toisoblue = self._get_isochrone_data(toblue)
+                    toisored = self._get_isochrone_data(tored)
+                    todata = toisoblue[toblue] - toisored[tored]
 
-            interper = InterpolatedUnivariateSpline(
-                fromdata[brancharr], todata[brancharr])
-            self.interpdicts[(fromcol, tocol, branch)] = interper
+                # Check if created branch is double-valued.
+                doubletup = check_sequence_double_valued(fromdata)
+                if doubletup:
+                    masses = self._get_isochrone_data("M/Mo")["M/Mo"]
+                    lowindices = masses <= masses[doubletup[0]]
+                    highindices = masses >= masses[doubletup[0]]
+
+                    # Make sure the arrays are ordered correctly
+                    fromordered_low, toordered_low = ensure_array_increasing(
+                        fromdata[lowindices], todata[lowindices])
+                    fromordered_high, toordered_high = ensure_array_increasing(
+                        fromdata[highindices], todata[highindices])
+
+                    # Get rid of problematic duplicate entries
+                    fromfixed_low, tofixed_low = fix_duplicate_array_values(
+                        fromordered_low, toordered_low) 
+                    fromfixed_high, tofixed_high = fix_duplicate_array_values(
+                        fromordered_high, toordered_high) 
+
+
+                    lowspline = InterpolatedUnivariateSpline(
+                        fromfixed_low, tofixed_low, ext=2, k=1)
+                    highspline = InterpolatedUnivariateSpline(
+                        fromfixed_high, tofixed_high, ext=2, k=1)
+                    
+                    self.interpdicts[(fromcol, tocol, lowermarker)] = lowspline
+                    self.interpdicts[(fromcol, tocol, uppermarker)] = highspline
+
+                    if branchmarker == lowermarker:
+                        interper = lowspline
+                    else:
+                        interper = highspline
+                else:
+                    fromordered, toordered = ensure_array_increasing(
+                        fromdata, todata)
+                    fromfixed, tofixed = fix_duplicate_array_values(
+                        fromordered, toordered)
+                    interper = InterpolatedUnivariateSpline(
+                        fromfixed, tofixed, ext=2, k=1)
+                    self.interpdicts[(fromcol, tocol, singlemarker)] = interper
+            else: 
+                assert (fromcol, tocol, altmarker) in self.interpdicts
+                    
         return interper
-
-
-
-    def _double_valued_interpolate(
-            self, fromcol, tocol, fromvals, branch="lowmass"):
-        '''Select from either of the branches for a double-valued function.'''
-        interper = self._load_double_interpdict(fromcol, tocol, branch)
-        return interper(fromvals)
-
-
 
     def _get_isochrone_data(self, col):
         '''Return the Table of isochrone data that has the current col.
@@ -488,7 +520,7 @@ class DSEPInterpolator(object):
             trimmed_table = self.iso[band_num]
         except KeyError:
             if len(self.iso) > 0 and band_num <= 0:
-                trimmed_table = au.nth(self.iso.keys(), 0)
+                trimmed_table = au.nth(self.iso.values(), 0)
             else:
                 if band_num <= 0:
                     band_num = 1
@@ -498,6 +530,27 @@ class DSEPInterpolator(object):
                 trimmed_table = restrict_interpolation_table(isotable)
                 self.iso[band_num] = trimmed_table
         return trimmed_table
+
+def check_sequence_double_valued(vals):
+    '''Perform check if the vals are sequential
+
+    This function assumes that vals is a coordinate that ought to be
+    monotonic. If the function is double-valued, then it will not be
+    monotonic and either the minimum or maximum do not lie on the endpoints.'''
+    max_index = np.argmax(vals)
+    min_index = np.argmin(vals)
+    maximum_present = not (
+        vals[max_index] == vals[0] or vals[max_index] == vals[-1])
+    minimum_present = not (
+        vals[min_index] == vals[0] or vals[min_index] == vals[-1])
+    if maximum_present and minimum_present:
+        raise ValueError("Can't Interpolate")
+    elif maximum_present and not minimum_present:
+        return (max_index, "max")
+    elif not maximum_present and minimum_present:
+        return (min_index, "min")
+    else:
+        return False
 
 # Internal DSEP Routines #
 ##########################
@@ -690,6 +743,7 @@ def read_DSEP_age_table(tablepath):
     '''
     age_table = Table.read(str(tablepath), format="ascii.commented_header",
                            header_start=-1)
+    age_table.sort("M/Mo")
     return age_table
 
 def read_DSEP_isochrone(
@@ -3264,8 +3318,103 @@ def binary_luminosity_ratio_evolution():
         massratio))
     plt.legend(loc="upper right")
 
+###############################################################################
+# Spline Routines #
+###############################################################################
 
+def plot_spline_test(spl, inv_x=False, inv_y=False):
+    '''Make a plot showing the behavior of the spline. 
+    
+    This function is used for testing whether the spline is correctly
+    interpolating, or if there are problems with the interpolation routines.
+    The internally-stored points will be plotted as well as a smooth sampling
+    of the interpolation.
+    
+    For cases where plotting would require flipping axies, the inv_x and inv_y
+    flags can be used to flip either the x or y axes.'''
+    bbox = _bounding_box_from_spline(spl)
+    xdata = _spline_x_data(spl)
+    ydata = _spline_y_data(spl)
 
+    testx = np.linspace(bbox[0], bbox[1], 200)
+    testy = spl(testx)
+
+    plt.plot(testx, testy, 'k-')
+    plt.plot(xdata, ydata, 'ro')
+    if inv_x:
+        hr.invert_x_axis()
+    if inv_y:
+        hr.invert_y_axis()
+
+def _bounding_box_from_spline(spl):
+    '''Get the bounding box from within a UnivariateSpline object.
+
+    WARNING: This function mucks around with the internals of Univariate
+    Spline, so it may be subject to breakage at any point!
+    '''
+    x, y = spl._data[3], spl._data[4]
+    assert isinstance(x, float)
+    assert isinstance(y, float)
+
+    return x, y
+
+def _spline_x_data(spl):
+    '''Get the x data from within a UnivariateSpline Object
+
+    WARNING: This function mucks around with the internals of Univariate
+    Spline, so it may be subject to breakage at any point!
+    '''
+    xdata = spl._data[0]
+    assert isinstance(xdata, np.ndarray)
+    return xdata
+
+def _spline_y_data(spl):
+    '''Get the y data from within a UnivariateSpline Object
+
+    WARNING: This function mucks around with the internals of Univariate
+    Spline, so it may be subject to breakage at any point!
+    '''
+    ydata = spl._data[1]
+    assert isinstance(ydata, np.ndarray)
+    return ydata
+
+def fix_duplicate_array_values(xvals, yvals):
+    '''Remove duplicate x-values from arrays.
+
+    One of the problems with DSEP isochrones is that occasionally, there will
+    be two adjacent points that have the same x-value, but have different
+    y-values. This function will attempt to find those duplicate points and fix
+    them.'''
+    # Note: This algorithm assumes that there are only two simultaneous
+    # duplications. Doing it for n simultaneous duplications might be tricky.
+    # The DSEP interpolation causes there to be very slight numerical errors in
+    # the answers. As a result, quantities that should be identical can be
+    # scattered above or below what they are.
+    dupmask = np.abs(xvals[:-1] - xvals[1:]) > 1.01e-4
+    valarray = np.vstack([xvals, yvals])
+    meanvals = np.mean([
+        valarray[:, np.hstack([np.ones(1, dtype=bool), dupmask])], 
+        valarray[:, np.hstack([dupmask, np.ones(1, dtype=bool)])]], axis=0)
+    newx = meanvals[0,:]
+    assert np.all(newx[:-1] < newx[1:])
+    newy = meanvals[1,:]
+    return newx, newy
+
+def ensure_array_increasing(xvals, yvals):
+    '''Ensure the provided xvalues are increasing.
+
+    Because creating a spline requires that xvalues are strictly increasing,
+    this function assumes that the provided xvals array is either strictly
+    increasing or decreasing, and if decreasing, it reverses it to ensure that
+    it's increasing. The yvals are also reversed if that's the case.
+    '''
+    if xvals[0] > xvals[-1]:
+        newxvals = xvals[::-1]
+        newyvals = yvals[::-1]
+    else:
+        newxvals = xvals
+        newyvals = yvals
+    return newxvals, newyvals
     
 if __name__ == "__main__":
 

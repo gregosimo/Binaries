@@ -1,6 +1,6 @@
 
 
-import APOGEE_spectroscopy as apo
+import data_splitting as data
 
 def display_fraction_census(aposplit, basic_crit=[]):
     '''Display a table showing the various levels of rapid rotation'''
@@ -35,17 +35,24 @@ def display_cool_dwarf_fraction_census(coolsplit, basic_crit=[]):
     print_DLSB_fractions(coolsplit, othercrits, printfunc=printfunc)
     print()
     othercrits.append("~DLSB")
-    print_rapid_rotation_fractions(coolsplit, othercrits, printfunc=printfunc)
-    print()
-    print_mcq_analysis_overlap(coolsplit, othercrits, printfunc=printfunc)
-    print()
-    print_mcq_detections(coolsplit, othercrits, printfunc=printfunc)
-    print()
-    with_periods = apo.combo_from_APOGEE_Splitter(coolsplit)
-    apo.initialize_combined_rotation_sample(with_periods)
-    print_mcq_rapid_rotator_overlap(
-        with_periods, othercrits, printfunc=printfunc)
-    print()
+    with_periods = data.add_periods_to_datasplitter(coolsplit)
+    data.initialize_general_APOGEE(with_periods)
+    data.initialize_cool_KICs(with_periods)
+    with_periods.split_period([1, 5], ("Very Rapid", "Rapid", "Slow"))
+    for evstate in ("Dwarf", "Subgiant"):
+        print("For {0}s".format(evstate))
+        print_vsini_detection_types( 
+            coolsplit, othercrits+[evstate], printfunc=printfunc)
+        print()
+        print_mcq_analysis_overlap_simplified(
+            coolsplit, othercrits+[evstate], printfunc=printfunc)
+        print()
+        print_mcq_detections_simplified(
+            coolsplit, othercrits+[evstate], printfunc=printfunc)
+        print()
+#       print_rapid_rotation_comparison(
+#           with_periods, othercrits+[evstate], printfunc=printfunc)
+        print()
 
 ###############################################################################
 # Functions for choosing quality
@@ -216,7 +223,7 @@ def print_rapid_rotation_fractions(
         "Fraction of robust detections that are very rapid rotators "
         "(vsini >= 2piR/(1 day)): ")
     def robust_very_rapid(x, othercrit=[]):
-        return rapid_rotator_fraction(
+        return vsini_rapid_rotator_fraction(
             x, othercrit=othercrit, detcrit="Vsini det", 
             rrcrit="Very rapid rotators")
     try:
@@ -230,7 +237,7 @@ def print_rapid_rotation_fractions(
         "Fraction of robust detections that are rapid rotators "
         "(2piR / (1 day) > vsini >= 2piR/(5 day)): ")
     def robust_rapid(x, othercrit=[]):
-        return rapid_rotator_fraction(
+        return vsini_rapid_rotator_fraction(
             x, othercrit=othercrit, detcrit="Vsini det")
     try:
         printfunc(
@@ -256,7 +263,7 @@ def print_rapid_rotation_fractions(
         "Fraction of marginal detections that are very rapid rotators "
         "(vsini >= 2piR / (1 day)): ")
     def marginal_very_rapid(x, othercrit=[]):
-        return rapid_rotator_fraction(
+        return vsini_rapid_rotator_fraction(
             x, othercrit=othercrit, detcrit="Vsini marginal", 
             rrcrit="Very rapid rotators")
     try:
@@ -270,7 +277,7 @@ def print_rapid_rotation_fractions(
         "Fraction of marginal detections that are rapid rotators "
         "(vsini >= 2piR/(5 day)): ")
     def marginal_rapid(x, othercrit=[]):
-        return rapid_rotator_fraction(
+        return vsini_rapid_rotator_fraction(
             x, othercrit=othercrit, detcrit="Vsini marginal")
     try:
         printfunc(
@@ -289,6 +296,45 @@ def print_rapid_rotation_fractions(
         printfunc(
             aposplit, marginal_slow, othercrits, 
             marginal_slow_fraction_string)
+    except ZeroDivisionError:
+        pass
+
+def print_mcq_analysis_overlap_simplified(
+        aposplit, othercrits, printfunc=print_not_bad_totals):
+    '''Print how much  slow/marginal/rapid groups were analyzed by McQuillan.'''
+    mcq_analysis_detection_string = (
+        "Fraction of vsini detections analyzed by McQuillan: ")
+    try:
+        printfunc(
+            aposplit, mcquillan_analysis_fraction, othercrits+["Vsini det"],
+            mcq_analysis_detection_string)
+    except ZeroDivisionError:
+        pass
+
+    mcq_analysis_marginal_string = (
+        "Fraction of marginal vsini detections analyzed by McQuillan: ")
+    try:
+        printfunc(
+            aposplit, mcquillan_analysis_fraction, othercrits+["Vsini marginal"],
+            mcq_analysis_marginal_string)
+    except ZeroDivisionError:
+        pass
+
+    mcq_analysis_slow_string = (
+        "Fraction of vsini non-detections analyzed by McQuillan: ")
+    try:
+        printfunc(
+            aposplit, mcquillan_analysis_fraction, othercrits+["Vsini nondet"],
+            mcq_analysis_slow_string)
+    except ZeroDivisionError:
+        pass
+
+    mcq_analysis_novsini_string = (
+        "Fraction of targets without vsini analyzed by McQuillan: ")
+    try:
+        printfunc(
+            aposplit, mcquillan_analysis_fraction, othercrits+["No Vsini"],
+            mcq_analysis_novsini_string)
     except ZeroDivisionError:
         pass
 
@@ -366,6 +412,44 @@ def print_mcq_analysis_overlap(
         return (nondets[0]+bads[0], nondets[1]+bads[1])
     try:
         printfunc(aposplit, nondet_mcq, othercrits, nondet_mcq_string)
+    except ZeroDivisionError:
+        pass
+
+def print_mcq_detections_simplified(
+        aposplit, othercrits, printfunc=print_not_bad_totals):
+    '''Print number of rotators with McQuillan detections.'''
+    rapid_mcq_string = (
+        "Fraction of rapid rotators with McQuillan detections: ")
+    try:
+        printfunc(
+            aposplit, mcquillan_detection_fraction, othercrits+["Vsini det"],
+            rapid_mcq_string)
+    except ZeroDivisionError:
+        pass
+
+    marginal_mcq_string = (
+        "Fraction of marginal rotators with McQuillan detections: ")
+    try:
+        printfunc(
+            aposplit, mcquillan_detection_fraction, othercrits+["Vsini marginal"],
+            marginal_mcq_string)
+    except ZeroDivisionError:
+        pass
+
+    slow_mcq_string = (
+        "Fraction of slow rotators with McQuillan detections: ")
+    try:
+        printfunc(
+            aposplit, mcquillan_detection_fraction, othercrits+["Vsini nondet"],
+            slow_mcq_string)
+    except ZeroDivisionError:
+        pass
+    novsini_mcq_string = (
+        "Fraction of targets without vsini with McQuillan detections: ")
+    try:
+        printfunc(
+            aposplit, mcquillan_detection_fraction, othercrits+["No Vsini"],
+            novsini_mcq_string)
     except ZeroDivisionError:
         pass
 
@@ -579,7 +663,7 @@ def slow_rotator_fraction(
     fullsamp = aposplit.subsample_len([detcrit] + othercrit)
     return (srlen, fullsamp)
 
-def rapid_rotator_fraction(
+def vsini_rapid_rotator_fraction(
     aposplit, rrcrit="Rapid rotators", detcrit="Vsini det", othercrit=[]):
     '''Return the number of rapid rotators and total sample.
 
@@ -589,6 +673,36 @@ def rapid_rotator_fraction(
 
     rrlen = aposplit.subsample_len([rrcrit, detcrit] + othercrit)
     fullsamp = aposplit.subsample_len([detcrit] + othercrit)
+    return (rrlen, fullsamp)
+
+def mcq_slow_rotator_fraction(
+        mcqsplit, rrcrit="Slow", othercrit=[]):
+    '''Return the number of period rapid rotators in a total sample.
+
+    Rapid rotators are those classified under rrcrit. Other cuts on categories
+    can be specified in othercrit.'''
+    rrlen = mcqsplit.subsample_len([rrcrit] + othercrit)
+    fullsamp = aposplit.subsample_len(othercrit)
+    return (rrlen, fullsamp)
+
+def mcq_rapid_rotator_fraction(
+        mcqsplit, rrcrit="Rapid", othercrit=[]):
+    '''Return the number of period rapid rotators in a total sample.
+
+    Rapid rotators are those classified under rrcrit. Other cuts on categories
+    can be specified in othercrit.'''
+    rrlen = mcqsplit.subsample_len([rrcrit] + othercrit)
+    fullsamp = aposplit.subsample_len(othercrit)
+    return (rrlen, fullsamp)
+
+def mcq_very_rapid_rotator_fraction(
+        mcqsplit, rrcrit="Very Rapid", othercrit=[]):
+    '''Return the number of period rapid rotators in a total sample.
+
+    Rapid rotators are those classified under rrcrit. Other cuts on categories
+    can be specified in othercrit.'''
+    rrlen = mcqsplit.subsample_len([rrcrit] + othercrit)
+    fullsamp = aposplit.subsample_len(othercrit)
     return (rrlen, fullsamp)
 
 def mcquillan_analysis_fraction(

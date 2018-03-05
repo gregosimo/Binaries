@@ -40,6 +40,7 @@ import catalog
 import hrplots as hr
 import biovis_colors as bc
 import data_splitting as data
+import sed
 
 ################################################################################
 # Generate binned distributions #
@@ -122,6 +123,32 @@ def rapid_fraction_histogram(
     plt.xlabel("Teff (K)")
     plt.ylabel("Fraction of Rapid Rotators in Teff bin")
     plt.title("Fraction of rotators with P < {0} day".format(maxper))
+
+def vsini_rapid_fraction_histogram(
+        aposet, hightemp=5450, lowtemp=4250, dtemp=100, vsini_det=10,
+        teffcol="TEFF", vsini_col="VSINI", label=""):
+    '''Plot a histogram of the fraction of vsini rapid rotators.'''
+    totalhist, totbins = number_binned_by_temperature(
+        aposet, hightemp=hightemp, lowtemp=lowtemp, dtemp=dtemp,
+        teffcol=teffcol)
+    rapid_vsini = catalog.perform_vsini_cut(
+        aposet, lowv=vsini_det, vcol=vsini_col)
+    print("Rapid Rotator Number: " + str(len(rapid_vsini)))
+    rapidhist, rapidbins = number_binned_by_temperature(
+        rapid_vsini, hightemp=hightemp, lowtemp=lowtemp, dtemp=dtemp,
+        teffcol=teffcol)
+    fracs = rapidhist / totalhist
+    fracerrs = np.sqrt(rapidhist) / totalhist
+#   plt.step(totbins[:-1], rapidhist/totalhist, where="post", label=label)
+    plt.errorbar(totbins[:-1], fracs, yerr=fracerrs, marker="o", ls="",
+                 label=label)
+    totalfrac = len(rapid_vsini) / len(aposet)
+    plt.plot([hightemp, lowtemp], [totalfrac, totalfrac], 'k--')
+    plt.xlim(plt.xlim()[::-1])
+    plt.xlabel("Teff (K)")
+    plt.ylabel("Fraction of Rapid Rotatiors in Teff bin")
+    plt.title(
+        "Fraction of rotators with Vsini > {0:.1f} km/s".format(vsini_det))
 
 def rapid_fraction_multiple_limits(
     mcquillan, hightemp=6500, lowtemp=3000, dtemp=50, maxper=5, dper=1, 
@@ -413,6 +440,50 @@ def generate_radius_column(
             radius_column.mask = colmask
 
     apotable[radcol] = radius_column
+
+def generate_DSEP_radius_column(
+    apotable, teffcol="TEFF", fehcol="FE_H", age=3, radcol="APOGEE radius"):
+    '''Add a radius column to apotable.
+
+    The column to convert teff to radius should be given as Teffcol. The radius
+    will be stored in the radcol column.'''
+    radiusarr = np.zeros(len(apotable))
+    # A dictionary referencing DSEP models according to metallicity.
+    DSEP_models = {}
+    assert np.all(apotable[fehcol] != -9999.0)
+    rounded_metallicities = np.round(apotable[fehcol]*2, 0)/2
+    # What to do about -9999 or masked arrays
+    for i in range(len(rounded_metallicities)):
+        try:
+            dsep_interper = DSEP_models[rounded_metallicities[i]]
+        except KeyError:
+            dsep_interper = sed.DSEPInterpolator(age, rounded_metallicities[i])
+
+        teffpoint = apotable[teffcol][i]
+        assert np.all(teffpoint > 0)
+        radiusarr[i] = dsep_interper.teff_to_radius_interpolation_sb(teffpoint)
+
+    apotable[radcol] = radiusarr
+
+def generate_DSEP_radius_column_with_errors(
+        apotable, teffcol="TEFF", fehcol="FE_H", ageval=3, oldage=10,
+        youngage=1, radcol="DSEP radius", topraderrcol="DSEP radius upper",
+        bottomraderrcol="DSEP radius lower"):
+    '''Add radius and error columns to apotable.
+
+    The columns that will be added are a column for the radius, the upper limit
+    and the lower limit. The ages corresponding to the representative, old, and
+    young limits should also be specified.'''
+    generate_DSEP_radius_column(
+        apotable, teffcol=teffcol, fehcol=fehcol, age=ageval, radcol=radcol)
+    generate_DSEP_radius_column(
+        apotable, teffcol=teffcol, fehcol=fehcol, age=youngage,
+        radcol=bottomraderrcol)
+    apotable[bottomraderrcol] = apotable[radcol] - apotable[bottomraderrcol]
+    generate_DSEP_radius_column(
+        apotable, teffcol=teffcol, fehcol=fehcol, age=oldage,
+        radcol=topraderrcol)
+    apotable[topraderrcol] = apotable[radcol] - apotable[topraderrcol]
 
 ###############################################################################
 # Asteroseismic log(g) determination #
