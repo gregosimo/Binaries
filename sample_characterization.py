@@ -40,6 +40,7 @@ import catalog
 import hrplots as hr
 import biovis_colors as bc
 import data_splitting as data
+import sed
 
 ################################################################################
 # Generate binned distributions #
@@ -439,6 +440,50 @@ def generate_radius_column(
             radius_column.mask = colmask
 
     apotable[radcol] = radius_column
+
+def generate_DSEP_radius_column(
+    apotable, teffcol="TEFF", fehcol="FE_H", age=3, radcol="APOGEE radius"):
+    '''Add a radius column to apotable.
+
+    The column to convert teff to radius should be given as Teffcol. The radius
+    will be stored in the radcol column.'''
+    radiusarr = np.zeros(len(apotable))
+    # A dictionary referencing DSEP models according to metallicity.
+    DSEP_models = {}
+    assert np.all(apotable[fehcol] != -9999.0)
+    rounded_metallicities = np.round(apotable[fehcol]*2, 0)/2
+    # What to do about -9999 or masked arrays
+    for i in range(len(rounded_metallicities)):
+        try:
+            dsep_interper = DSEP_models[rounded_metallicities[i]]
+        except KeyError:
+            dsep_interper = sed.DSEPInterpolator(age, rounded_metallicities[i])
+
+        teffpoint = apotable[teffcol][i]
+        assert np.all(teffpoint > 0)
+        radiusarr[i] = dsep_interper.teff_to_radius_interpolation_sb(teffpoint)
+
+    apotable[radcol] = radiusarr
+
+def generate_DSEP_radius_column_with_errors(
+        apotable, teffcol="TEFF", fehcol="FE_H", ageval=3, oldage=10,
+        youngage=1, radcol="DSEP radius", topraderrcol="DSEP radius upper",
+        bottomraderrcol="DSEP radius lower"):
+    '''Add radius and error columns to apotable.
+
+    The columns that will be added are a column for the radius, the upper limit
+    and the lower limit. The ages corresponding to the representative, old, and
+    young limits should also be specified.'''
+    generate_DSEP_radius_column(
+        apotable, teffcol=teffcol, fehcol=fehcol, age=ageval, radcol=radcol)
+    generate_DSEP_radius_column(
+        apotable, teffcol=teffcol, fehcol=fehcol, age=youngage,
+        radcol=bottomraderrcol)
+    apotable[bottomraderrcol] = apotable[radcol] - apotable[bottomraderrcol]
+    generate_DSEP_radius_column(
+        apotable, teffcol=teffcol, fehcol=fehcol, age=oldage,
+        radcol=topraderrcol)
+    apotable[topraderrcol] = apotable[radcol] - apotable[topraderrcol]
 
 ###############################################################################
 # Asteroseismic log(g) determination #

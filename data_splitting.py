@@ -1031,10 +1031,6 @@ def initialize_cool_KICs(kicsplit):
             "Huber giants", "Huber subgiants", "Huber dwarfs", "No Huber EV"),
         crit="Huber evolutionary state")
 
-    kicsplit.split_cool_dwarfs()
-    radius_fit = samp.huber_dwarf_radius_relation()
-    add_radius_column_to_splitter(kicsplit, radius_fit)
-
 def initialize_asteroseismic_sample(aposplit):
     '''Initialize the sample for asteroseismic targets.
     
