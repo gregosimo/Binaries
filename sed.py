@@ -15,6 +15,7 @@ from scipy.stats import chi2, norm, multivariate_normal
 from astropy.table import Table
 from pathlib import Path
 import matplotlib.pyplot as plt
+import astropy_util as au
 
 import path_config as paths
 import catalog
@@ -347,7 +348,6 @@ class DSEPInterpolator(object):
         self.iso = {}
         self.age = age
         self.metallicity = metallicity
-        self.bands = bands
         self.Y = Y
         self.afe = afe
         self.interpdicts = {}
@@ -363,7 +363,7 @@ class DSEPInterpolator(object):
         
         Fromcol and tocol should be columns in the DSEP Interpolator
         data. Note that fromcol or tocol can be colors.'''
-        interper = self._load_interpdict((fromcol, tocol))
+        interper = self._load_single_interpdict(fromcol, tocol)
 
         return interper
 
@@ -463,36 +463,13 @@ class DSEPInterpolator(object):
 
 
 
-    def _double_valued_interpolator(
-            self, fromcol, tocol, splitindex, branch="lowmass"):
+    def _double_valued_interpolate(
+            self, fromcol, tocol, fromvals, branch="lowmass"):
         '''Select from either of the branches for a double-valued function.'''
-        from_to_mass = self._load_interpdict(self, 
-        try:
-            interper = self.interpdicts[(fromcol, tocol, branch)]
-        except KeyError:
-            try:
-                fromblue, fromred = split_color(fromcol)
-            except IndexError:
-                fromiso = self._get_isochrone_data(fromcol)
-                fromdata = fromiso[fromcol]
-            else:
-                fromisoblue = self._get_isochrone_data(fromblue)
-                fromisored = self._get_isochrone_data(fromred)
-                fromdata = fromisoblue[fromblue] - fromisored[fromred]
-            try:
-                toblue, tored = split_color(tocol)
-            except IndexError:
-                toiso = self._get_isochrone_data(tocol)
-                todata = toiso[tocol]
-            else:
-                toisoblue = self._get_isochrone_data(toblue)
-                toisored = self._get_isochrone_data(tored)
-                todata = toisoblue[toblue] - toisored[tored]
+        interper = self._load_double_interpdict(fromcol, tocol, branch)
+        return interper(fromvals)
 
 
-            interper = InterpolatedUnivariateSpline(todata, todata)
-            self.interpdicts[(fromcol, tocol)] = interper
-        return interper
 
     def _get_isochrone_data(self, col):
         '''Return the Table of isochrone data that has the current col.
@@ -516,7 +493,8 @@ class DSEPInterpolator(object):
                 if band_num <= 0:
                     band_num = 1
                 isotable = read_DSEP_isochrone(
-                    self.feh, self.age, Y=self.Y, afe=self.afe, bands=band_num)
+                    self.metallicity, self.age, Y=self.Y, afe=self.afe, 
+                    bands=band_num)
                 trimmed_table = restrict_interpolation_table(isotable)
                 self.iso[band_num] = trimmed_table
         return trimmed_table
