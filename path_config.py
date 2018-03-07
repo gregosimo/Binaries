@@ -67,6 +67,7 @@ EL_BADRY_SB2 = HEAD_DIR / "Table_E3_all_binary_star_labels.csv"
 EL_BADRY_HIDDEN_TRIPLE = (
     HEAD_DIR / "Table_E4_all_SB2s_hidden_third_component_labels.csv")
 EL_BADRY_SB3 = HEAD_DIR / "Table_E5_all_SB3_labels.csv"
+CALIFORNIA_KEPLER_SPECTROSCOPY = HEAD_DIR / "ajaa80det5_mrt.txt"
 
 STAUFFER_VSINI_PATH = HEAD_DIR / "Stauffer_Hartmann_Table1.txt"
 

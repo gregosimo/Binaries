@@ -355,6 +355,16 @@ def read_El_Badry_SB3(elb_sb3=paths.EL_BADRY_SB3):
     sb3table = Table.read(elb_sb3, format="ascii.csv")
     return sb3table
 
+def read_California_Kepler_Spectroscopy(
+    cks=paths.CALIFORNIA_KEPLER_SPECTROSCOPY):
+    '''Read in the data from the California Kepler Survey.
+
+    This table contains spectroscopic parameters from the California Kepler
+    Survey. Essentially has Teff, logg, [Fe/H] and vsini from two different
+    pipelines.'''
+    ckstable = Table.read(cks, format="ascii.cds")
+    return ckstable
+
 ###############################################################################
 # Joined catalogs #
 ##############################################################################

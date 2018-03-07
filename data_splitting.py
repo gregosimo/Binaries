@@ -1030,6 +1030,7 @@ def initialize_cool_KICs(kicsplit):
         bottomdiv_coord=(5000, 4.2), splitnames=(
             "Huber giants", "Huber subgiants", "Huber dwarfs", "No Huber EV"),
         crit="Huber evolutionary state")
+    kicsplit.split_cool_dwarfs()
 
 def initialize_asteroseismic_sample(aposplit):
     '''Initialize the sample for asteroseismic targets.
