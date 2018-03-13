@@ -41,6 +41,7 @@ import hrplots as hr
 import biovis_colors as bc
 import data_splitting as data
 import sed
+import rotation_consistency as rot
 
 ################################################################################
 # Generate binned distributions #
@@ -167,6 +168,64 @@ def rapid_fraction_multiple_limits(
             maxper=bound, teffcol=teffcol, periodcol=periodcol, label=perlabel)
     plt.title("Rapid Rotator Fraction up to {0} day".format(maxper))
     plt.legend(loc="upper center")
+
+def rapid_rotation_fraction_detection_limits(vsinis, vsini_limits):
+    '''Return the rapid rotator fraction for each of the given limits.
+    
+    Returns an array that has the fraction of rapid rotators in the vsinis
+    array given each detection limit in vsini_limits.'''
+    # How it works when numpy is upgraded to >=1.12.
+    #fracs = (np.count_nonzero(vsinis[:,np.newaxis] >= vsini_limits, axis=0) / 
+    #         len(vsinis))
+    fracs = np.zeros(len(vsini_limits))
+    for i in range(len(vsini_limits)):
+        fracs[i] = np.count_nonzero(vsinis >= vsini_limits[i]) / len(vsinis)
+    return fracs
+
+def phot_rapid_rotator_fraction_spec_detection(periods, radii, vsini_limits):
+    '''Plot period fraction of rapid rotators given vsini limits.
+
+    This function will basically plot the number of targets expected to have
+    vsini > vsini_limits for each of the elements in vsini_limits. Note that
+    this function does not include the pi/4 correction for vsini.
+    '''
+    est_v = rot.period_to_velocities(periods, radii)
+    frac = rapid_rotation_fraction_detection_limits(est_v, vsini_limits)
+    return frac
+
+def plot_rapid_rotation_detection_limits(
+        vsinis, periods, radii, min_limit=5, max_limit=15):
+    '''Plot rapid rotator fraction for vsinis as a function of detection limits.
+
+    For each of the vsini measurements in vsinis, plot the rapid rotator
+    fraction spanning vsinis from min_limit to max_limit. For the purposes of
+    this plot, this will span integer values between min_limit and
+    max_limit.'''
+    vsini_limits = np.arange(min_limit, max_limit)
+    rapid_frac = rapid_rotation_fraction_detection_limits(vsinis, vsini_limits)
+    upper_rapid_frac = (
+        au.poisson_upper(rapid_frac*len(vsinis), 1.0) / len(vsinis) - rapid_frac)
+    lower_rapid_frac = (
+        rapid_frac - au.poisson_lower(rapid_frac*len(vsinis), 1.0) / len(vsinis))
+    rapid_frac_errs = np.array([lower_rapid_frac, upper_rapid_frac])
+
+    phot_rapid_frac = phot_rapid_rotator_fraction_spec_detection(
+        periods, radii, vsini_limits) 
+    upper_phot_rapid_frac = (
+        au.poisson_upper(phot_rapid_frac*len(vsinis), 1.0) / len(vsinis) - 
+        phot_rapid_frac)
+    lower_phot_rapid_frac = (
+        phot_rapid_frac - au.poisson_lower(phot_rapid_frac*len(vsinis), 1.0) / 
+        len(vsinis))
+    phot_rapid_frac_errs = np.array([lower_phot_rapid_frac, upper_phot_rapid_frac])
+
+    plt.errorbar(vsini_limits, rapid_frac, yerr=rapid_frac_errs, color=bc.black, 
+                 linestyle="-", label="Spectroscopic", capsize=4)
+    plt.errorbar(vsini_limits, phot_rapid_frac*np.pi/4, yerr=phot_rapid_frac_errs, 
+                 color=bc.red, linestyle="-", label="Photometric", capsize=4)
+    plt.xlabel("Vsini detection limit (km/s)")
+    plt.ylabel("Rapid Rotator Fraction")
+    plt.legend()
 
 ###############################################################################
 # Comparing KIC values #
