@@ -525,7 +525,7 @@ class DSEPInterpolator(object):
                 if band_num <= 0:
                     band_num = 1
                 isotable = read_DSEP_isochrone(
-                    self.metallicity, self.age, Y=self.Y, afe=self.afe, 
+                    self.feh, self.age, Y=self.Y, afe=self.afe, 
                     bands=band_num)
                 trimmed_table = restrict_interpolation_table(isotable)
                 self.iso[band_num] = trimmed_table

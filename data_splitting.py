@@ -1003,7 +1003,7 @@ def initialize_general_APOGEE(aposplit):
     aposplit.split_McQuillan_periods()
 
     aposplit.split_vsini(
-        [0, 7, 15], ("No Vsini", "Vsini nondet", "Vsini marginal", "Vsini det"))
+        [0, 7, 12], ("No Vsini", "Vsini nondet", "Vsini marginal", "Vsini det"))
 
     aposplit.split_vscatter(
         [0, 1], ("Single Visit", "RV Nonvariable", "RV Variable"), 
