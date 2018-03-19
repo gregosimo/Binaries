@@ -659,6 +659,69 @@ def compare_rotation_velocity_radius(
     ax3.set_xlabel("McQuillan Period (day)")
     ax3.set_ylabel("Inferred P / sin(i) (day)")
 
+def plot_rotation_velocity_radius(
+        vsini, period, radii, raderr_below, raderr_above, color="k",
+        subplot_tup=None):
+    '''Make a 3-paneled figure comparing measured and inferred radii.
+
+    This function plots vsini vs inferred v, radius vs inferred rsini, and
+    period vs inferred P/sini. It assumes the inputted data already contain the
+    necessary cuts.'''
+    if not subplot_tup:
+        subplot_tup = plt.subplots(1, 3, figsize=(15, 5))
+    f, (ax1, ax2, ax3) = subplot_tup
+
+    downvel, infvel, upvel = period_to_velocities_uncertainties(
+        period, radii, raderr_below, raderr_above)
+
+    ax1.errorbar(
+        infvel, vsini, xerr=[-downvel, upvel], yerr=0.1*vsini,
+        color=color, ls="None", marker="*")
+    ax1.plot([0, 80], [0, 80], 'k-')
+    plt.sca(ax1)
+#    plt.legend(loc="upper right")
+    ax1.set_xlabel("Inferred equatorial velocity (km/s)")
+    ax1.set_ylabel("V sini (km/s)")
+
+    vsini_fractional_error = 0.15
+    inferred_radii = rotation_radius(vsini, period)
+    ax2.errorbar(
+        radii, inferred_radii, yerr=vsini_fractional_error*inferred_radii, 
+        xerr=[-raderr_below, raderr_above], color=color, ls="None",
+        marker="*")
+    ax2.plot([0, 4.0], [0, 4.0], 'k-')
+    ax2.set_xlabel("Radius (Rsun)")
+    ax2.set_ylabel("Inferred R sini (Rsun)")
+
+    inferred_period = vsini_to_spot_period_range(vsini, radii)[1]
+    # Dealing with errors is difficult because the vsini and radius errors have
+    # a unspecified interplay, especially since radius is asymmetric. Instead
+    # of trying to calculate some form, I'll take the maximum of either the
+    # vsini error or the radius error.
+    radius_fractional_errors = ((raderr_above + raderr_below) / 
+                                radii)
+    inferred_period_err_up = np.where(
+        radius_fractional_errors >= vsini_fractional_error, 
+        vsini_to_spot_period_range(
+            vsini, radii + raderr_above)[1] - inferred_period, 
+        vsini_to_spot_period_range(
+            vsini*(1-vsini_fractional_error), radii)[1] - inferred_period)
+    inferred_period_err_down = np.where(
+        radius_fractional_errors >= vsini_fractional_error, 
+        vsini_to_spot_period_range(
+            vsini, radii + raderr_below)[1] - inferred_period, 
+        vsini_to_spot_period_range(
+            vsini*(1+vsini_fractional_error), radii)[1] - inferred_period)
+    ax3.errorbar(
+        period, inferred_period, 
+        yerr=[-inferred_period_err_down, inferred_period_err_up], color=color,
+        ls="None", marker="*")
+
+    ax3.plot([0, 15.0], [0, 15.0], 'k-')
+    ax3.set_xlabel("McQuillan Period (day)")
+    ax3.set_ylabel("Inferred P / sin(i) (day)")
+    return subplot_tup
+
 def rotation_teff_test(
     vsini, period, teff, metallicity, alpha, apogee_flags, age=2.0):
     '''Test the subgiant status using displacement in radius.
