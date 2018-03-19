@@ -193,14 +193,14 @@ def phot_rapid_rotator_fraction_spec_detection(periods, radii, vsini_limits):
     frac = rapid_rotation_fraction_detection_limits(est_v, vsini_limits)
     return frac
 
-def plot_rapid_rotation_detection_limits(
+def spectroscopic_photometric_rotation_fraction_comparison_plot(
         vsinis, periods, radii, min_limit=5, max_limit=15):
-    '''Plot rapid rotator fraction for vsinis as a function of detection limits.
+    '''Plot spectroscopic and corresponding photometric rapid rotator fractions.
 
-    For each of the vsini measurements in vsinis, plot the rapid rotator
-    fraction spanning vsinis from min_limit to max_limit. For the purposes of
-    this plot, this will span integer values between min_limit and
-    max_limit.'''
+    Plot the spectroscopic rapid rotator fraction accepting detection limits
+    ranging from min_limit to max_limit, inclusive. And then plot the
+    photometric rapid rotator fraction corresponding to each detection limit,
+    including the inclination correction.'''
     vsini_limits = np.arange(min_limit, max_limit)
     rapid_frac = rapid_rotation_fraction_detection_limits(vsinis, vsini_limits)
     upper_rapid_frac = (
@@ -226,6 +226,30 @@ def plot_rapid_rotation_detection_limits(
     plt.xlabel("Vsini detection limit (km/s)")
     plt.ylabel("Rapid Rotator Fraction")
     plt.legend()
+
+def plot_rapid_rotation_detection_limits(
+        vsinis, min_limit=5, max_limit=15, color=bc.black, ls="-", label="",
+        offset=0.0):
+    '''Plot rapid rotator fraction for vsinis as a function of detection limits.
+
+    For each of the vsini measurements in vsinis, plot the rapid rotator
+    fraction spanning vsinis from min_limit to max_limit. For the purposes of
+    this plot, this will span integer values between min_limit and
+    max_limit.
+    
+    Offsets can be provided if many of these plots are shown at the same time.'''
+    vsini_limits = np.arange(min_limit, max_limit)
+    rapid_frac = rapid_rotation_fraction_detection_limits(vsinis, vsini_limits)
+    upper_rapid_frac = (
+        au.poisson_upper(rapid_frac*len(vsinis), 1.0) / len(vsinis) -
+        rapid_frac)
+    lower_rapid_frac = (
+        rapid_frac - 
+        au.poisson_lower(rapid_frac*len(vsinis), 1.0) / len(vsinis))
+    rapid_frac_errs = np.array([lower_rapid_frac, upper_rapid_frac])
+
+    plt.errorbar(vsini_limits+offset, rapid_frac, yerr=rapid_frac_errs, color=color,
+                 linestyle=ls, label=label, capsize=4)
 
 ###############################################################################
 # Comparing KIC values #
