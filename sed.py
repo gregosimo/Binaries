@@ -384,7 +384,18 @@ class DSEPInterpolator(object):
         logteff_to_logluminosity = self._load_interpdict("LogTeff", "LogL/Lo")
 
         logteffvals = np.log10(teffs)
-        loglumvals = logteff_to_logluminosity(logteffvals)
+        try:
+            loglumvals = logteff_to_logluminosity(logteffvals)
+        except ValueError:
+            teff_inputs = _spline_x_data(logteff_to_logluminosity)
+            min_teff, max_teff = teff_inputs[0], teff_inputs[-1]
+            too_low = teffs < min_teff
+            too_high = teffs > max_teff
+            if np.count_nonzero(too_low):
+                print("Included Teffs are lower than {0:1f}".format(10**min_teff))
+            if np.count_nonzero(too_high):
+                print("Included Teffs are higher than {0:1f}".format(10**max_teff))
+            raise
         radius = 10**(loglumvals/2 - 2 * (logteffvals - np.log10(5778)))
 
         return radius
