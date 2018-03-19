@@ -593,7 +593,7 @@ def stelparms_triple_KIC(
     to put them on the SDSS system. Finally Huber et al (2014) reanalyzed the
     whole KIC to use the best available data and fit the parameters as well as
     uncertainties using DSEP isochrones.'''
-    hubercat = read_KIC_DR25_catalog(huberpath)
+    hubercat = stelparms_with_original_KIC(huberpath)
     pinsonneaultcat = read_Pinsonneault_2012_catalog(pinpath)
     joinedcat = au.join_by_id(
         hubercat, pinsonneaultcat, "kepid", "KIC", join_type="left")
@@ -741,6 +741,28 @@ def read_Stauffer_Pleiades(vsini_file=paths.STAUFFER_VSINI_PATH):
         ('---', '0'), ('', '0')])
     separate_limit(tbl, ["vsini"], eqdelim="")
     return tbl
+
+# Stauffer (1982)
+
+def read_Stauffer_1982_photometry(photfile=paths.STAUFFER_1982_TABLE1_PATH):
+    '''Read the photometry table from Stauffer (1982).'''
+    tbl = Table.read(
+        str(photfile), format="ascii.no_header", guess=False, 
+        fill_values=[("---", "0"), ("", "0")]) 
+
+    staufftable = Table([
+        npstr.add(tbl["col1"], tbl["col2"]), tbl["col3"],
+        npstr.strip(tbl["col4"], "()").astype(np.float), tbl["col5"], 
+        npstr.strip(tbl["col6"], "()").astype(np.float), tbl["col7"], 
+        npstr.strip(tbl["col8"], "()").astype(np.float), tbl["col9"], 
+        npstr.strip(tbl["col10"], "()").astype(np.float), tbl["col11"]], names=[
+            "Star", "V", "Verr", "B-V", "B-Verr", "V-R", "V-Rerr",
+            "R-I", "R-Ierr", "V-I"], masked=True)
+
+    for initcol, stauffcol in zip(tbl.colnames[2:], staufftable.colnames[1:]):
+        staufftable[stauffcol].mask = tbl[initcol].mask
+
+    return staufftable
 
 #################
 # Service Files #

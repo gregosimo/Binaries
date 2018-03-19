@@ -70,6 +70,7 @@ EL_BADRY_SB3 = HEAD_DIR / "Table_E5_all_SB3_labels.csv"
 CALIFORNIA_KEPLER_SPECTROSCOPY = HEAD_DIR / "ajaa80det5_mrt.txt"
 
 STAUFFER_VSINI_PATH = HEAD_DIR / "Stauffer_Hartmann_Table1.txt"
+STAUFFER_1982_TABLE1_PATH = HEAD_DIR / "Stauffer_82_Table1.txt"
 
 THESIS_PATH = HEAD_DIR / "Thesis"
 PROPOSAL_PATH = THESIS_PATH / "Proposals"
