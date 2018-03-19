@@ -987,8 +987,8 @@ def create_combined_rotation_splitter(baseclass):
 def initialize_general_APOGEE(aposplit):
     '''Initialize the most general and applicable cuts to APOGEE'''
     aposplit.split_teff(
-        "TEFF", [4500, 5450, 5500], (
-            "Too Cool", "Right Teff", "Teff Age Evolution", "Too Hot"),
+        "TEFF", [4500, 5450], (
+            "Too Cool", "Right Teff", "Too Hot"),
         teff_crit="APOGEE Teff")
     
     aposplit.split_mag(
