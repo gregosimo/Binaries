@@ -995,11 +995,11 @@ def find_UKIRT_contaminants(
     if ukirt_file is None:
         ukirt_input_path = input(
             "Please input the output path for the upload file to WFCAM:")
-        write_UKIRT_file(bintable, ukirt_input_path)
-        ukirt_file = input(
+        write_UKIRT_file(bintable, output_filename=ukirt_input_path)
+        ukirt_file = paths.HEAD_DIR / input(
             "Please input the path to the WFCAM output file:")
 
-    ukirt_catalog = read_UKIRT_file(ukirt_file)
+    ukirt_catalog = catin.read_UKIRT_file(ukirt_file)
     ukirt_catalog = filter_good_UKIRT_observations(ukirt_catalog)
     ukirt_groups = ukirt_catalog.group_by("upload_ID")
 
@@ -1018,9 +1018,9 @@ def find_UKIRT_contaminants(
         kepler_contam_sources = contam_list[np.where(np.logical_and(
             offsets > apogee_window, offsets < kepler_window))]
 
-        target_ind = np.argmax(
+        target_ind = np.argmin(
             apogee_sources["jAperMag3"])
-        brightest_contam_ind = np.argmax(
+        brightest_contam_ind = np.argmin(
             kepler_contam_sources["jAperMag3"])
 
         magdiffs[i] = (
