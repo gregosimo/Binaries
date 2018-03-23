@@ -677,7 +677,11 @@ def plot_rotation_velocity_radius(
     ax1.errorbar(
         infvel, vsini, xerr=[-downvel, upvel], yerr=0.1*vsini,
         color=color, ls="None", marker="*")
-    ax1.plot([0, 80], [0, 80], 'k-')
+    ax1.fill_between([0, 80], [0, 80], [0, 0], facecolor="gray")
+    ax1.annotate(r"$\sin i < 1$", xy=(0.70, 0.05), xycoords="axes fraction",
+                 fontsize=16)
+    ax1.set_xlim(0, 80)
+    ax1.set_ylim(0, 80)
     plt.sca(ax1)
 #    plt.legend(loc="upper right")
     ax1.set_xlabel("Inferred equatorial velocity (km/s)")
@@ -689,7 +693,9 @@ def plot_rotation_velocity_radius(
         radii, inferred_radii, yerr=vsini_fractional_error*inferred_radii, 
         xerr=[-raderr_below, raderr_above], color=color, ls="None",
         marker="*")
-    ax2.plot([0, 4.0], [0, 4.0], 'k-')
+    ax2.fill_between([0, 4], [0, 4], [0, 0], facecolor="gray")
+    ax2.set_xlim(0, 4.0)
+    ax2.set_ylim(0, 4.0)
     ax2.set_xlabel("Radius (Rsun)")
     ax2.set_ylabel("Inferred R sini (Rsun)")
 
@@ -717,7 +723,9 @@ def plot_rotation_velocity_radius(
         yerr=[-inferred_period_err_down, inferred_period_err_up], color=color,
         ls="None", marker="*")
 
-    ax3.plot([0, 15.0], [0, 15.0], 'k-')
+    ax3.fill_between([0, 15], [0, 15], [15, 15], facecolor="gray")
+    ax3.set_xlim(0, 15)
+    ax3.set_ylim(0, 15)
     ax3.set_xlabel("McQuillan Period (day)")
     ax3.set_ylabel("Inferred P / sin(i) (day)")
     return subplot_tup
