@@ -220,9 +220,11 @@ def spectroscopic_photometric_rotation_fraction_comparison_plot(
     phot_rapid_frac_errs = np.array([lower_phot_rapid_frac, upper_phot_rapid_frac])
 
     plt.errorbar(vsini_limits, rapid_frac, yerr=rapid_frac_errs, color=bc.black, 
-                 linestyle="-", label="Spectroscopic", capsize=4)
+                 linestyle="-", label="Spectroscopic", capsize=4, lw=3,
+                 capthick=3)
     plt.errorbar(vsini_limits, phot_rapid_frac*np.pi/4, yerr=phot_rapid_frac_errs, 
-                 color=bc.red, linestyle="-", label="Photometric", capsize=4)
+                 color=bc.black, linestyle="--", label="Photometric",
+                 capsize=4, lw=3, capthick=3)
     plt.xlabel("Vsini detection limit (km/s)")
     plt.ylabel("Rapid Rotator Fraction")
     plt.legend()
@@ -534,7 +536,7 @@ def generate_DSEP_radius_column(
     # A dictionary referencing DSEP models according to metallicity.
     DSEP_models = {}
     assert np.all(apotable[fehcol] != -9999.0)
-    rounded_metallicities = np.round(apotable[fehcol]*2, 0)/2
+    rounded_metallicities = np.round(apotable[fehcol]*2, 1)/2
     # What to do about -9999 or masked arrays
     for i in range(len(rounded_metallicities)):
         try:

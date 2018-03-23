@@ -488,11 +488,20 @@ class DSEPInterpolator(object):
                     fromfixed_high, tofixed_high = fix_duplicate_array_values(
                         fromordered_high, toordered_high) 
 
+                    # Noise on the edges sometimes causes false minima/maxima.
+                    # If that seems to be the case, the edges would be really
+                    # small.
+                    if len(fromfixed_low) < 3:
+                        branchmarker = uppermarker
+
+                    if len(fromfixed_high) < 3:
+                       branchmarker=lowermarker
 
                     lowspline = InterpolatedUnivariateSpline(
                         fromfixed_low, tofixed_low, ext=2, k=1)
                     highspline = InterpolatedUnivariateSpline(
                         fromfixed_high, tofixed_high, ext=2, k=1)
+
                     
                     self.interpdicts[(fromcol, tocol, lowermarker)] = lowspline
                     self.interpdicts[(fromcol, tocol, uppermarker)] = highspline
@@ -3401,13 +3410,18 @@ def fix_duplicate_array_values(xvals, yvals):
     # The DSEP interpolation causes there to be very slight numerical errors in
     # the answers. As a result, quantities that should be identical can be
     # scattered above or below what they are.
-    dupmask = np.abs(xvals[:-1] - xvals[1:]) > 1.01e-4
+    dupmask = np.abs(np.diff(xvals)) > 1.01e-5
     valarray = np.vstack([xvals, yvals])
-    meanvals = np.mean([
-        valarray[:, np.hstack([np.ones(1, dtype=bool), dupmask])], 
-        valarray[:, np.hstack([dupmask, np.ones(1, dtype=bool)])]], axis=0)
+    # If the cases of duplication are isolated:
+    if np.all(np.logical_or(dupmask[1:], dupmask[:-1])):
+        meanvals = np.mean([
+            valarray[:, np.hstack([np.ones(1, dtype=bool), dupmask])], 
+            valarray[:, np.hstack([dupmask, np.ones(1, dtype=bool)])]], axis=0)
+    else:
+        splitlist = np.hsplit(valarray, np.where(dupmask)[0]+1)
+        meanvals = np.concatenate([
+            np.mean(vals, axis=1)[:,np.newaxis] for vals in splitlist], axis=1)
     newx = meanvals[0,:]
-    assert np.all(newx[:-1] < newx[1:])
     newy = meanvals[1,:]
     return newx, newy
 
@@ -3425,7 +3439,15 @@ def ensure_array_increasing(xvals, yvals):
     else:
         newxvals = xvals
         newyvals = yvals
-    return newxvals, newyvals
+
+    # These may require a bit of resorting due to interpolation errors. One
+    # quality flag I'd like to ensure is that no drastic sorting changes occur.
+    sorted_xvals_indices = np.argsort(newxvals)
+    sorted_xvals = newxvals[sorted_xvals_indices]
+    sorted_yvals = newyvals[sorted_xvals_indices]
+    assert np.all(sorted_xvals_indices - np.arange(len(sorted_xvals)) < 3)
+
+    return sorted_xvals, sorted_yvals
     
 if __name__ == "__main__":
 
