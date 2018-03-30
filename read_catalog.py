@@ -154,6 +154,20 @@ def read_UCAC4_Mcquillan_Tidsync(
     UCAC_table.add_column(kic_ints, index=0)
     return UCAC_table
 
+def read_UCAC4_EB_Tidsync(
+        upath=paths.UCAC_EB_TIDSYNC_PATH, kic_col="KIC"):
+    '''Reads the UCAC4 table for tidally-synchronized eclipsing binaries.
+
+    The UCAC-4 table was obtained from Vizier
+    (http://cdsbib.u-strasbg.fr/cgi-bin/cdsbib?2012yCat.1322....0Z).'''
+    UCAC_table = Table.read(str(upath), format="ascii.basic", delimiter=";",
+                          data_start=3, header_start=0)
+    kic_numbers = npstr.replace(UCAC_table["_1"], "KIC ", "")
+    kic_ints = Column(kic_numbers, name=kic_col, dtype=np.int)
+    del(UCAC_table["_1"])
+    UCAC_table.add_column(kic_ints, index=0)
+    return UCAC_table
+
 def read_UCAC4_Rafa_Tidsync(
     upath=paths.UCAC_TIDSYNC_RAFA_PATH, kic_col="KIC"):
     '''Reads the UCAC4 table of Tidally-synchronized binaries in McQuillan.

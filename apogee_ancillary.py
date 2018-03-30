@@ -34,6 +34,8 @@ write_APOGEE_proposal_table
     Write the proposed observing sample in machine-readable format.
 
 '''
+import random
+
 import numpy as np
 import scipy
 import numpy.core.defchararray as npstr
@@ -44,6 +46,7 @@ import astropy_util as au
 
 import read_catalog as catin
 import catalog
+import path_config as paths
 
 ###############################################################################
 # Get the Ancillary sample #
@@ -250,6 +253,54 @@ def vrel_snr_plot(apodwarfs):
     plt.figure()
     plt.plot(apodwarfs[good_dwarfs]["mjd"], vel_err[good_dwarfs], "b*")
 
+###############################################################################
+# Table manipulation #
+###############################################################################
+
+def mcq_table():
+    '''Get the target list from the McQuillan table.
+    
+    This is a table which requires the APOGEE field, 2MASS designation column,
+    RA column, Dec column, coordinate source, H-mag, H-mag source, proper
+    motion in RA, proper motion in dec,, proper motion source, number of
+    visits, and desired signal-to-noise.'''
+    mcq = catin.mcquillan_with_stelparms()
+    tidsync = catalog.select_tidally_synchronized_binaries(
+        mcq, pcut=5, lowperiod=1, teffcol="teff")
+    ancillary_fields = ["K04_083+13", "K06_078+16", "K07_075+17"]
+    fieldtargs = targets_in_APOGEE_fields(ancillary_fields, tidsync)
+    ucactable = catin.read_UCAC4_Mcquillan_Tidsync()
+    mcq_ucac = au.join_by_id(fieldtargs, ucactable, "KIC", "KIC")
+    return mcq_ucac
+
+def eb_table():
+    '''Get the control list of eclipsing binaries.'''
+    ebs = catin.read_villanova_EBs()
+    stelparms = catin.read_KIC_DR25_catalog()
+    ebs_parms = au.join_by_id(ebs, stelparms, "KIC", "kepid")
+    tidsync = catalog.select_tidally_synchronized_binaries(
+        ebs_parms, pcut=5, lowperiod=1, teffcol="teff", pcol="period")
+    ancillary_fields = ["K04_083+13", "K06_078+16", "K07_075+17"]
+    fieldtargs = targets_in_APOGEE_fields(ancillary_fields, tidsync)
+    ucactable = catin.read_UCAC4_EB_Tidsync()
+    eb_ucac = au.join_by_id(fieldtargs, ucactable, "KIC", "KIC")
+    return eb_ucac
+
+def apogee_table():
+    '''Get the list of spectroscopic rapid rotators'''
+    apo = catin.dr14_with_KIC_stelparms()
+    tidsync = catalog.select_tidally_synchronized_binaries(
+        apo, pcut=2000, lowperiod=10, teffcol="teff", pcol="VSINI")
+    ancillary_fields = ["K04_083+13", "K06_078+16", "K07_075+17"]
+    fieldtargs = targets_in_APOGEE_fields(ancillary_fields, tidsync)
+    fieldtargs.rename_column("PMRA", "pmRA")
+    fieldtargs.rename_column("PMDEC", "pmDE")
+    apo_notrapid = catalog.perform_vscatter_cut(fieldtargs, highv=1)
+    apo_needsrv = catalog.perform_cut(apo_notrapid, "NVISITS", highval=4)
+    nodlsb = catalog.filter_double_lined_spectroscopic_binaries(apo_needsrv)
+    return nodlsb
+
+
 ################################################################################
 # Write the Ancillary Table #
 ################################################################################
@@ -262,13 +313,28 @@ def APOGEE_Ancillary_table(outputpath=paths.APOGEE_ANCILLARY_TARGETS_TABLE):
     Get PM information from UCAC-4.
     Write out all of the necessary information to the file.
     '''
-    mcq = catin.mcquillan_with_stelparms()
-    tidsync = catalog.select_tidally_synchronized_binaries(
-        mcq, pcut=5, lowperiod=1, teffcol="teff")
-    ancillary_fields = ["K04_083+13", "K06_078+16", "K07_075+17"]
-    fieldtargs = targets_in_APOGEE_fields(ancillary_fields, tidsync)
-    ucactable = catin.read_UCAC4_Mcquillan_Tidsync()
-    mcq_ucac = au.join_by_id(fieldtargs, ucactable, "KIC", "KIC")
+    mcq = mcq_table()
+    # Remove RV variable targets from MDM
+    mdmtargs = [11819949, 12736892, 3248885]
+    nonobs = au.filter_column_from_subtable(mcq, "KIC", mdmtargs)
+    assert len(nonobs) == len(mcq) - len(mdmtargs)
+    # Add spectroscopic rapid rotators.
+    apo = apogee_table()
+
+    # Control sample.
+    ebs = eb_table()
+    # Remove the faint/bright control targets.
+    ebs = ebs[np.logical_and(ebs["hmag"] > min(mcq["hmag"]), 
+                             ebs["hmag"] < max(mcq["hmag"]))]
+    # Select 2 from each field.
+    eb_groups = ebs.group_by("APOGEE_Field")
+    random.seed("EB CONTROL")
+    tablerows = []
+    for grp in eb_groups.groups():
+        randindices = random.sample(range(len(grp)), 2)
+        for ind in randindices:
+            tablerows.append(grp[ind])
+
     write_APOGEE_proposal_table(mcq_ucac)
 
 def write_APOGEE_proposal_table(
