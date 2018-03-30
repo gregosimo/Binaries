@@ -674,28 +674,47 @@ def plot_rotation_velocity_radius(
     downvel, infvel, upvel = period_to_velocities_uncertainties(
         period, radii, raderr_below, raderr_above)
 
+    vsini_fractional_error = 0.15
     ax1.errorbar(
-        infvel, vsini, xerr=[-downvel, upvel], yerr=0.1*vsini,
-        color=color, ls="None", marker="*")
-    ax1.fill_between([0, 80], [0, 80], [0, 0], facecolor="gray")
+        infvel, vsini, xerr=[-downvel, upvel], 
+        yerr=vsini_fractional_error*vsini, color=color, ls="None", marker="*")
+    min_x, max_x = au.round_bound(0, infvel+upvel, 10)
+    min_y, max_y = au.round_bound(0, vsini*(1+vsini_fractional_error), 10)
+    prev_xmin, prev_xmax = ax1.get_xlim()
+    prev_ymin, prev_ymax = ax1.get_ylim()
+    min_x = min(min_x, prev_xmin)
+    max_x = max(max_x, prev_xmax)
+    min_y = min(min_y, prev_ymin)
+    max_y = max(max_y, prev_ymax)
+    totmax = max(max_x, max_y)
+    ax1.fill_between([0, totmax], [0, totmax], [0, 0], facecolor="gray")
     ax1.annotate(r"$\sin i < 1$", xy=(0.70, 0.05), xycoords="axes fraction",
                  fontsize=16)
-    ax1.set_xlim(0, 80)
-    ax1.set_ylim(0, 80)
+    ax1.set_xlim(min_x, max_x)
+    ax1.set_ylim(min_y, max_y)
     plt.sca(ax1)
 #    plt.legend(loc="upper right")
     ax1.set_xlabel("Inferred equatorial velocity (km/s)")
     ax1.set_ylabel("V sini (km/s)")
 
-    vsini_fractional_error = 0.15
     inferred_radii = rotation_radius(vsini, period)
     ax2.errorbar(
         radii, inferred_radii, yerr=vsini_fractional_error*inferred_radii, 
         xerr=[-raderr_below, raderr_above], color=color, ls="None",
         marker="*")
-    ax2.fill_between([0, 4], [0, 4], [0, 0], facecolor="gray")
-    ax2.set_xlim(0, 4.0)
-    ax2.set_ylim(0, 4.0)
+    min_x, max_x = au.round_bound(0, radii+raderr_above, 0.2)
+    min_y, max_y = au.round_bound(
+        0, inferred_radii*(1+vsini_fractional_error), 1)
+    prev_xmin, prev_xmax = ax2.get_xlim()
+    prev_ymin, prev_ymax = ax2.get_ylim()
+    min_x = min(min_x, prev_xmin)
+    max_x = max(max_x, prev_xmax)
+    min_y = min(min_y, prev_ymin)
+    max_y = max(max_y, prev_ymax)
+    totmax = max(max_x, max_y)
+    ax2.fill_between([0, totmax], [0, totmax], [0, 0], facecolor="gray")
+    ax2.set_xlim(min_x, max_x)
+    ax2.set_ylim(min_y, max_y)
     ax2.set_xlabel("Radius (Rsun)")
     ax2.set_ylabel("Inferred R sini (Rsun)")
 
@@ -723,9 +742,21 @@ def plot_rotation_velocity_radius(
         yerr=[-inferred_period_err_down, inferred_period_err_up], color=color,
         ls="None", marker="*")
 
-    ax3.fill_between([0, 15], [0, 15], [15, 15], facecolor="gray")
-    ax3.set_xlim(0, 15)
-    ax3.set_ylim(0, 15)
+    min_x, max_x = au.round_bound(
+        0, period+inferred_period_err_up, 0.5)
+    min_y, max_y = au.round_bound(
+        0, inferred_period*(1+vsini_fractional_error), 0.5)
+    prev_xmin, prev_xmax = ax3.get_xlim()
+    prev_ymin, prev_ymax = ax3.get_ylim()
+    min_x = min(min_x, prev_xmin)
+    max_x = max(max_x, prev_xmax)
+    min_y = min(min_y, prev_ymin)
+    max_y = max(max_y, prev_ymax)
+    totmax = max(max_x, max_y)
+    ax3.fill_between([0, totmax], [0, totmax], [totmax, totmax], 
+                     facecolor="gray")
+    ax3.set_xlim(min_x, max_x)
+    ax3.set_ylim(min_y, max_y)
     ax3.set_xlabel("McQuillan Period (day)")
     ax3.set_ylabel("Inferred P / sin(i) (day)")
     return subplot_tup
