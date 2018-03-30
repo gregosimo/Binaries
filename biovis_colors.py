@@ -5,6 +5,7 @@ http://mkweb.bcgsc.ca/biovis2012/'''
 colordict = {
     "black": (0, 0, 0), 
     "pink": (255/255.0, 109/255.0, 182/255.0), 
+    "light pink": (255/255.0, 182/255.0, 119/255.0),
     "purple": (73/255.0, 0, 146/255.0), 
     "blue": (0, 109/255.0, 219/255.0), 
     "violet": (182/255.0, 109/255.0, 255/255.0), 
@@ -17,6 +18,7 @@ colordict = {
 
 black = colordict["black"]
 pink = colordict["pink"]
+light_pink = colordict["light pink"]
 purple = colordict["purple"]
 blue = colordict["blue"]
 violet = colordict["violet"]
