@@ -194,44 +194,73 @@ def phot_rapid_rotator_fraction_spec_detection(periods, radii, vsini_limits):
     return frac
 
 def spectroscopic_photometric_rotation_fraction_comparison_plot(
-        vsinis, periods, radii, min_limit=5, max_limit=15):
+        vsinis, periods, radii, min_limit=5, max_limit=20):
     '''Plot spectroscopic and corresponding photometric rapid rotator fractions.
 
     Plot the spectroscopic rapid rotator fraction accepting detection limits
     ranging from min_limit to max_limit, inclusive. And then plot the
     photometric rapid rotator fraction corresponding to each detection limit,
     including the inclination correction.'''
-    vsini_limits = np.arange(min_limit, max_limit)
-    rapid_frac = rapid_rotation_fraction_detection_limits(vsinis, vsini_limits)
-    upper_rapid_frac = (
-        au.poisson_upper(rapid_frac*len(vsinis), 1.0) / len(vsinis) - rapid_frac)
-    lower_rapid_frac = (
-        rapid_frac - au.poisson_lower(rapid_frac*len(vsinis), 1.0) / len(vsinis))
+    vsini_bins = np.arange(min_limit, max_limit+2)
+    # I do this because I want the fraction to include *all* the values, not
+    # just the ones between vsini_bins[0] = vsini_bins[=1]
+    vsini_cor = np.where(
+        vsinis < vsini_bins[-2], 
+        np.where( vsinis > vsini_bins[0], vsinis, vsini_bins[0]), 
+        vsini_bins[-1])
+    # Change normed -> density after matplotlib 2.1.0.
+    assert np.all(np.diff(vsini_bins) == 1)
+    ax1 = plt.gca()
+    spec_frac, bins, patches = ax1.hist(
+        vsini_cor, vsini_bins, normed=True, histtype="step", cumulative=True,
+        label="Spectroscopic", color=bc.black)
+    upper_rapid_frac = (au.binomial_upper(
+        spec_frac*len(vsini_cor), len(vsini_cor)) - spec_frac)
+    lower_rapid_frac = (spec_frac - au.binomial_lower(
+        spec_frac*len(vsini_cor), len(vsini_cor)))
     rapid_frac_errs = np.array([lower_rapid_frac, upper_rapid_frac])
 
-    phot_rapid_frac = phot_rapid_rotator_fraction_spec_detection(
-        periods, radii, vsini_limits) 
-    upper_phot_rapid_frac = (
-        au.poisson_upper(phot_rapid_frac*len(vsinis), 1.0) / len(vsinis) - 
-        phot_rapid_frac)
-    lower_phot_rapid_frac = (
-        phot_rapid_frac - au.poisson_lower(phot_rapid_frac*len(vsinis), 1.0) / 
-        len(vsinis))
-    phot_rapid_frac_errs = np.array([lower_phot_rapid_frac, upper_phot_rapid_frac])
+    vel_periods = rot.period_to_velocities(periods, radii)
+    # I do this because I want the fraction to include *all* the values, not
+    # just the ones between vsini_bins[0] = vsini_bins[=1]
+    vel_periods_cor = np.where(
+        vel_periods < vsini_bins[-2], 
+        np.where(vel_periods > vsini_bins[0], vel_periods, vsini_bins[0]), 
+        vsini_bins[-1])
+    # Change normed -> density after matplotlib 2.1.0.
+    phot_frac, bins, patches = ax1.hist(
+        vel_periods_cor, vsini_bins, normed=True, histtype="step", cumulative=True,
+        label="Photometric", color=bc.red)
+    upper_phot_rapid_frac = (au.binomial_upper(
+        phot_frac*len(vel_periods_cor), len(vel_periods_cor)) - phot_frac)
+    lower_phot_rapid_frac = (phot_frac - au.binomial_lower(
+        phot_frac*len(vel_periods_cor), len(vel_periods_cor))) 
+    phot_rapid_frac_errs = np.array([
+        lower_phot_rapid_frac, upper_phot_rapid_frac])
 
-    plt.errorbar(vsini_limits, rapid_frac, yerr=rapid_frac_errs, color=bc.black, 
-                 linestyle="-", label="Spectroscopic", capsize=4, lw=3,
-                 capthick=3)
-    plt.errorbar(vsini_limits, phot_rapid_frac*np.pi/4, yerr=phot_rapid_frac_errs, 
-                 color=bc.black, linestyle="--", label="Photometric",
-                 capsize=4, lw=3, capthick=3)
-    plt.xlabel("Vsini detection limit (km/s)")
-    plt.ylabel("Rapid Rotator Fraction")
-    plt.legend()
+    bin_mean = (vsini_bins[:-1] + vsini_bins[1:])/2
+    ax1.errorbar(bin_mean, spec_frac, yerr=rapid_frac_errs, color=bc.black, 
+                 linestyle="None", capsize=4) 
+    ax1.errorbar(bin_mean, phot_frac, yerr=phot_rapid_frac_errs, 
+                 color=bc.red, capsize=4, linestyle="None")
+    ax1.set_ylim(0.7, 1.0)
+    ax2 = ax1.twinx()
+    ticks = ax1.get_yticks()
+    print(ticks)
+    fracticks = 1 - ticks
+    print(fracticks)
+    ax2.set_yticks(ticks)
+    ax2.set_yticklabels(fracticks)
+    ax1.set_xlim(min_limit, max_limit)
+    ax2.set_xlim(min_limit, max_limit)
+    ax1.set_ylabel("N (< vsini) / N")
+    ax1.set_xlabel("vsini")
+    ax2.set_ylabel("Rapid Rotator Fraction")
+    ax2.set_ylim(0.7, 1.0)
+    plt.sca(ax1)
 
 def plot_rapid_rotation_detection_limits(
-        vsinis, min_limit=5, max_limit=15, color=bc.black, ls="-", label="",
-        offset=0.0):
+        vsinis, min_limit=5, max_limit=20, color=bc.black, label="", ls="-"):
     '''Plot rapid rotator fraction for vsinis as a function of detection limits.
 
     For each of the vsini measurements in vsinis, plot the rapid rotator
@@ -240,18 +269,27 @@ def plot_rapid_rotation_detection_limits(
     max_limit.
     
     Offsets can be provided if many of these plots are shown at the same time.'''
-    vsini_limits = np.arange(min_limit, max_limit)
-    rapid_frac = rapid_rotation_fraction_detection_limits(vsinis, vsini_limits)
-    upper_rapid_frac = (
-        au.poisson_upper(rapid_frac*len(vsinis), 1.0) / len(vsinis) -
-        rapid_frac)
-    lower_rapid_frac = (
-        rapid_frac - 
-        au.poisson_lower(rapid_frac*len(vsinis), 1.0) / len(vsinis))
+    vsini_bins = np.arange(min_limit, max_limit+2)
+    # I do this because I want the fraction to include *all* the values, not
+    # just the ones between vsini_bins[0] = vsini_bins[=1]
+    vsini_cor = np.where(
+        vsinis < vsini_bins[-2], 
+        np.where( vsinis > vsini_bins[0], vsinis, vsini_bins[0]), 
+        vsini_bins[-1])
+    # Change normed -> density after matplotlib 2.1.0.
+    assert np.all(np.diff(vsini_bins) == 1)
+    spec_frac, bins, patches = plt.hist(
+        vsini_cor, vsini_bins, normed=True, histtype="step", cumulative=True,
+        label=label, color=color, ls=ls)
+    upper_rapid_frac = (au.binomial_upper(
+        spec_frac*len(vsini_cor), len(vsini_cor)) - spec_frac)
+    lower_rapid_frac = (spec_frac - au.binomial_lower(
+        spec_frac*len(vsini_cor), len(vsini_cor)))
     rapid_frac_errs = np.array([lower_rapid_frac, upper_rapid_frac])
 
-    plt.errorbar(vsini_limits+offset, rapid_frac, yerr=rapid_frac_errs, color=color,
-                 linestyle=ls, label=label, capsize=4)
+    bin_mean = (vsini_bins[:-1] + vsini_bins[1:])/2
+    plt.errorbar(bin_mean, spec_frac, yerr=rapid_frac_errs, color=color,
+                 linestyle="None", capsize=4)
 
 ###############################################################################
 # Comparing KIC values #
