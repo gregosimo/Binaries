@@ -661,7 +661,7 @@ def compare_rotation_velocity_radius(
 
 def plot_rotation_velocity_radius(
         vsini, period, radii, raderr_below, raderr_above, color="k",
-        subplot_tup=None):
+        subplot_tup=None, label=""):
     '''Make a 3-paneled figure comparing measured and inferred radii.
 
     This function plots vsini vs inferred v, radius vs inferred rsini, and
@@ -688,14 +688,16 @@ def plot_rotation_velocity_radius(
     max_y = max(max_y, prev_ymax)
     totmax = max(max_x, max_y)
     ax1.fill_between([0, totmax], [0, totmax], [0, 0], facecolor="gray")
-    ax1.annotate(r"$\sin i < 1$", xy=(0.70, 0.05), xycoords="axes fraction",
+    ax1.annotate(r"$\sin i > 1$", xy=(0.05, 0.9), xycoords="axes fraction",
                  fontsize=16)
+    ax1.annotate(label, xy=(0.55, 0.05), xycoords="axes fraction",
+                 fontsize=14, color="white")
     ax1.set_xlim(min_x, max_x)
     ax1.set_ylim(min_y, max_y)
     plt.sca(ax1)
 #    plt.legend(loc="upper right")
-    ax1.set_xlabel("Inferred equatorial velocity (km/s)")
-    ax1.set_ylabel("V sini (km/s)")
+    ax1.set_xlabel(r"$v_{eq}$ (km/s) from $R$ and $P_{rot}$")
+    ax1.set_ylabel("APOGEE $v \sin i$ (km/s)")
 
     inferred_radii = rotation_radius(vsini, period)
     ax2.errorbar(
@@ -715,10 +717,10 @@ def plot_rotation_velocity_radius(
     ax2.fill_between([0, totmax], [0, totmax], [0, 0], facecolor="gray")
     ax2.set_xlim(min_x, max_x)
     ax2.set_ylim(min_y, max_y)
-    ax2.set_xlabel("Radius (Rsun)")
-    ax2.set_ylabel("Inferred R sini (Rsun)")
+    ax2.set_xlabel("DSEP Radius (Rsun)")
+    ax2.set_ylabel("$R \sin i$ (Rsun) from $v \sin i$ and $P_{rot}$")
 
-    inferred_period = vsini_to_spot_period_range(vsini, radii)[1]
+    inferred_period = vsini_to_spot_period_range(vsini, radii)[0]
     # Dealing with errors is difficult because the vsini and radius errors have
     # a unspecified interplay, especially since radius is asymmetric. Instead
     # of trying to calculate some form, I'll take the maximum of either the
@@ -728,15 +730,15 @@ def plot_rotation_velocity_radius(
     inferred_period_err_up = np.where(
         radius_fractional_errors >= vsini_fractional_error, 
         vsini_to_spot_period_range(
-            vsini, radii + raderr_above)[1] - inferred_period, 
+            vsini, radii + raderr_above)[0] - inferred_period, 
         vsini_to_spot_period_range(
-            vsini*(1-vsini_fractional_error), radii)[1] - inferred_period)
+            vsini*(1-vsini_fractional_error), radii)[0] - inferred_period)
     inferred_period_err_down = np.where(
         radius_fractional_errors >= vsini_fractional_error, 
         vsini_to_spot_period_range(
-            vsini, radii + raderr_below)[1] - inferred_period, 
+            vsini, radii + raderr_below)[0] - inferred_period, 
         vsini_to_spot_period_range(
-            vsini*(1+vsini_fractional_error), radii)[1] - inferred_period)
+            vsini*(1+vsini_fractional_error), radii)[0] - inferred_period)
     ax3.errorbar(
         period, inferred_period, 
         yerr=[-inferred_period_err_down, inferred_period_err_up], color=color,
@@ -758,7 +760,7 @@ def plot_rotation_velocity_radius(
     ax3.set_xlim(min_x, max_x)
     ax3.set_ylim(min_y, max_y)
     ax3.set_xlabel("McQuillan Period (day)")
-    ax3.set_ylabel("Inferred P / sin(i) (day)")
+    ax3.set_ylabel("$P / {\sin i}$ (day) from $v \sin i$ and $R$")
     return subplot_tup
 
 def rotation_teff_test(
