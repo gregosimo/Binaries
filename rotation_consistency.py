@@ -659,6 +659,24 @@ def compare_rotation_velocity_radius(
     ax3.set_xlabel("McQuillan Period (day)")
     ax3.set_ylabel("Inferred P / sin(i) (day)")
 
+def plot_vsini_velocity(
+    vsini, period, radius, raderr_below, raderr_above, det_color=bc.black,
+    marginal_color=bc.sky_blue, ax=None, vsini_fracerr=0.15):
+    '''Make a plot of vsini vs velocity.
+
+    Vsini will be on the y-axis while velocity will be on the x-axis. The
+    bottom right should be a region of allowed space while the top left is
+    disallowed.'''
+    if not ax:
+        ax = plt.subplots(111, figsize=(5,5))
+
+    downvel, infvel, upvel = period_to_velocities_uncertainties(
+        period, radii, raderr_below, raderr_above)
+
+    ax.errorbar(
+        infvel, vsini, xerr=[-downvel, upvel], yerr=vsini_fracerr*vsini, 
+        color=color, ls="None", marker="*")
+
 def plot_rotation_velocity_radius(
         vsini, period, radii, raderr_below, raderr_above, color="k",
         subplot_tup=None, label=""):
