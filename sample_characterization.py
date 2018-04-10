@@ -30,6 +30,8 @@ rapid_fraction_multiple_limits:
 
 
 """
+import subprocess
+
 import numpy as np
 import matplotlib.pyplot as plt
 from astropy.modeling import models, fitting
@@ -202,48 +204,47 @@ def spectroscopic_photometric_rotation_fraction_comparison_plot(
     photometric rapid rotator fraction corresponding to each detection limit,
     including the inclination correction.'''
     vsini_bins = np.arange(min_limit, max_limit+2)
-    # I do this because I want the fraction to include *all* the values, not
-    # just the ones between vsini_bins[0] = vsini_bins[=1]
-    vsini_cor = np.where(
-        vsinis < vsini_bins[-2], 
-        np.where( vsinis > vsini_bins[0], vsinis, vsini_bins[0]), 
-        vsini_bins[-1])
-    # Change normed -> density after matplotlib 2.1.0.
-    assert np.all(np.diff(vsini_bins) == 1)
+    # I want to make sure the whole sample is counted within the histogram. So
+    # I set the bin edges to be an interval which encompasses the full sample. 
+    bin_edges = np.insert(
+        vsini_bins, [0, len(vsini_bins)], [min(vsinis), max(vsinis)])
+    # I haven't fully planned what behavior would occur if the vsini bin range
+    # is larger than the range of vsinis.
+    assert vsini_bins[0] > min(vsinis)
+    assert vsini_bins[-1] < max(vsinis)
+
+    bindiff = vsini_bins[1] - vsini_bins[0]
+    assert np.all(np.diff(vsini_bins) == bindiff)
     ax1 = plt.gca()
-    spec_frac, bins, patches = ax1.hist(
-        vsini_cor, vsini_bins, normed=True, histtype="step", cumulative=True,
-        label="Spectroscopic", color=bc.black)
+    spec_hist, bins = np.histogram(vsinis, bins=bin_edges, density=False)
+    spec_cumhist = np.cumsum(spec_hist) / len(vsinis)
+    ax1.step(bins[:-1]+bindiff/2, spec_cumhist, where="post", color=bc.black,
+             label="Spectroscopic")
+        
     upper_rapid_frac = (au.binomial_upper(
-        spec_frac*len(vsini_cor), len(vsini_cor)) - spec_frac)
-    lower_rapid_frac = (spec_frac - au.binomial_lower(
-        spec_frac*len(vsini_cor), len(vsini_cor)))
+        spec_cumhist*len(vsinis), len(vsinis)) - spec_cumhist)
+    lower_rapid_frac = (spec_cumhist - au.binomial_lower(
+        spec_cumhist*len(vsinis), len(vsinis)))
     rapid_frac_errs = np.array([lower_rapid_frac, upper_rapid_frac])
 
     vel_periods = rot.period_to_velocities(periods, radii)
-    # I do this because I want the fraction to include *all* the values, not
-    # just the ones between vsini_bins[0] = vsini_bins[=1]
-    vel_periods_cor = np.where(
-        vel_periods < vsini_bins[-2], 
-        np.where(vel_periods > vsini_bins[0], vel_periods, vsini_bins[0]), 
-        vsini_bins[-1])
-    # Change normed -> density after matplotlib 2.1.0.
-    phot_frac, bins, patches = ax1.hist(
-        vel_periods_cor, vsini_bins, normed=True, histtype="step", cumulative=True,
-        label="Photometric", color=bc.red)
+    phot_hist, bins = np.histogram(vel_periods, bins=bin_edges, density=False)
+    phot_cumhist = np.cumsum(phot_hist) / len(vel_periods)
+    ax1.step(bins[:-1]+bindiff/2, phot_cumhist, where="post", color=bc.red,
+             label="Photometric")
+
     upper_phot_rapid_frac = (au.binomial_upper(
-        phot_frac*len(vel_periods_cor), len(vel_periods_cor)) - phot_frac)
-    lower_phot_rapid_frac = (phot_frac - au.binomial_lower(
-        phot_frac*len(vel_periods_cor), len(vel_periods_cor))) 
+        phot_cumhist*len(vel_periods), len(vel_periods)) - phot_cumhist)
+    lower_phot_rapid_frac = (phot_cumhist - au.binomial_lower(
+        phot_cumhist*len(vel_periods), len(vel_periods))) 
     phot_rapid_frac_errs = np.array([
         lower_phot_rapid_frac, upper_phot_rapid_frac])
 
-    bin_mean = (vsini_bins[:-1] + vsini_bins[1:])/2
-    ax1.errorbar(bin_mean, spec_frac, yerr=rapid_frac_errs, color=bc.black, 
-                 linestyle="None", capsize=4) 
-    ax1.errorbar(bin_mean, phot_frac, yerr=phot_rapid_frac_errs, 
+    bin_mean = vsini_bins
+    ax1.errorbar(bin_mean, spec_cumhist[:-1], yerr=rapid_frac_errs[:,:-1], 
+                 color=bc.black, linestyle="None", capsize=4) 
+    ax1.errorbar(bin_mean, phot_cumhist[:-1], yerr=phot_rapid_frac_errs[:,:-1], 
                  color=bc.red, capsize=4, linestyle="None")
-    ax1.set_ylim(0.7, 1.0)
     ax2 = ax1.twinx()
     ticks = ax1.get_yticks()
     print(ticks)
@@ -251,10 +252,10 @@ def spectroscopic_photometric_rotation_fraction_comparison_plot(
     print(fracticks)
     ax2.set_yticks(ticks)
     ax2.set_yticklabels(fracticks)
-    ax1.set_xlim(min_limit, max_limit)
-    ax2.set_xlim(min_limit, max_limit)
-    ax1.set_ylabel("N (< vsini) / N")
-    ax1.set_xlabel("vsini")
+    ax1.set_xlim(min_limit-bindiff/2, max_limit+bindiff/2)
+    ax2.set_xlim(min_limit-bindiff/2, max_limit+bindiff/2)
+    ax1.set_ylabel(r"$N (< v \sin i) / N$")
+    ax1.set_xlabel(r"$v \sin i$")
     ax2.set_ylabel("Rapid Rotator Fraction")
     ax2.set_ylim(0.7, 1.0)
     plt.sca(ax1)
@@ -270,26 +271,33 @@ def plot_rapid_rotation_detection_limits(
     
     Offsets can be provided if many of these plots are shown at the same time.'''
     vsini_bins = np.arange(min_limit, max_limit+2)
-    # I do this because I want the fraction to include *all* the values, not
-    # just the ones between vsini_bins[0] = vsini_bins[=1]
-    vsini_cor = np.where(
-        vsinis < vsini_bins[-2], 
-        np.where( vsinis > vsini_bins[0], vsinis, vsini_bins[0]), 
-        vsini_bins[-1])
-    # Change normed -> density after matplotlib 2.1.0.
-    assert np.all(np.diff(vsini_bins) == 1)
-    spec_frac, bins, patches = plt.hist(
-        vsini_cor, vsini_bins, normed=True, histtype="step", cumulative=True,
-        label=label, color=color, ls=ls)
+    # I want to make sure the whole sample is counted within the histogram. So
+    # I set the bin edges to be an interval which encompasses the full sample. 
+    bin_edges = np.insert(
+        vsini_bins, [0, len(vsini_bins)], [min(vsinis), max(vsinis)])
+    # I haven't fully planned what behavior would occur if the vsini bin range
+    # is larger than the range of vsinis.
+    assert vsini_bins[0] > min(vsinis)
+    assert vsini_bins[-1] < max(vsinis)
+
+    bindiff = vsini_bins[1] - vsini_bins[0]
+    assert np.all(np.diff(vsini_bins) == bindiff)
+    ax1 = plt.gca()
+    spec_hist, bins = np.histogram(vsinis, bins=bin_edges, density=False)
+    spec_cumhist = np.cumsum(spec_hist) / len(vsinis)
+    ax1.step(bins[:-1]+bindiff/2, spec_cumhist, where="post", color=color,
+             linestyle=ls, label=label)
+        
     upper_rapid_frac = (au.binomial_upper(
-        spec_frac*len(vsini_cor), len(vsini_cor)) - spec_frac)
-    lower_rapid_frac = (spec_frac - au.binomial_lower(
-        spec_frac*len(vsini_cor), len(vsini_cor)))
+        spec_cumhist*len(vsinis), len(vsinis)) - spec_cumhist)
+    lower_rapid_frac = (spec_cumhist - au.binomial_lower(
+        spec_cumhist*len(vsinis), len(vsinis)))
     rapid_frac_errs = np.array([lower_rapid_frac, upper_rapid_frac])
 
-    bin_mean = (vsini_bins[:-1] + vsini_bins[1:])/2
-    plt.errorbar(bin_mean, spec_frac, yerr=rapid_frac_errs, color=color,
-                 linestyle="None", capsize=4)
+
+    bin_mean = vsini_bins
+    ax1.errorbar(bin_mean, spec_cumhist[:-1], yerr=rapid_frac_errs[:,:-1], 
+                 color=color, linestyle="None", capsize=4) 
 
 ###############################################################################
 # Comparing KIC values #
@@ -573,7 +581,6 @@ def generate_DSEP_radius_column(
     radiusarr = np.zeros(len(apotable))
     # A dictionary referencing DSEP models according to metallicity.
     DSEP_models = {}
-    assert np.all(apotable[fehcol] != -9999.0)
     rounded_metallicities = np.round(apotable[fehcol]*2, 1)/2
     # What to do about -9999 or masked arrays
     for i in range(len(rounded_metallicities)):
@@ -583,8 +590,14 @@ def generate_DSEP_radius_column(
             dsep_interper = sed.DSEPInterpolator(age, rounded_metallicities[i])
 
         teffpoint = apotable[teffcol][i]
-        assert np.all(teffpoint > 0)
-        radiusarr[i] = dsep_interper.teff_to_radius_interpolation_sb(teffpoint)
+        try:
+            radiusarr[i] = dsep_interper.teff_to_radius_interpolation_sb(teffpoint)
+        # This will be called if the DSEP interpolator has one of the values
+        # being out of bounds.
+        except subprocess.CalledProcessError:
+            radiusarr[i] = np.nan
+        else:
+            assert teffpoint > 0
 
     apotable[radcol] = radiusarr
 
@@ -727,5 +740,16 @@ def asteroseismic_hr_check(apokascsplitter):
     plt.ylabel("Log(g)")
     plt.legend(loc="lower right")
 
+###############################################################################
+# Cool Dwarf Subset properties #
+###############################################################################
 
+def plot_cool_dwarf(sampsplitter, ycols, yerrs):
+    '''Plot  yval against Teff, distinguishing subsamples for cool dwarfs.
+
+    Currently there are three subsamples for nondetections, marginal rotators,
+    and rapid rotators, and these both occur for McQuillan detections and
+    McQuillan nondetections.'''
+
+    pass
 
