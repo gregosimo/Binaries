@@ -34,6 +34,7 @@ import astropy_util as au
 import eclipsing_binaries as ebs
 import catalog
 import hrplots as hr
+import biovis_colors as bc
 
 def apogee_vsini_distribution(period, radius, vsini, vsini_floor=5):
     '''Plot the distribution of vsinis for an APOGEE sample.
@@ -660,8 +661,8 @@ def compare_rotation_velocity_radius(
     ax3.set_ylabel("Inferred P / sin(i) (day)")
 
 def plot_vsini_velocity(
-    vsini, period, radius, raderr_below, raderr_above, det_color=bc.black,
-    marginal_color=bc.sky_blue, ax=None, vsini_fracerr=0.15):
+    vsini, period, radii, raderr_below, raderr_above, color='k', ax=None, 
+        vsini_fracerr=0.15, label="", xticks=10, yticks=10, sini_label=True):
     '''Make a plot of vsini vs velocity.
 
     Vsini will be on the y-axis while velocity will be on the x-axis. The
@@ -674,8 +675,172 @@ def plot_vsini_velocity(
         period, radii, raderr_below, raderr_above)
 
     ax.errorbar(
-        infvel, vsini, xerr=[-downvel, upvel], yerr=vsini_fracerr*vsini, 
+        infvel, vsini, xerr=[-downvel, upvel], yerr=vsini_fracerr*vsini/2, 
         color=color, ls="None", marker="*")
+    au.adjust_axes(ax, 0, infvel+upvel, 0, vsini*(1+vsini_fracerr/2),
+                   xticks, yticks)
+    min_x, max_x = ax.get_xlim()
+    min_y, max_y = ax.get_ylim()
+    # Show sini = 1 and sini = 1/2.
+    med_x = min_x + 0.8*(max_x - min_x)
+    med_y = min_y + 0.8*(max_y - min_y)
+    if max_y > max_x:
+        bound_point = max_x, max_x
+    else:
+        bound_point = max_y, max_y
+    ax.plot([0, bound_point[0]], [0, bound_point[1]], 'k-', lw=3)
+    ax.fill_between([0, bound_point[0]], [max_y, max_y], 
+                    [0, bound_point[1]], hatch="\\", facecolor="white",
+                    edgecolor="gray")
+
+    if max_y/2 > max_x:
+        half_bound = max_x, max_x/2
+    else:
+        half_bound = 2*max_y, max_y
+    ax.plot([0, half_bound[0]], [0, half_bound[1]], 'k--')
+
+    if sini_label:
+        rotangle = np.arctan(
+            (bound_point[1] - min_y) / (max_y-min_y) * (max_x - min_x) /
+            (bound_point[0] - min_x))/np.pi*180
+        half_rotangle = np.arctan(
+            (half_bound[1] - min_y) / (max_y-min_y) * (max_x - min_x) /
+            (half_bound[0] - min_x))/np.pi*180
+        med = min(med_x, med_y)
+        ax.text(med, med, r"$\sin i = 1$", rotation=rotangle)
+        ax.text(med, med/2, r"$\sin i = 0.5$", rotation=half_rotangle)
+
+    ax.annotate(label, xy=(0.55, 0.05), xycoords="axes fraction",
+                 fontsize=14, color="white")
+
+    ax.set_xlim(min_x, max_x)
+    ax.set_ylim(min_y, max_y)
+    ax.set_xlabel(r"$v_{eq}$ (km/s) from $R$ and $P_{rot}$")
+    ax.set_ylabel("APOGEE $v \sin i$ (km/s)")
+
+def plot_rotation_radius(
+        vsini, period, radii, raderr_below, raderr_above, color="k", ax=None,
+        vsini_fracerr=0.15, label="", xticks=0.2, yticks=1, sini_label=True):
+    '''Plot the radius against inferred radius.
+    
+    Radius will be on the y-axis while inferred radius will be on the x-axis.'''
+    if not ax:
+        ax = plt.subplots(111, figsize=(5,5))
+
+    inferred_radii = rotation_radius(vsini, period)
+
+    ax.errorbar(
+        inferred_radii, radii, yerr=[-raderr_below, raderr_above],
+        xerr=vsini_fracerr*inferred_radii/2, color=color, ls="None", marker="*")
+    au.adjust_axes(ax, 0, inferred_radii+raderr_above, 0, 
+                   radii*(1+vsini_fracerr/2), xticks, yticks)
+    min_x, max_x = ax.get_xlim()
+    min_y, max_y = ax.get_ylim()
+    # Show sini = 1 and sini = 1/2.
+    med_x = min_x + 0.8*(max_x - min_x)
+    med_y = min_y + 0.8*(max_y - min_y)
+    if max_y > max_x:
+        bound_point = max_x, max_x
+    else:
+        bound_point = max_y, max_y
+    ax.plot([0, bound_point[0]], [0, bound_point[1]], 'k-', lw=3)
+
+    if max_y > max_x/2:
+        half_bound = max_x/2, max_x
+    else:
+        half_bound = max_y, max_y*2
+    ax.plot([0, half_bound[0]], [0, half_bound[1]], 'k--')
+
+    if sini_label:
+        rotangle = np.arctan(
+            (bound_point[1] - min_y) / (max_y-min_y) * (max_x - min_x) /
+            (bound_point[0] - min_x))/np.pi*180
+        half_rotangle = np.arctan(
+            (half_bound[1] - min_y) / (max_y-min_y) * (max_x - min_x) /
+            (half_bound[0] - min_x))/np.pi*180
+        med = min(med_x, med_y)
+        ax.text(med, med, r"$\sin i = 1$", rotation=rotangle)
+#       ax.text(med, med/2, r"$\sin i = 0.5$", rotation=half_rotangle)
+
+    ax.annotate(label, xy=(0.55, 0.05), xycoords="axes fraction",
+                 fontsize=14, color="white")
+
+    ax.set_xlim(min_x, max_x)
+    ax.set_ylim(min_y, max_y)
+    ax.set_xlabel("$R \sin i$ (Rsun) from $v \sin i$ and $P_{rot}$")
+    ax.set_ylabel("DSEP Radius (Rsun)")
+
+def plot_rotation_period(
+        vsini, period, radii, raderr_below, raderr_above, color="k", ax=None,
+        vsini_fracerr=0.15, label="", xticks=0.2, yticks=1, sini_label=True):
+    '''Plot the radius against inferred radius.
+    
+    Radius will be on the y-axis while inferred radius will be on the x-axis.'''
+    if not ax:
+        ax = plt.subplots(111, figsize=(5,5))
+
+    inferred_period = vsini_to_spot_period_range(vsini, radii)[0]
+    # Dealing with errors is difficult because the vsini and radius errors have
+    # a unspecified interplay, especially since radius is asymmetric. Instead
+    # of trying to calculate some form, I'll take the maximum of either the
+    # vsini error or the radius error.
+    radius_fractional_errors = ((raderr_above + raderr_below) / 
+                                radii)
+    inferred_period_err_up = np.where(
+        radius_fractional_errors >= vsini_fracerr/2, 
+        vsini_to_spot_period_range(
+            vsini, radii + raderr_above)[0] - inferred_period, 
+        vsini_to_spot_period_range(
+            vsini*(1-vsini_fracerr/2), radii)[0] - inferred_period)
+    inferred_period_err_down = np.where(
+        radius_fractional_errors >= vsini_fracerr/2, 
+        vsini_to_spot_period_range(
+            vsini, radii + raderr_below)[0] - inferred_period, 
+        vsini_to_spot_period_range(
+            vsini*(1+vsini_fracerr/2), radii)[0] - inferred_period)
+
+    ax.errorbar(
+        inferred_period, period, 
+        xerr=[-inferred_period_err_down, inferred_period_err_up], color=color,
+        ls="None", marker="*")
+    au.adjust_axes(
+        ax, 0, inferred_period+inferred_period_err_up, 0,
+        inferred_period*(1+vsini_fracerr/2), xticks, yticks)
+    min_x, max_x = ax.get_xlim()
+    min_y, max_y = ax.get_ylim()
+    # Show sini = 1 and sini = 1/2.
+    med_x = min_x + 0.8*(max_x - min_x)
+    med_y = min_y + 0.8*(max_y - min_y)
+    if max_y > max_x:
+        bound_point = max_x, max_x
+    else:
+        bound_point = max_y, max_y
+    ax.plot([0, bound_point[0]], [0, bound_point[1]], 'k-', lw=3)
+
+    if max_y/2 > max_x:
+        half_bound = max_x, max_x/2
+    else:
+        half_bound = 2*max_y, max_y
+    ax.plot([0, half_bound[0]], [0, half_bound[1]], 'k--')
+
+    if sini_label:
+        rotangle = np.arctan(
+            (bound_point[1] - min_y) / (max_y-min_y) * (max_x - min_x) /
+            (bound_point[0] - min_x))/np.pi*180
+        half_rotangle = np.arctan(
+            (half_bound[1] - min_y) / (max_y-min_y) * (max_x - min_x) /
+            (half_bound[0] - min_x))/np.pi*180
+        med = min(med_x, med_y)
+        ax.text(med, med, r"$\sin i = 1$", rotation=rotangle)
+#       ax.text(med, med/2, r"$\sin i = 0.5$", rotation=half_rotangle)
+
+    ax.annotate(label, xy=(0.55, 0.05), xycoords="axes fraction",
+                 fontsize=14, color="white")
+
+    ax.set_xlim(min_x, max_x)
+    ax.set_ylim(min_y, max_y)
+    ax.set_xlabel("$P / {\sin i}$ (day) from $v \sin i$ and $R$")
+    ax.set_ylabel("McQuillan Period (day)")
 
 def plot_rotation_velocity_radius(
         vsini, period, radii, raderr_below, raderr_above, color="k",
@@ -687,98 +852,27 @@ def plot_rotation_velocity_radius(
     necessary cuts.'''
     if not subplot_tup:
         subplot_tup = plt.subplots(1, 3, figsize=(15, 5))
+        label_sini = True
+    else:
+        label_sini = False
     f, (ax1, ax2, ax3) = subplot_tup
 
-    downvel, infvel, upvel = period_to_velocities_uncertainties(
-        period, radii, raderr_below, raderr_above)
-
     vsini_fractional_error = 0.15
-    ax1.errorbar(
-        infvel, vsini, xerr=[-downvel, upvel], 
-        yerr=vsini_fractional_error*vsini, color=color, ls="None", marker="*")
-    min_x, max_x = au.round_bound(0, infvel+upvel, 10)
-    min_y, max_y = au.round_bound(0, vsini*(1+vsini_fractional_error), 10)
-    prev_xmin, prev_xmax = ax1.get_xlim()
-    prev_ymin, prev_ymax = ax1.get_ylim()
-    min_x = min(min_x, prev_xmin)
-    max_x = max(max_x, prev_xmax)
-    min_y = min(min_y, prev_ymin)
-    max_y = max(max_y, prev_ymax)
-    totmax = max(max_x, max_y)
-    ax1.fill_between([0, totmax], [0, totmax], [0, 0], facecolor="gray")
-    ax1.annotate(r"$\sin i > 1$", xy=(0.05, 0.9), xycoords="axes fraction",
-                 fontsize=16)
-    ax1.annotate(label, xy=(0.55, 0.05), xycoords="axes fraction",
-                 fontsize=14, color="white")
-    ax1.set_xlim(min_x, max_x)
-    ax1.set_ylim(min_y, max_y)
-    plt.sca(ax1)
-#    plt.legend(loc="upper right")
-    ax1.set_xlabel(r"$v_{eq}$ (km/s) from $R$ and $P_{rot}$")
-    ax1.set_ylabel("APOGEE $v \sin i$ (km/s)")
+    plot_vsini_velocity(
+        vsini, period, radii, raderr_below, raderr_above, ax=ax1, 
+        vsini_fracerr=vsini_fractional_error, xticks=10, yticks=10,
+        color=color, sini_label=label_sini)
 
-    inferred_radii = rotation_radius(vsini, period)
-    ax2.errorbar(
-        radii, inferred_radii, yerr=vsini_fractional_error*inferred_radii, 
-        xerr=[-raderr_below, raderr_above], color=color, ls="None",
-        marker="*")
-    min_x, max_x = au.round_bound(0, radii+raderr_above, 0.2)
-    min_y, max_y = au.round_bound(
-        0, inferred_radii*(1+vsini_fractional_error), 1)
-    prev_xmin, prev_xmax = ax2.get_xlim()
-    prev_ymin, prev_ymax = ax2.get_ylim()
-    min_x = min(min_x, prev_xmin)
-    max_x = max(max_x, prev_xmax)
-    min_y = min(min_y, prev_ymin)
-    max_y = max(max_y, prev_ymax)
-    totmax = max(max_x, max_y)
-    ax2.fill_between([0, totmax], [0, totmax], [0, 0], facecolor="gray")
-    ax2.set_xlim(min_x, max_x)
-    ax2.set_ylim(min_y, max_y)
-    ax2.set_xlabel("DSEP Radius (Rsun)")
-    ax2.set_ylabel("$R \sin i$ (Rsun) from $v \sin i$ and $P_{rot}$")
+    plot_rotation_radius(
+        vsini, period, radii, raderr_below, raderr_above, ax=ax2, 
+        vsini_fracerr=vsini_fractional_error, xticks=1, yticks=0.2,
+        color=color, sini_label=False)
 
-    inferred_period = vsini_to_spot_period_range(vsini, radii)[0]
-    # Dealing with errors is difficult because the vsini and radius errors have
-    # a unspecified interplay, especially since radius is asymmetric. Instead
-    # of trying to calculate some form, I'll take the maximum of either the
-    # vsini error or the radius error.
-    radius_fractional_errors = ((raderr_above + raderr_below) / 
-                                radii)
-    inferred_period_err_up = np.where(
-        radius_fractional_errors >= vsini_fractional_error, 
-        vsini_to_spot_period_range(
-            vsini, radii + raderr_above)[0] - inferred_period, 
-        vsini_to_spot_period_range(
-            vsini*(1-vsini_fractional_error), radii)[0] - inferred_period)
-    inferred_period_err_down = np.where(
-        radius_fractional_errors >= vsini_fractional_error, 
-        vsini_to_spot_period_range(
-            vsini, radii + raderr_below)[0] - inferred_period, 
-        vsini_to_spot_period_range(
-            vsini*(1+vsini_fractional_error), radii)[0] - inferred_period)
-    ax3.errorbar(
-        period, inferred_period, 
-        yerr=[-inferred_period_err_down, inferred_period_err_up], color=color,
-        ls="None", marker="*")
+    plot_rotation_period(
+        vsini, period, radii, raderr_below, raderr_above, ax=ax3, 
+        vsini_fracerr=vsini_fractional_error, xticks=0.5, yticks=5,
+        color=color, sini_label=False)
 
-    min_x, max_x = au.round_bound(
-        0, period+inferred_period_err_up, 0.5)
-    min_y, max_y = au.round_bound(
-        0, inferred_period*(1+vsini_fractional_error), 0.5)
-    prev_xmin, prev_xmax = ax3.get_xlim()
-    prev_ymin, prev_ymax = ax3.get_ylim()
-    min_x = min(min_x, prev_xmin)
-    max_x = max(max_x, prev_xmax)
-    min_y = min(min_y, prev_ymin)
-    max_y = max(max_y, prev_ymax)
-    totmax = max(max_x, max_y)
-    ax3.fill_between([0, totmax], [0, totmax], [totmax, totmax], 
-                     facecolor="gray")
-    ax3.set_xlim(min_x, max_x)
-    ax3.set_ylim(min_y, max_y)
-    ax3.set_xlabel("McQuillan Period (day)")
-    ax3.set_ylabel("$P / {\sin i}$ (day) from $v \sin i$ and $R$")
     return subplot_tup
 
 def rotation_teff_test(
