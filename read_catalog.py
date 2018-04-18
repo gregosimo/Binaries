@@ -1,4 +1,5 @@
 from astropy.table import Table, vstack, Column
+from astropy.coordinates import SkyCoord
 import astropy.units as u
 from astropy.io import fits
 from scipy.io import readsav
@@ -257,6 +258,9 @@ def read_dr14_allStar(allstarpath=paths.DR14_ALLSTAR_PATH, opt="kepler"):
             elif opt.lower() == "pleiades":
                 index_start = allstar_indices.data[55]
                 index_end = allstar_indices.data[58]
+            elif opt.lower() == "m67":
+                index_start = allstar_indices.data[131]
+                index_end = allstar_indices.data[134]
             else:
                 raise ValueError(
                     "Don't understand optmization: {0}".format(opt))
@@ -378,6 +382,18 @@ def read_California_Kepler_Spectroscopy(
     pipelines.'''
     ckstable = Table.read(cks, format="ascii.cds")
     return ckstable
+
+def read_Geller_M67(geller=paths.HEAD_DIR / "aj518354t2_mrt.txt"):
+    '''Read in the M67 WOCS data.'''
+    fulldata = Table.read(geller, format="ascii.cds")
+    # I want to have regular RA/Dec columns.
+    coords = SkyCoord(
+        ra=fulldata["RAh"]+fulldata["RAm"]/60+fulldata["RAs"]/60/60,
+        dec=fulldata["DEd"] + fulldata["DEm"]/60 + fulldata["DEs"]/60/60,
+        unit=(u.hourangle, u.degree))
+    fulldata["RA"] = coords.ra
+    fulldata["DEC"] = coords.dec
+    return fulldata
 
 ###############################################################################
 # Joined catalogs #
