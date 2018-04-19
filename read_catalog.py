@@ -1,3 +1,5 @@
+import tempfile
+
 from astropy.table import Table, vstack, Column
 from astropy.coordinates import SkyCoord
 import astropy.units as u
@@ -188,6 +190,20 @@ def read_UCAC4_Rafa_Tidsync(
     del(UCAC_table["_1"])
     UCAC_table.add_column(kic_ints, index=0)
     return UCAC_table
+
+def read_TGAS_Kepler(tgas_kep_path=paths.TGAS_KEPLER_OVERLAP):
+    '''Read the TGAS table for stars overlapping with Kepler.
+
+    If this file doesn't exist, use the astroquery package to get it from
+    the Vizier xMatch service.'''
+    try:
+        tgas = Table.read(tgas_kep_path, format="ascii.csv")
+    except FileNotFoundError:
+        tgas = XMatch.query(cat1="J/ApJS/229/30/catalog", cat2="GAIA DR1 TGAS")
+        tgas.write(str(tgas_kep_path), format="ascii.csv")
+
+    return tgas
+
 
 def read_TGAS_McQuillan_APOGEE_overlap_tidsync(
     path=paths.TGAS_MCQUILLAN_APOGEE_TIDSYNC_PATH):

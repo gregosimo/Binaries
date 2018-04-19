@@ -59,6 +59,7 @@ SYNC_EB_PATH = HEAD_DIR / "sync_ebs_moredetails.csv"
 KOI_PATH = HEAD_DIR / "koi.csv"
 TGAS_MCQUILLAN_APOGEE_TIDSYNC_PATH = (
     HEAD_DIR / "TGAS_McQuillan_APOGEE_tidsync.fits")
+TGAS_KEPLER_OVERLAP = HEAD_DIR / "TGAS_Kepler.csv"
 FLICKER_LOGG = HEAD_DIR / "flicker_loggs.txt"
 BRUNTT_PATH = HEAD_DIR / "Bruntt_vsini.vot"
 DRESSING_CHARBONNEAU_PROPS = HEAD_DIR / "Dressing_Charbonneau13.fits"
