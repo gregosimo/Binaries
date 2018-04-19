@@ -22,12 +22,18 @@ teffbins = np.linspace(3500, 8500, 20)
 metbins = np.linspace(-1, 1, 20)
 
 # Show overlap between APOGEE and McQuillan in Teff
-plt.hist([apogee_nongiants["TEFF"], apogee_giants["TEFF"]], bins=teffbins,
-          stacked=True, label=["APOGEE Dwarfs", "APOGEE Giants"], 
-         color=[bc.pink, bc.black])
-plt.hist([apo_mcq["TEFF"], apo_nomcq["TEFF"]], bins=teffbins, stacked=True, 
-         label=["McQuillan Detections", "McQuillan Nondetections"],
-         color=[bc.yellow, bc.red])
+n, bins, apopatches = plt.hist(
+    [apogee_nongiants["TEFF"], apogee_giants["TEFF"]], bins=teffbins, 
+    stacked=True, label=["APOGEE Dwarfs", "APOGEE Giants"], 
+    color=[bc.pink, bc.black], histtype="step")
+#for patch in apopatches[1]:
+#    patch.set_hatch("/")
+n, bins, mcqpatches = plt.hist(
+    [apo_mcq["TEFF"], apo_nomcq["TEFF"]], bins=teffbins, stacked=True, 
+    label=["McQuillan Detections", "McQuillan Nondetections"], 
+    color=[bc.red, bc.yellow], histtype="stepfilled")
+#for patch in mcqpatches[1]:
+#    patch.set_hatch("/")
 plt.legend(loc="upper right")
 plt.xlabel("APOGEE Teff (K)")
 plt.ylabel("N")

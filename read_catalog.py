@@ -306,6 +306,23 @@ def read_Garcia_periods(rottable=paths.GARCIA_PERIODS):
     rafapers = Table.read(rottable, format="fits")
     return rafapers
 
+def read_Garcia_prevsample(
+    chap_sdss=paths.CHAPLIN_DWARFS_SDSS, chap_irfm=paths.CHAPLIN_DWARFS_IRFM,
+    chap_bruntt=paths.CHAPLIN_DWARFS_BRUNTT):
+    '''Reads in the Chaplin sample.
+
+    Since there are three different tables, all of which are less than the 540
+    value that Garcia claims, this function will join them all together.'''
+    sdsstab = Table.read(chap_sdss, format="ascii.cds")
+    irfmtab = Table.read(chap_irfm, format="ascii.cds")
+    bruntttab = Table.read(chap_bruntt, format="ascii.cds")
+
+    sdssirfm = au.join_by_id(sdsstab, irfmtab, "KIC", "KIC", join_type="outer")
+    brunttsdssirfm = au.join_by_id(
+        sdssirfm, bruntttab, "KIC", "KIC", join_type="outer")
+
+    return brunttsdssirfm
+
 def read_DR14_original_KIC(kicpath=paths.DR14_ORIG_KIC):
     '''Reads in the original KIC for DR14 targets.
 
