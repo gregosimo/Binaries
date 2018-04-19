@@ -308,20 +308,22 @@ def read_Garcia_periods(rottable=paths.GARCIA_PERIODS):
 
 def read_Garcia_prevsample(
     chap_sdss=paths.CHAPLIN_DWARFS_SDSS, chap_irfm=paths.CHAPLIN_DWARFS_IRFM,
-    chap_bruntt=paths.CHAPLIN_DWARFS_BRUNTT):
+    chap_bruntt=paths.CHAPLIN_DWARFS_BRUNTT, 
+        chap_input=paths.CHAPLIN_DWARFS_INPUT):
     '''Reads in the Chaplin sample.
 
-    Since there are three different tables, all of which are less than the 540
-    value that Garcia claims, this function will join them all together.'''
-    sdsstab = Table.read(chap_sdss, format="ascii.cds")
-    irfmtab = Table.read(chap_irfm, format="ascii.cds")
-    bruntttab = Table.read(chap_bruntt, format="ascii.cds")
+    Garcia claims to have run their period algorithm on a set of 540 targets.
+    However, when checking the Chaplin et al (2014) sample, there are only 518
+    targets, which implies that there were additional stars analyzed by Garcia
+    et al (2014) not listed in Chaplin.
 
-    sdssirfm = au.join_by_id(sdsstab, irfmtab, "KIC", "KIC", join_type="outer")
-    brunttsdssirfm = au.join_by_id(
-        sdssirfm, bruntttab, "KIC", "KIC", join_type="outer")
+    Garcia et al (2014) note in Fig 3 that only 297 have both rotation periods 
+    and asteroseismic spacings, which is what we get when we cross-match the
+    Chaplin sample with the Garcia et al (2014) sample. So I don't know where
+    the additional stars came from.'''
+    inputtab = Table.read(chap_input, format="ascii.cds")
 
-    return brunttsdssirfm
+    return inputtab
 
 def read_DR14_original_KIC(kicpath=paths.DR14_ORIG_KIC):
     '''Reads in the original KIC for DR14 targets.
