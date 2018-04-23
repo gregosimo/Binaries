@@ -196,13 +196,26 @@ def read_TGAS_Kepler(tgas_kep_path=paths.TGAS_KEPLER_OVERLAP):
 
     If this file doesn't exist, use the astroquery package to get it from
     the Vizier xMatch service.'''
+    desired_cols = ["kepid", "ra_ep2000", "dec_ep2000", "parallax",
+                    "parallax_error", "pmra", "pmra_error", "pmdec",
+                    "pmdec_error"]
     try:
-        tgas = Table.read(tgas_kep_path, format="ascii.csv")
+        tgas = Table.read(tgas_kep_path, format="ascii.csv",
+                          include_names=desired_cols)
     except FileNotFoundError:
         tgas = XMatch.query(cat1="J/ApJS/229/30/catalog", cat2="GAIA DR1 TGAS")
         tgas.write(str(tgas_kep_path), format="ascii.csv")
 
     return tgas
+
+def APOGEE_TGAS(tgas_kep_path=paths.TGAS_KEPLER_OVERLAP,
+                apopath=paths.DR14_ALLSTAR_PATH):
+    '''Read in stars observed in both APOGEE and TGAS.'''
+    apo = dr14_with_KIC_stelparms()
+    tgas = read_TGAS_Kepler()
+    
+    apo_tgas = au.join_by_id(apo, tgas, "kepid", "kepid")
+    return apo_tgas
 
 
 def read_TGAS_McQuillan_APOGEE_overlap_tidsync(
