@@ -389,8 +389,8 @@ class DSEPInterpolator(object):
         except ValueError:
             teff_inputs = _spline_x_data(logteff_to_logluminosity)
             min_teff, max_teff = teff_inputs[0], teff_inputs[-1]
-            too_low = teffs < min_teff
-            too_high = teffs > max_teff
+            too_low = logteffvals < min_teff
+            too_high = logteffvals > max_teff
             if np.count_nonzero(too_low):
                 print("Included Teffs are lower than {0:1f}".format(10**min_teff))
             if np.count_nonzero(too_high):
@@ -399,6 +399,26 @@ class DSEPInterpolator(object):
         radius = 10**(loglumvals/2 - 2 * (logteffvals - np.log10(5778)))
 
         return radius
+
+    def teff_to_abs_mag(self, teffs, outmag, bands=1):
+        '''Convert Teff to an absolute magnitude.'''
+        logteff_to_mag = self._load_interpdict("LogTeff", outmag, branch="upper")
+        
+        logteffvals = np.log10(teffs)
+        try:
+            mags = logteff_to_mag(logteffvals)
+        except ValueError:
+            teff_inputs = _spline_x_data(logteff_to_mag)
+            min_teff, max_teff = teff_inputs[0], teff_inputs[-1]
+            too_low = teffs < min_teff
+            if np.count_nonzero(too_low):
+                print("Included Teffs are lower than {0:1f}".format(
+                    10**min_teff))
+            if np.count_nonzero(too_high):
+                print("Included Teffs are higher than {0:1f}".format(
+                    10**max_teff))
+        return mags
+
 
     def _interp_bound_values(self, fromcol, tocol, branch="lower"):
         '''Get the boundary values the spline between the columns.'''
