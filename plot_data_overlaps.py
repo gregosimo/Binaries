@@ -200,6 +200,52 @@ plt.xlabel("[M/H]")
 plt.ylabel("N (< [M/H]) / N")
 plt.title("Metallicity Overlap")
 
+# Plot APOGEE Teff against Metallicity
+# Dwarfs vs Giants
+plt.plot(apogee_nongiants["TEFF"], apogee_nongiants["M_H"], color=bc.black,
+         ls="None", marker=".", label="APOGEE Dwarfs")
+plt.plot(apogee_giants["TEFF"], apogee_giants["M_H"], color=bc.orange,
+         ls="None", marker=".", label="APOGEE Giants")
+plt.xlim(8000, 3500)
+plt.ylim(-2.5, 0.5)
+hr.invert_x_axis()
+plt.xlabel("APOGEE Teff (K)")
+plt.ylabel("[M/H]")
+plt.title("APOGEE Teff and Metallicity")
+plt.legend(loc="lower left")
+
+# Plot APOGEE Teff against Metallicity
+# McQuillan Detection vs Nondetection
+plt.plot(apogee_nongiants["TEFF"], apogee_nongiants["M_H"], color=bc.black,
+         ls="None", marker=".", label="APOGEE Dwarfs")
+plt.plot(apo_mcq["TEFF"], apo_mcq["M_H"], color=bc.pink,
+         ls="None", marker="o", label="McQuillan Detection")
+plt.plot(apo_nomcq["TEFF"], apo_nomcq["M_H"], color=bc.sky_blue,
+         ls="None", marker="o", label="McQuillan Non-Detection")
+plt.xlim(8000, 3500)
+plt.ylim(-2.5, 0.5)
+hr.invert_x_axis()
+plt.xlabel("APOGEE Teff (K)")
+plt.ylabel("[M/H]")
+plt.title("APOGEE Teff and Metallicity")
+plt.legend(loc="lower left")
+
+# Plot APOGEE Teff against Metallicity
+# Garcia Detection vs Nondetection
+plt.plot(apogee_nongiants["TEFF"], apogee_nongiants["M_H"], color=bc.black,
+         ls="None", marker=".", label="APOGEE Dwarfs")
+plt.plot(apo_garcia["TEFF"], apo_garcia["M_H"], color=bc.pink,
+         ls="None", marker="o", label="Garcia Detection")
+plt.plot(apo_nogarcia["TEFF"], apo_nogarcia["M_H"], color=bc.sky_blue,
+         ls="None", marker="o", label="Garcia Non-Detection")
+plt.xlim(8000, 3500)
+plt.ylim(-2.5, 0.5)
+hr.invert_x_axis()
+plt.xlabel("APOGEE Teff (K)")
+plt.ylabel("[M/H]")
+plt.title("APOGEE Teff and Metallicity")
+plt.legend(loc="lower left")
+
 # Show overlap between McQuillan and APOGEE in period
 plt.hist(mcq["Prot"], bins=pbins, stacked=True, label="McQuillan Detections", 
          color=bc.black, histtype="bar")
