@@ -89,6 +89,11 @@ DR14_ALLSTAR_PATH = HEAD_DIR / "allStar-l31c.2.fits"
 DLSB_DB = HEAD_DIR / "DLSB.txt"
 NODL_DB = HEAD_DIR / "noDL.txt"
 
+VIZIER_KEPLER_INPUT = HEAD_DIR / "Vizier_Kepler_Input.txt"
+GAIA_KEPLER_INPUT = HEAD_DIR / "Gaia_Kepler_Input.txt"
+GAIA_DR2_KEPLER_OVERLAP = HEAD_DIR / "Gaia_DR2_Kepler.csv"
+UCAC_KEPLER_PATH = HEAD_DIR / "UCAC_Kepler.csv"
+
 # SHORTCUT PATHS
 # These are for subsets of table that take a really long time to generate.
 # Since disk space is cheap, I think it will be much more valuable to just

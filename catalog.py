@@ -456,6 +456,56 @@ def write_columns_for_input(outputtable, filename, maxlen, table_format,
         outputsegment.write(str(outputpath / outputfile), format=table_format,
                             include_names=output_columns, comment=False)
 
+def write_Kepler_field_Vizier_upload_list(
+        outputfile=paths.VIZIER_KEPLER_INPUT):
+    '''Write a file resolved by Vizier with the full Kepler field.'''
+    fullkepler = catin.read_KIC_DR25_catalog()
+    write_KIC_Vizier_upload_list(
+        fullkepler["kepid"], outputfile.name, outputpath=outputfile.parent)
+
+def write_xMatch_upload_list(
+        ra, dec, outputfile, ids=None, outputpath=paths.HEAD_DIR):
+    '''Write the upload list suitable for sending to xMatch.
+    
+    The RA and Dec should be given in J2000 coordinates. If a set of IDs are
+    associated with each coordinate, those can also be given to this file, and
+    it will be added to the list. IDs are useful for identifying cases where
+    xMatch didn't find an associated source, or found multiple associated
+    sources.
+    
+    The file will be written in the directory outputpath to the file
+    outputfile.'''
+    xmatch_table = Table([ids, ra, dec], names=("ID", "RA", "DEC"))
+    xmatch_table.write(str(outputpath / outputfile), format="ascii.csv",
+                       comment=False)
+
+def clean_cross_matched_table(tbl, uniq_col="ID", dist_col="angDist"):
+    '''Ensure that a table has only one target associated with each ID.
+
+    If any of entries under tbl[uniq_col] are duplicated, only select the one
+    with the lowest value in tbl[dist_col].'''
+    keep_indices = np.zeros(len(tbl), dtype="bool")
+    for ident in tbl[uniq_col]:
+        ident_match = np.where(tbl[uniq_col] == ident)[0]
+        minval = np.argmin(tbl[dist_col][ident_match])
+        keep_indices[ident_match[minval]] = 1
+
+    return tbl[keep_indices]
+
+def clean_XMatch_file(tablepath, uniq_col="ID", tableformat="ascii.csv"):
+    '''Ensure XMatch file has only one target associated with each ID.
+
+    Go through the table located at tablepath (in the format specified in
+    tableformat and ensure that all
+    identifications in uniq_col are unique. If there are duplicates, chose the
+    one with the lowest value in dist_col.'''
+    tbl = Table.read(tablepath, format=tableformat)
+
+    newtbl = clean_cross_matched_table(
+        tbl, uniq_col=uniq_col, dist_col="angDist")
+
+    newtbl.write(str(tablepath), format=tableformat, overwrite=True)
+
 def write_KIC_Vizier_upload_list(kics, outputfile, outputpath=paths.HEAD_DIR):
     '''Write a file to be uploaded to Vizier. 
 
@@ -468,7 +518,15 @@ def write_KIC_Vizier_upload_list(kics, outputfile, outputpath=paths.HEAD_DIR):
     write_columns_for_input(
         kic_table, outputfile, 99999, "ascii.no_header", output_columns=["KIC"], 
         outputpath=outputpath)
-    kic_table.write(str(outputpath / outputfile), format="ascii.no_header")
+
+def write_Kepler_Gaia_Archive_upload_list(outputpath=paths.GAIA_KEPLER_INPUT):
+    '''Write a list of KIC identifiers for the full Kepler sample.'''
+    kictable = catin.read_KIC_DR25_catalog()
+    kicstr = kictable["kepid"].astype(np.str)
+    kic_column = npstr.add("KIC ", kicstr)
+    kic_table = Table([kic_column], names=["KIC"])
+    kic_table.write(str(outputpath), format="ascii.no_header", overwrite=True, 
+                    delimiter=",")
 
 def write_SIMBAD_identifier_list(
     identifiers, outputfile, outputpath=paths.HEAD_DIR):

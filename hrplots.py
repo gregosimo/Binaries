@@ -20,7 +20,7 @@ def logg_teff_plot(teff, logg, style="", **kwargs):
     ax.errorbar(teff, logg, fmt=style, **kwargs)
     invert_x_axis(ax)
     invert_y_axis(ax)
-    plt.xlabel("Teff")
+    plt.xlabel("Teff (K)")
     plt.ylabel("log g")
 
 def radius_teff_plot(teff, radius, style="k.", **kwargs):
@@ -34,12 +34,39 @@ def radius_teff_plot(teff, radius, style="k.", **kwargs):
         ax = kwargs.pop("axis")
     except KeyError:
         ax = plt.gca()
-    ax.errorbar(teff, radius, fmt=style, **kwargs)
+    ax.errorbar(teff, radius, **kwargs)
     invert_x_axis(ax)
-    plt.xlabel("Teff")
+    plt.xlabel("Teff (K)")
     plt.ylabel("Radius")
-    
 
+def absmag_teff_plot(teff, mag, **kwargs):
+    '''Plots values in absolute magnitude/Teff space.
+
+    Teff and absolute magnitude are values which should be plotted. Other
+    keyword parameters will be passed to the underlying errorbar routine.'''
+    try:
+        ax = kwargs.pop("axis")
+    except KeyError:
+        ax = plt.gca()
+    ax.errorbar(teff, mag, **kwargs)
+    invert_x_axis(ax)
+    invert_y_axis(ax)
+    ax.set_xlabel("Teff (K)")
+    ax.set_ylabel("Absolute Magnitude")
+
+def logL_teff_plot(teff, loglum, **kwargs):
+    '''Plots values in LogLuminosity/Teff space.
+
+    Teff and luminosity are values which should be plotted. Other keyword
+    parameters willb e passed to the underlying errorbar routine.'''
+    try:
+        ax = kwargs.pop("axis")
+    except KeyError:
+        ax = plt.gca()
+    ax.errorbar(teff, loglum, **kwargs)
+    invert_x_axis(ax)
+    ax.set_xlabel("Teff (K)")
+    ax.set_ylabel("Log Luminosity")
 
 def invert_x_axis(axes=None):
     '''Inverts the x-axis for given axes (useful for Teff)'''

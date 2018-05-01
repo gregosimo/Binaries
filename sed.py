@@ -402,21 +402,23 @@ class DSEPInterpolator(object):
 
     def teff_to_abs_mag(self, teffs, outmag, bands=1):
         '''Convert Teff to an absolute magnitude.'''
-        logteff_to_mag = self._load_interpdict("LogTeff", outmag, branch="upper")
+        logteff_to_mag = self._load_interpdict("LogTeff", outmag, branch="lower")
         
         logteffvals = np.log10(teffs)
         try:
             mags = logteff_to_mag(logteffvals)
         except ValueError:
             teff_inputs = _spline_x_data(logteff_to_mag)
-            min_teff, max_teff = teff_inputs[0], teff_inputs[-1]
+            min_teff, max_teff = 10**teff_inputs[0], 10**teff_inputs[-1]
             too_low = teffs < min_teff
+            too_high = teffs > max_teff
             if np.count_nonzero(too_low):
                 print("Included Teffs are lower than {0:1f}".format(
-                    10**min_teff))
+                    min_teff))
             if np.count_nonzero(too_high):
                 print("Included Teffs are higher than {0:1f}".format(
-                    10**max_teff))
+                    max_teff))
+            raise
         return mags
 
 

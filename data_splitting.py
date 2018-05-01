@@ -1000,7 +1000,7 @@ def initialize_general_APOGEE(aposplit):
 
     aposplit.split_original_KIC_params()
 
-    aposplit.split_McQuillan_periods()
+    aposplit.split_McQuillan_periods(kiccol=aposplit.kic_col)
 
     aposplit.split_vsini(
         [0, 7, 12], ("No Vsini", "Vsini nondet", "Vsini marginal", "Vsini det"))
