@@ -39,8 +39,9 @@ import random
 import numpy as np
 import scipy
 import numpy.core.defchararray as npstr
-from astropy.table import unique, Table
+from astropy.table import unique, Table, vstack
 from astropy.coordinates import SkyCoord
+from astropy.io import ascii
 import astropy.units as u
 import astropy_util as au
 
@@ -267,10 +268,16 @@ def mcq_table():
     mcq = catin.mcquillan_with_stelparms()
     tidsync = catalog.select_tidally_synchronized_binaries(
         mcq, pcut=5, lowperiod=1, teffcol="teff")
-    ancillary_fields = ["K04_083+13", "K06_078+16", "K07_075+17"]
+    ancillary_fields = ["K18_070+14", "K19_076+07"]
     fieldtargs = targets_in_APOGEE_fields(ancillary_fields, tidsync)
-    ucactable = catin.read_UCAC4_Mcquillan_Tidsync()
-    mcq_ucac = au.join_by_id(fieldtargs, ucactable, "KIC", "KIC")
+    ucactable = catin.read_Kepler_UCAC4()
+    mcq_ucac = au.join_by_id(fieldtargs, ucactable, "KIC", "kepid",
+                             join_type="left")
+    shared_kic_set = set(mcq_ucac["KIC"])
+    full_ucac_set = set(ucactable["kepid"])
+    if shared_kic_set <= full_ucac_set:
+        for kepid in shared_kic_set - full_ucac_set:
+            print("KIC {0:d} not in UCAC-4.")
     return mcq_ucac
 
 def eb_table():
@@ -280,10 +287,16 @@ def eb_table():
     ebs_parms = au.join_by_id(ebs, stelparms, "KIC", "kepid")
     tidsync = catalog.select_tidally_synchronized_binaries(
         ebs_parms, pcut=5, lowperiod=1, teffcol="teff", pcol="period")
-    ancillary_fields = ["K04_083+13", "K06_078+16", "K07_075+17"]
+    ancillary_fields = ["K18_070+14", "K19_076+07"]
     fieldtargs = targets_in_APOGEE_fields(ancillary_fields, tidsync)
-    ucactable = catin.read_UCAC4_EB_Tidsync()
-    eb_ucac = au.join_by_id(fieldtargs, ucactable, "KIC", "KIC")
+    ucactable = catin.read_Kepler_UCAC4()
+    eb_ucac = au.join_by_id(fieldtargs, ucactable, "KIC", "kepid",
+                            join_type="left")
+    shared_kic_set = set(eb_ucac["KIC"])
+    full_ucac_set = set(ucactable["kepid"])
+    if shared_kic_set <= full_ucac_set:
+        for kepid in shared_kic_set - full_ucac_set:
+            print("KIC {0:d} not in UCAC-4.")
     return eb_ucac
 
 def apogee_table():
@@ -291,7 +304,7 @@ def apogee_table():
     apo = catin.dr14_with_KIC_stelparms()
     tidsync = catalog.select_tidally_synchronized_binaries(
         apo, pcut=2000, lowperiod=10, teffcol="teff", pcol="VSINI")
-    ancillary_fields = ["K04_083+13", "K06_078+16", "K07_075+17"]
+    ancillary_fields = ["K18_070+14", "K19_076+07"]
     fieldtargs = targets_in_APOGEE_fields(ancillary_fields, tidsync)
     fieldtargs.rename_column("PMRA", "pmRA")
     fieldtargs.rename_column("PMDEC", "pmDE")
@@ -317,9 +330,17 @@ def APOGEE_Ancillary_table(outputpath=paths.APOGEE_ANCILLARY_TARGETS_TABLE):
     # Remove RV variable targets from MDM
     mdmtargs = [11819949, 12736892, 3248885]
     nonobs = au.filter_column_from_subtable(mcq, "KIC", mdmtargs)
-    assert len(nonobs) == len(mcq) - len(mdmtargs)
+    mcq_writetable = nonobs[[
+        "APOGEE_Field", "tm_designation", "ra", "dec", "hmag", "pmRA", "pmDE"]]
+    mcq_writetable["Order"] = 1
+    mcq_writetable["Source"] = "McQuillan"
+                            
     # Add spectroscopic rapid rotators.
     apo = apogee_table()
+    apo_writetable = apo[[
+        "APOGEE_Field", "tm_designation", "ra", "dec", "hmag", "pmRA", "pmDE"]]
+    apo_writetable["Order"] = 2
+    apo_writetable["Source"] = "APOGEE"
 
     # Control sample.
     ebs = eb_table()
@@ -330,12 +351,22 @@ def APOGEE_Ancillary_table(outputpath=paths.APOGEE_ANCILLARY_TARGETS_TABLE):
     eb_groups = ebs.group_by("APOGEE_Field")
     random.seed("EB CONTROL")
     tablerows = []
-    for grp in eb_groups.groups():
+    for grp in eb_groups.groups:
         randindices = random.sample(range(len(grp)), 2)
         for ind in randindices:
             tablerows.append(grp[ind])
+    ebs_selected = Table(rows=tablerows, names=ebs.colnames)
+    eb_writetable = ebs_selected[[
+        "APOGEE_Field", "tm_designation", "ra", "dec", "hmag", "pmRA", "pmDE"]]
+    eb_writetable["Order"] = 3
+    eb_writetable["Source"] = "EB"
 
-    write_APOGEE_proposal_table(mcq_ucac)
+    fulltable = vstack([mcq_writetable, apo_writetable, eb_writetable],
+                       join_type="exact")
+    fulltable.sort(["APOGEE_Field", "Order"])
+#    return fulltable
+    del(fulltable["Order"])
+    write_APOGEE_proposal_table(fulltable)
 
 def write_APOGEE_proposal_table(
     field_targets, outputpath=paths.APOGEE_ANCILLARY_TARGETS_TABLE, 
@@ -404,7 +435,7 @@ def write_APOGEE_proposal_table(
         apogee_field_col, twomass_col, "Coords", hmag_col, 
         r"$\mu_\alpha \cos \delta$", r"$\mu_\delta$", 
         "Min. visits", "Req. S/N"]]
-    ordered_output.sort(apogee_field_col)
+#    ordered_output.sort(apogee_field_col)
 
     # Comments about the dataset.
     ordered_output.meta["comments"] = [
@@ -418,4 +449,7 @@ def write_APOGEE_proposal_table(
     # Therefore, I want to write the file to a StringIO object and replace the
     # instances of tabular with those of longtable.
     ordered_output.write(
-        str(outputpath), format="ascii.fixed_width", names=names)
+        str(outputpath), format="ascii.fixed_width", names=names,
+        overwrite=True, formats={"PM_RA": ".1f", "PM_DE": ".1f"},
+        fill_values=[(ascii.masked, "0.0")], 
+        fill_include_names=["PM_RA", "PM_DE"])

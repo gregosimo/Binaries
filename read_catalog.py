@@ -1,7 +1,7 @@
 import tempfile
 
 from astropy.table import Table, vstack, Column
-from astropy.coordinates import SkyCoord
+from astropy.coordinates import SkyCoord, FK5
 import astropy.units as u
 from astropy.io import fits
 from scipy.io import readsav
@@ -62,8 +62,22 @@ def read_Huber_KIC_catalog(huberpath=paths.HUBER_CATALOG):
 
 def read_KIC_DR25_catalog(kicpath=paths.KIC_CATALOG):
     '''Read the KIC DR25 Stellar Parameter catalog.'''
-    kiccat = Table.read(str(kicpath), format="ascii.ipac")
+    desired_cols = [
+        "kepid", "tm_designation", "teff", "teff_err1", "teff_err2", "logg", 
+        "logg_err1", "logg_err2", "feh", "feh_err1", "feh_err2", "mass", 
+        "mass_err1", "mass_err2", "radius", "radius_err1", "radius_err2", 
+        "kepmag", "dist", "dist_err1", "dist_err2", "ra", "dec", "st_quarters", 
+        "teff_prov", "logg_prov", "feh_prov", "jmag", "jmag_err", "hmag", 
+        "hmag_err", "kmag", "kmag_err", "av", "av_err1", "av_err2"]
+    kiccat = Table.read(
+        str(kicpath), format="ascii.ipac", include_names=desired_cols)
     fix_table_coordinates_units(kiccat, "ra", "dec")
+    # This was necessary because of a bug in astropy where "dex" isn't
+    # considered a valid flux unit.
+    # https://github.com/astropy/astropy/issues/7279
+    kiccat["feh"].unit = "Dex"
+    kiccat["feh_err1"].unit = "Dex"
+    kiccat["feh_err2"].unit = "Dex"
     return kiccat
 
 def read_Pinsonneault_2012_catalog(pinpath=paths.PINSONNEAULT_CORRECTIONS):
@@ -136,6 +150,14 @@ def read_APOGEE_dwarfs(apopath=paths.APOGEE_DWARF_PATH):
     np.ma.masked_equal(dwarfs["vrelerr"], -9999)
     return dwarfs
 
+def read_Kepler_UCAC4(upath=paths.UCAC_KEPLER_PATH):
+    '''Reads the UCAC4 Table for the full Kepler field.
+    
+    The UCAC-4 table was obtained from the CDS XMatch service.'''
+    pm_table = Table.read(
+        str(upath), format="ascii.csv", include_names=("ID", "pmRA", "pmDE"))
+    pm_table.rename_column("ID", "kepid")
+    return pm_table
 
 def read_UCAC4_Mcquillan_Tidsync(
     upath=paths.UCAC_TIDSYNC_PATH, kic_col="KIC"):
@@ -207,6 +229,21 @@ def read_TGAS_Kepler(tgas_kep_path=paths.TGAS_KEPLER_OVERLAP):
         tgas.write(str(tgas_kep_path), format="ascii.csv")
 
     return tgas
+
+def read_Gaia_DR2_Kepler(gaia_dr2_kep_path=paths.GAIA_DR2_KEPLER_OVERLAP):
+    '''Read the Gaia DR2 table of stars overlapping with Kepler.
+
+    If this file doesn't exist, use the astroquery package to get it from the
+    Vizier xMatch service.'''
+    desired_cols = [
+        "ID", "angDist", "ra_epoch2000", "dec_epoch2000", "parallax", 
+        "parallax_error", "pmra", "pmra_error", "pmdec", "pmdec_error", 
+        "radial_velocity", "radial_velocity_error", "radius_val", "lum_val"]
+    dr2 = Table.read(gaia_dr2_kep_path, format="ascii.csv", 
+                     include_names=desired_cols)
+    dr2.rename_column("ID", "kepid")
+
+    return dr2
 
 def APOGEE_TGAS(tgas_kep_path=paths.TGAS_KEPLER_OVERLAP,
                 apopath=paths.DR14_ALLSTAR_PATH):
@@ -649,7 +686,7 @@ def APOKASC_with_KIC_stelparms(
 def stelparms_with_original_KIC(parmpath=paths.KIC_CATALOG,
                                 kicpath=paths.ORIG_KIC_ABRIDGED):
     '''Read in the Huber and original KIC stellar parameters.'''
-    kiccat = read_KIC_DR25_catalog(parmpath)
+    kiccat = stelparms_with_Gaia(parmpath)
     origcat = read_abridged_original_KIC(kicpath)
     orig_subtable = Table([
         origcat["Kepler ID"], origcat["Teff (deg K)"], 
@@ -676,6 +713,14 @@ def stelparms_triple_KIC(
     joinedcat = au.join_by_id(
         hubercat, pinsonneaultcat, "kepid", "KIC", join_type="left")
     del(joinedcat["KIC"])
+    return joinedcat
+
+def stelparms_with_Gaia(
+        parmpath=paths.KIC_CATALOG, gaiapath=paths.GAIA_DR2_KEPLER_OVERLAP):
+    kiccat = read_KIC_DR25_catalog(parmpath)
+    gaiacat = read_Gaia_DR2_Kepler(gaiapath)
+
+    joinedcat = au.join_by_id(kiccat, gaiacat, "kepid", "kepid")
     return joinedcat
 
 ###########
