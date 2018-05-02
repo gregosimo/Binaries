@@ -389,6 +389,7 @@ def _check_namelist_for_tildes(namelist):
                 "{0} cannot be a name that starts with a tilde (~)".format(
                     name))
 
+
 class KeplerSplitter(DataSplitter):
     '''Split dataset with Kepler stellar properties.
 
@@ -546,6 +547,55 @@ class KeplerSplitter(DataSplitter):
         '''
         self.split_by_col(magcol, mags, splitnames, mag_crit, invert_inequality)
 
+    def split_evstate(
+            self, teff_col="teff", logg_col="LOGG_FIT", 
+            giant_subgiant_points=[(5000, 3.5), (3500, 3.5)],
+            subgiant_dwarf_points=[(5690, 4.43), (4640, 3.72)], 
+            splitnames=("Giant", "Subgiant", "Dwarf", "NO_EV"), 
+            crit="APOGEE Evolutionary State"):
+        '''Split the cool dwarf sample by evolutionary state.
+
+        This function splits the sample according to linear cuts. There is a
+        linear cut between giants and subgiants, and a linear cut between
+        subgiants and dwarfs.
+
+        The default cut between giants and subgiants is a horizontal log(g) 
+        cut of 3.5. The default cut between subgiants and dwarfs is a linear
+        cut calibrated to an APOGEE HR diagram.
+        '''
+        topdiv_slope = (
+            (giant_subgiant_points[0][1] - giant_subgiant_points[1][1]) /
+            (giant_subgiant_points[0][0] - giant_subgiant_points[1][0]))
+        topdiv_coord = giant_subgiant_points[0]
+        bottomdiv_slope = (
+            (subgiant_dwarf_points[0][1] - subgiant_dwarf_points[1][1]) /
+            (subgiant_dwarf_points[0][0] - subgiant_dwarf_points[1][0]))
+        bottomdiv_coord = subgiant_dwarf_points[0]
+
+        giant_subgiant_div = topdiv_slope * (
+            self.data[teff_col] - topdiv_coord[0]) + topdiv_coord[1]
+        subgiant_dwarf_div = bottomdiv_slope * (
+            self.data[teff_col] - bottomdiv_coord[0]) + bottomdiv_coord[1]
+
+        unclassified_indices = self.data[teff_col] < 0
+        giant_indices = np.logical_and(
+            self.data[logg_col] < giant_subgiant_div,
+            np.logical_not(unclassified_indices))
+
+        subgiant_indices = np.logical_and(
+            np.logical_and(
+                self.data[logg_col] >= giant_subgiant_div, 
+                self.data[logg_col] < subgiant_dwarf_div), 
+            np.logical_not(unclassified_indices))
+
+        dwarf_indices = np.logical_and(
+            self.data[logg_col] >= subgiant_dwarf_div,
+            np.logical_not(unclassified_indices))
+
+        indexarr = [giant_indices, subgiant_indices, dwarf_indices,
+                    unclassified_indices]
+        self._setup_indices(splitnames, indexarr, crit)
+
 class McQuillanSplitter(KeplerSplitter):
     '''Keep an organized database of various cuts on McQuillan data.'''
 
@@ -574,7 +624,63 @@ class McQuillanSplitter(KeplerSplitter):
         self.split_by_col(pcol, splitvalues, splitnames, period_crit, 
                           invert_inequality)
 
-class APOGEESplitter(KeplerSplitter):
+class GaiaSplitter(KeplerSplitter):
+    '''Split dataset with Gaia information.'''
+
+    def __init__(self, data, splitgroups=None, indices=None,
+                 gaia_index="source_id", kic_col="kepid", tm_col="APOGEE_ID"):
+        '''Initialize the splitter for a Gaia-containig dataset.
+
+        Set up the splitter with the given data. The splitter is indexed by the
+        gaia_index, which should be specified in the parameter "gaia_index".'''
+        super().__init__(data, splitgroups=splitgroups, indices=indices,
+                         kic_col=kic_col, tm_col=tm_col)
+        self.gaia_index = gaia_index
+
+    def split_parallax_quality(
+            self, parallax_col="parallax", parallax_err_col="parallax_error", 
+            frac_err=0.05, splitnames=(
+                "Good parallax", "Bad parallax", "No parallax"), 
+            crit="Gaia DR2 parallax"):
+        '''Split the sample based on the quality of the parallax.
+
+        The value and error of parallax must be given in parallax_col and
+        parallax_err_col. Splitnames should be a 3-tuple containing the names
+        of categories for those objects with good parallax, bad parallax, and
+        no parallax.
+        
+        Only the targets with fractional parallax error will be accepted as
+        having good parallax. Targets with fractional parallax error higher
+        than frac_error, or those with negative parallaxes, will be removed.
+        Objects with no Gaia parallaxes at all are categorized under the no
+        parallax name.'''
+        parallax_ratio = self.data[parallax_col] / self.data[parallax_err_col]
+
+        no_parallax_indices = self.data[parallax_col].mask
+        good_indices = np.logical_and(
+            parallax_ratio >= 1/frac_err, np.logical_not(no_parallax_indices))
+        bad_indices = np.logical_and(
+            parallax_ratio < 1/frac_err, np.logical_not(no_parallax_indices))
+
+        indexarr = [good_indices, bad_indices, no_parallax_indices]
+        self._setup_indices(splitnames, indexarr, crit)
+
+    def split_mk_evstate(
+            self, teff_col="TEFF", mk_col="M_K", 
+            giant_subgiant_points=[(5000, 0.7), (3500, 0.7)],
+            subgiant_dwarf_points=[(5015, 2.34), (5625, 2.46)], 
+            splitnames=("Giant", "Subgiant", "Dwarf", "NO_EV"), 
+            crit="APOGEE Evolutionary State"):
+        '''Split the cool dwarf sample into evolutionary states using M_K.
+
+        Split the catalog according to the K-band absolute magnitude.'''
+        self.split_evstate(
+            teff_col=teff_col, logg_col=mk_col,
+            giant_subgiant_points=giant_subgiant_points,
+            subgiant_dwarf_points=subgiant_dwarf_points, splitnames=splitnames,
+            crit=crit)
+
+class APOGEESplitter(GaiaSplitter):
     '''Keep an organized database of various cuts on APOGEE data.'''
 
     def __init__(self, data=None, splitgroups=None, indices=None, 
@@ -645,6 +751,21 @@ class APOGEESplitter(KeplerSplitter):
                           invert_inequality)
         del(self.data[tempcol])
         assert tempcol not in self.data.colnames
+
+    def split_logg_evstate(
+            self, teff_col="TEFF", logg_col="LOGG_FIT", 
+            giant_subgiant_points=[(5000, 3.5), (3500, 3.5)],
+            subgiant_dwarf_points=[(5690, 4.43), (4640, 3.72)], 
+            splitnames=("Giant", "Subgiant", "Dwarf", "NO_EV"), 
+            crit="APOGEE Evolutionary State"):
+        '''Split the cool dwarf sample into evolutionary states using M_K.
+
+        Split the catalog according to the K-band absolute magnitude.'''
+        self.split_evstate(
+            teff_col=teff_col, logg_col=logg_col,
+            giant_subgiant_points=giant_subgiant_points,
+            subgiant_dwarf_points=subgiant_dwarf_points, splitnames=splitnames,
+            crit=crit)
 
     def split_dlsb(
         self, apid_col="APOGEE_ID", dl_names=("DLSB", "No DLSB", "Unknown DLSB"),
@@ -821,45 +942,6 @@ class APOGEESplitter(KeplerSplitter):
 
         self._setup_complement_index(splitnames, full_sample, cool_crit)
 
-    def split_evstate(
-        self, teff_col="TEFF", logg_col="LOGG_FIT", 
-        topdiv_slope=0, topdiv_coord=(5000, 3.5), 
-        bottomdiv_slope=(4.43-3.72)/(5690-4640), bottomdiv_coord=(4640, 3.72), 
-        splitnames=("Giant", "Subgiant", "Dwarf", "NO_EV"), 
-        crit="APOGEE Evolutionary State"):
-        '''Split the cool dwarf sample by evolutionary state.
-
-        This function splits the sample according to linear cuts. There is a
-        linear cut between giants and subgiants, and a linear cut between
-        subgiants and dwarfs.
-
-        The default cut between giants and subgiants is a horizontal log(g) 
-        cut of 3.5. The default cut between subgiants and dwarfs is a linear
-        cut calibrated to an APOGEE HR diagram.
-        '''
-        giant_subgiant_div = topdiv_slope * (
-            self.data[teff_col] - topdiv_coord[0]) + topdiv_coord[1]
-        subgiant_dwarf_div = bottomdiv_slope * (
-            self.data[teff_col] - bottomdiv_coord[0]) + bottomdiv_coord[1]
-
-        unclassified_indices = self.data[teff_col] < 0
-        giant_indices = np.logical_and(
-            self.data[logg_col] < giant_subgiant_div,
-            np.logical_not(unclassified_indices))
-
-        subgiant_indices = np.logical_and(
-            np.logical_and(
-                self.data[logg_col] >= giant_subgiant_div, 
-                self.data[logg_col] < subgiant_dwarf_div), 
-            np.logical_not(unclassified_indices))
-
-        dwarf_indices = np.logical_and(
-            self.data[logg_col] >= subgiant_dwarf_div,
-            np.logical_not(unclassified_indices))
-
-        indexarr = [giant_indices, subgiant_indices, dwarf_indices,
-                    unclassified_indices]
-        self._setup_indices(splitnames, indexarr, crit)
 
     def subsample_len(self, namelist):
         '''Get the size of a subsample.
@@ -1011,6 +1093,11 @@ def initialize_general_APOGEE(aposplit):
 
     aposplit.split_dlsb()
 
+    aposplit.split_parallax_quality()
+
+    aposplit.data["M_K"] = (
+        aposplit.data["K"] - 5 * np.log10(aposplit.data["parallax"]/100))
+
 def initialize_cool_KICs(kicsplit):
     '''Initialize cool dwarfs that have KIC values.'''
     kicsplit.split_teff(
@@ -1022,13 +1109,13 @@ def initialize_cool_KICs(kicsplit):
     kicsplit.split_logg("log(g)", 4.0, ("Jen Giant", "Jen Dwarf"),
                            logg_crit="KIC logg")
 #   kicsplit.split_logg("LOGG_FIT", [3.5, 4.2], ("Giant", "Subgiant", "Dwarf"))
-    kicsplit.split_evstate(crit="Subgiant Split")
+    kicsplit.split_mk_evstate(crit="Subgiant Split")
     # I want to split by the huber log(g)s as well.
     kicsplit.split_evstate(
-        teff_col="teff", logg_col="logg", topdiv_slope=0, 
-        topdiv_coord=(5000, 3.5), bottomdiv_slope=0, 
-        bottomdiv_coord=(5000, 4.2), splitnames=(
-            "Huber giants", "Huber subgiants", "Huber dwarfs", "No Huber EV"),
+        teff_col="teff", logg_col="logg", 
+        giant_subgiant_points=[(5000, 3.5), (3500, 3.5)], 
+        subgiant_dwarf_points=[(5690, 4.2), (4640, 4.2)], splitnames=(
+            "Huber giants", "Huber subgiants", "Huber dwarfs", "No Huber EV"), 
         crit="Huber evolutionary state")
     kicsplit.split_cool_dwarfs()
 
