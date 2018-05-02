@@ -741,15 +741,140 @@ def asteroseismic_hr_check(apokascsplitter):
     plt.legend(loc="lower right")
 
 ###############################################################################
-# Cool Dwarf Subset properties #
+# Check evolutionary state classifications #
 ###############################################################################
 
-def plot_cool_dwarf(sampsplitter, ycols, yerrs):
-    '''Plot  yval against Teff, distinguishing subsamples for cool dwarfs.
+def check_evstate_classifications(teff, logg, bollum, kmag):
+    '''Show dwarf/subgiant classification agreements for three methods.
 
-    Currently there are three subsamples for nondetections, marginal rotators,
-    and rapid rotators, and these both occur for McQuillan detections and
-    McQuillan nondetections.'''
+    Compare the regions where the APOGEE, bolometric luminosity, and Absolute K
+    magnitude methods agree and disagree.'''
 
-    pass
+    logg_points = [(4640, 3.72), (5690, 4.43)]
+    bollum_points = [(4970, 0.25), (5750, 0.24)]
+    kmag_points = [(5015, 2.34), (5625, 2.46)]
+
+    logg_slope = ((logg_points[0][1] - logg_points[1][1]) / (
+        logg_points[0][0] - logg_points[1][0]))
+    bollum_slope = ((bollum_points[0][1] - bollum_points[1][1]) / (
+        bollum_points[0][0] - bollum_points[1][0]))
+    kmag_slope = ((kmag_points[0][1] - kmag_points[1][1]) / (
+        kmag_points[0][0] - kmag_points[1][0]))
+
+    logg_dwarf_indices = logg >= logg_points[0][1] + logg_slope * (
+        teff - logg_points[0][0])
+    logg_subgiant_indices = logg < logg_points[0][1] + logg_slope * (
+        teff - logg_points[0][0])
+    bollum_dwarf_indices = bollum <= bollum_points[0][1] + bollum_slope * (
+        teff - bollum_points[0][0])
+    bollum_subgiant_indices = bollum > bollum_points[0][1] + bollum_slope * (
+        teff - bollum_points[0][0])
+    kmag_dwarf_indices = kmag >= kmag_points[0][1] + kmag_slope * (
+        teff - kmag_points[0][0])
+    kmag_subgiant_indices = kmag < kmag_points[0][1] + kmag_slope * (
+        teff - kmag_points[0][0])
+
+    # Where all 3 match, let it be a green dot.
+    # Where logg is off, let it be an orange star
+    # Where bollum is off, let it be a purple square
+    # Where kmag is off, let it be a red diamond.
+
+    matching_targets = np.logical_or(
+        au.multi_logical_and(logg_dwarf_indices, bollum_dwarf_indices, 
+                             kmag_dwarf_indices),
+        au.multi_logical_and(logg_subgiant_indices, bollum_subgiant_indices, 
+                             kmag_subgiant_indices))
+    logg_off = np.logical_or(
+        au.multi_logical_and(
+            np.logical_not(logg_dwarf_indices), bollum_dwarf_indices, 
+            kmag_dwarf_indices),
+        au.multi_logical_and(
+            np.logical_not(logg_subgiant_indices), bollum_subgiant_indices, 
+            kmag_subgiant_indices))
+    bollum_off = np.logical_or(
+        au.multi_logical_and(
+            logg_dwarf_indices, np.logical_not(bollum_dwarf_indices), 
+            kmag_dwarf_indices),
+        au.multi_logical_and(
+            logg_subgiant_indices, np.logical_not(bollum_subgiant_indices), 
+            kmag_subgiant_indices))
+    kmag_off = np.logical_or(
+        au.multi_logical_and(
+            logg_dwarf_indices, bollum_dwarf_indices, 
+            np.logical_not(kmag_dwarf_indices)),
+        au.multi_logical_and(
+            logg_subgiant_indices, bollum_subgiant_indices, 
+            np.logical_not(kmag_subgiant_indices)))
+
+    # All of the targets in logg/teff space.
+    plt.figure()
+    ax=plt.gca()
+    hr.logg_teff_plot(
+        teff[matching_targets], logg[matching_targets], ls="", marker=".",
+        color=bc.green, axis=ax, label="Match")
+    hr.logg_teff_plot(
+        teff[logg_off], logg[logg_off], ls="", marker="*",
+        color=bc.orange, axis=ax, label="Log(g) disagrees")
+    hr.logg_teff_plot(
+        teff[bollum_off], logg[bollum_off], ls="", marker="s",
+        color=bc.purple, axis=ax, label="Lbol disagrees" )
+    hr.logg_teff_plot(
+        teff[kmag_off], logg[kmag_off], ls="", marker="d",
+        color=bc.red, axis=ax, label="M_K disagrees" )
+    ax.plot([logg_points[0][0], logg_points[1][0]], 
+             [logg_points[0][1], logg_points[1][1]], 'k-')
+    ax.set_xlabel("APOGEE Teff (K)")
+    ax.set_xlim(6500, 3500)
+    hr.invert_x_axis(ax)
+    hr.invert_y_axis(ax)
+    plt.legend(loc="upper left")
+
+    # All of the targets in bollum/teff space.
+    plt.figure()
+    ax=plt.gca()
+    hr.logL_teff_plot(
+        teff[matching_targets], bollum[matching_targets], ls="", marker=".",
+        color=bc.green, axis=ax, label="Match")
+    hr.logL_teff_plot(
+        teff[logg_off], bollum[logg_off], ls="", marker="*",
+        color=bc.orange, axis=ax, label="Log(g) disagrees" )
+    hr.logL_teff_plot(
+        teff[bollum_off], bollum[bollum_off], ls="", marker="s",
+        color=bc.purple, axis=ax, label="Lbol disagrees" )
+    hr.logL_teff_plot(
+        teff[kmag_off], bollum[kmag_off], ls="", marker="d",
+        color=bc.red, axis=ax, label="M_K disagrees" )
+    ax.plot([bollum_points[0][0], bollum_points[1][0]], 
+             [bollum_points[0][1], bollum_points[1][1]], 'k-')
+    ax.set_xlabel("APOGEE Teff (K)")
+    ax.set_xlim(6500, 3500)
+    hr.invert_x_axis(ax)
+    plt.legend(loc="upper left")
+
+
+
+    # All of the targets in kmag/teff space.
+    plt.figure()
+    ax=plt.gca()
+    hr.absmag_teff_plot(
+        teff[matching_targets], kmag[matching_targets], ls="", marker=".",
+        color=bc.green, axis=ax, label="Match" )
+    hr.absmag_teff_plot(
+        teff[logg_off], kmag[logg_off], ls="", marker="*",
+        color=bc.orange, axis=ax, label="Log(g) disagrees" )
+    hr.absmag_teff_plot(
+        teff[bollum_off], kmag[bollum_off], ls="", marker="s",
+        color=bc.purple, axis=ax, label="Lbol disagrees" )
+    hr.absmag_teff_plot(
+        teff[kmag_off], kmag[kmag_off], ls="", marker="d",
+        color=bc.red, axis=ax, label="M_K disagrees" )
+    ax.plot([kmag_points[0][0], kmag_points[1][0]], 
+             [kmag_points[0][1], kmag_points[1][1]], 'k-')
+    ax.set_xlabel("APOGEE Teff (K)")
+    ax.set_ylabel("M_K")
+    ax.set_xlim(6500, 3500)
+    hr.invert_x_axis(ax)
+    hr.invert_y_axis(ax)
+    plt.legend(loc="upper left")
+    print(kmag[kmag_off])
 
