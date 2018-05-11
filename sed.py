@@ -351,6 +351,9 @@ class DSEPInterpolator(object):
         self.Y = Y
         self.afe = afe
         self.interpdicts = {}
+        self.lowT = lowT
+        self.highT = highT
+        self.minlogG = minlogG
 
     def teff_to_logg_interpolation(self, teffvals):
         '''Interpolate teffvals to corresponding log(g) on this isochrone.
@@ -400,9 +403,9 @@ class DSEPInterpolator(object):
 
         return radius
 
-    def teff_to_abs_mag(self, teffs, outmag, bands=1):
+    def teff_to_abs_mag(self, teffs, outmag, bands=1, branch="lower"):
         '''Convert Teff to an absolute magnitude.'''
-        logteff_to_mag = self._load_interpdict("LogTeff", outmag, branch="lower")
+        logteff_to_mag = self._load_interpdict("LogTeff", outmag, branch=branch)
         
         logteffvals = np.log10(teffs)
         try:
@@ -421,6 +424,41 @@ class DSEPInterpolator(object):
             raise
         return mags
 
+    def mass_to_abs_mag(self, masses, outmag, bands=1):
+        '''Convert a mass to an absolute magnitude.'''
+        mass_to_mag = self._load_interpdict("M/Mo", outmag)
+
+        try:
+            mags = mass_to_mag(masses)
+        except ValueError:
+            mass_inputs = _spline_x_data(mass_to_mag)
+            min_mass, max_mass = mass_inputs[0], mass_inputs[-1]
+            too_low = masses < min_mass
+            too_high = masses > max_mass
+            if np.count_nonzero(too_low):
+                print("Included masses are lower than {0:1f}".format(min_mass))
+            if np.count_nonzero(too_high):
+                print("Included masses are higher than {0:1f}".format(max_mass))
+            raise
+        return mags
+
+    def mass_to_teff(self, masses):
+        '''Convert a mass to an effective temperature.'''
+        mass_to_logTeff = self._load_interpdict("M/Mo", "LogTeff")
+
+        try:
+            teffs = 10**mass_to_logTeff(masses)
+        except ValueError:
+            mass_inputs = _spline_x_data(mass_to_logTeff)
+            min_mass, max_mass = mass_inputs[0], mass_inputs[-1]
+            too_low = masses < min_mass
+            too_high = masses > max_mass
+            if np.count_nonzero(too_low):
+                print("Included masses are lower than {0:1f}".format(min_mass))
+            if np.count_nonzero(too_high):
+                print("Included masses are higher than {0:1f}".format(max_mass))
+            raise
+        return teffs
 
     def _interp_bound_values(self, fromcol, tocol, branch="lower"):
         '''Get the boundary values the spline between the columns.'''
@@ -569,7 +607,9 @@ class DSEPInterpolator(object):
                 isotable = read_DSEP_isochrone(
                     self.feh, self.age, Y=self.Y, afe=self.afe, 
                     bands=band_num)
-                trimmed_table = restrict_interpolation_table(isotable)
+                trimmed_table = restrict_interpolation_table(
+                    isotable, highT=self.highT, lowT=self.lowT,
+                    minlogG=self.minlogG)
                 self.iso[band_num] = trimmed_table
         return trimmed_table
 
@@ -1798,6 +1838,27 @@ def mass_to_band_DSEP_interpolator(
 
     return interpolator
 
+def teff_to_mag_DSEP_interpolator(
+        band, age=1.5, metallicity=0.0, bands=1, Y=1, afe=2, lowT=3000,
+        redden_EBV=0.0, D=10, minlogg=4.1, highT=6000):
+    '''Return function to interpolate a magnitude for a given temperature.
+
+    This function returns an interpolator to map Teff and magnitude in the
+    given band.'''
+    star_table = restrict_interpolation_table(
+        read_DSEP_isochrone(metallicity, age, bands=bands, Y=Y, afe=afe), 
+        lowT=lowT, highT=highT)
+    band = DSEP_band_converter(band, bands)
+    bandmag = star_table[band]
+    logteff = star_table["LogTeff"]
+
+    interpolator = interp1d(logteff, bandmag, kind="linear",
+                            bounds_error=bound_error)
+    teff_to_mag = out_of_bounds_wrapper(
+        interpolator, "LogTeff", max(logteff), min(logteff))
+
+    return teff_to_mag_
+
 def mass_to_color_DSEP_interpolator(
     color, DSEP_lookup, age=1.5, metallicity=0.0, Y=1, afe=2,
     bound_error=True, lowT=3000, redden_EBV=0.0):
@@ -2085,6 +2146,40 @@ def DSEP_dwarf_radii(teffs, metallicities, alphas, age=2.0, lowTeff=3000,
             model_radii[i] = 10**interp(np.log10(masked_teffs[i]))
 
     return model_radii
+
+def DSEP_dwarf_mag(teffs, metallicities, alphas, mag, age=2.0, lowTeff=3000,
+                   highTeff=7000):
+    '''Calculate absolute K magnitudes from DSEP.
+
+    Using an isochrone of given age, calculate the absolute K magnitude of a
+    star given an effective temperature, metallicity, and alpha abundance.'''
+    # This may be complicated, so I wanna take it slow.
+    masked_teffs = np.ma.masked_equal(teffs, APOGEE_NULL)
+    masked_metallicities = np.ma.masked_equal(metallicities, APOGEE_NULL)
+    masked_alphas = np.ma.masked_equal(alphas, APOGEE_NULL)
+    mag_mask = au.multi_logical_or(
+        masked_teffs.mask, masked_metallicities.mask, masked_alphas.mask)
+    model_mags = np.ma.zeros(len(masked_teffs))
+    model_mags.mask = mag_mask
+
+    # These are the alpha/Fe bins that will be fed into DSEP.
+    alpha_binedges = np.arange(-0.1, 0.9, 0.2)
+    # a/Fe < -0.1 corresponds to 1, and a/Fe > 0.7 corresponds to 6.
+    alpha_bins = np.digitize(masked_alphas, alpha_binedges)+1
+    # DSEP should crash or something if the metallicity and alpha enhancement
+    # are not compatible. In particular, high alpha enhancements are only
+    # available for low metallicity stars. I want to ensure that this will be
+    # the case before running into weird DSEP bugs.
+    assert(np.all(np.logical_or(alpha_bins < 4, np.logical_and(
+        alpha_bins >= 4, masked_metallicities <= 0.0))))
+
+    rounded_metallicities = np.around(masked_metallicities, 2)
+    for i in range(len(model_mags)):
+        if not model_mags.mask[i]:
+            interp = teff_to_mag_DSEP_interpolator(
+                mag, age=age, metallicity=rounded_metallicities[i], afe=alpha_bins[i],
+                lowT=lowTeff, highT=highTeff)
+            model_mags[i] = 10**interp(np.log10(masked_teffs[i]))
 
 def DSEP_logg(teffs, metallicities, alphas, age=2.0, lowTeff=3000,
               highTeff=7000):
@@ -3378,7 +3473,7 @@ def plot_spline_test(spl, inv_x=False, inv_y=False):
     xdata = _spline_x_data(spl)
     ydata = _spline_y_data(spl)
 
-    testx = np.linspace(bbox[0], bbox[1], 200)
+    testx = np.linspace(bbox[0], bbox[1], 1000)
     testy = spl(testx)
 
     plt.plot(testx, testy, 'k-')
@@ -3467,7 +3562,7 @@ def ensure_array_increasing(xvals, yvals):
     sorted_xvals_indices = np.argsort(newxvals)
     sorted_xvals = newxvals[sorted_xvals_indices]
     sorted_yvals = newyvals[sorted_xvals_indices]
-    assert np.all(sorted_xvals_indices - np.arange(len(sorted_xvals)) < 3)
+    assert np.all(sorted_xvals_indices - np.arange(len(sorted_xvals)) < 4)
 
     return sorted_xvals, sorted_yvals
     

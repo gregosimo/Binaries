@@ -44,6 +44,8 @@ import biovis_colors as bc
 import data_splitting as data
 import sed
 import rotation_consistency as rot
+import observations as obs
+import read_catalog as catin
 
 ################################################################################
 # Generate binned distributions #
@@ -878,3 +880,182 @@ def check_evstate_classifications(teff, logg, bollum, kmag):
     plt.legend(loc="upper left")
     print(kmag[kmag_off])
 
+###############################################################################
+# Photometric binarity #
+###############################################################################
+
+def calc_DSEP_model_mags(teffs, fehs, mag, age=3):
+    '''A predicted absolute magnitude given teff.
+
+    For a variety of temperatures with associated metallicities, calculate the
+    absolute magnitude in a given band for each of those temperatures. The age
+    of the distribution can also be specified.'''
+    magarr = np.zeros(len(teffs))
+    # A dictionary referencing DSEP models according to metallicity.
+    DSEP_models = {}
+    rounded_metallicities = np.round(fehs*2, 1)/2
+    # What to do about -9999 or masked arrays
+    for i in range(len(rounded_metallicities)):
+        try:
+            dsep_interper = DSEP_models[rounded_metallicities[i]]
+        except KeyError:
+            dsep_interper = sed.DSEPInterpolator(
+                age, rounded_metallicities[i], highT=7000)
+
+        teffpoint = teffs[i]
+        try:
+            magarr[i] = dsep_interper.teff_to_abs_mag(teffpoint, mag)
+            assert fehs[i] - rounded_metallicities[i] < 0.05
+        # This will be called if the DSEP interpolator has one of the values
+        # being out of bounds.
+        except subprocess.CalledProcessError:
+            magarr[i] = np.nan
+        else:
+            assert teffpoint > 0
+
+    return magarr
+
+def calc_photometric_excess(teffs, fehs, mag, photvals, age=3):
+    '''Calculate the photometric excess above a given isochrone.
+
+    Calculate the magnitude difference between photvals and an isochrone
+    solution for the given teff, [Fe/H] and age for the given mag.'''
+    DSEPmags = calc_DSEP_model_mags(teffs, fehs, mag, age=age)
+    magdiff = photvals - DSEPmags
+
+    return magdiff
+
+def plot_photometric_binary_excess(teffs, fehs, mag, photvals, age=3):
+    '''Plot the photometric excess for a sample of main-sequence targets.
+
+    Plot the magnitude difference between photvals and an isochrone solution
+    for the given teff, [Fe/H], and age for the given absolute magnitude.'''
+    magdiff = calc_photometric_excess(teffs, fehs, mag, photvals, age=age)
+    phot_binary_div_points = [(5427, -0.60), (3946, -0.14)]
+    dividing_line = (phot_binary_div_points[0][1] + 
+        (phot_binary_div_points[0][1] - phot_binary_div_points[1][1]) /
+        (phot_binary_div_points[0][0] - phot_binary_div_points[1][0]) *
+        (teffs - phot_binary_div_points[0][0]))
+    phot_binary_indices = magdiff < dividing_line
+
+    hr.absmag_teff_plot(
+        teffs[~phot_binary_indices], magdiff[~phot_binary_indices], marker=".", 
+        color=bc.black, ls="", label="Single Stellar locus")
+    hr.absmag_teff_plot(
+        teffs[phot_binary_indices], magdiff[phot_binary_indices], marker=".", 
+        color=bc.red, ls="", label="Photometric Binaries")
+    hr.absmag_teff_plot(teffs, dividing_line, ls="-", color=bc.black, marker="")
+    plt.xlim(5500, 3500)
+    plt.ylim(0.3, -2.2)
+    plt.xlabel("Teff (K)")
+    plt.ylabel("M_{0}-DSEP M_{0}".format(mag))
+    plt.legend(loc="upper right")
+
+def mcquillan_rapid_rotator_binarity():
+    '''Plot rapid rotators in a CMD.'''
+    mcq = catin.mcquillan_with_stelparms()
+    mcq["M_K"] = mcq["kmag"] - 5 * np.log10(mcq["dis"]/10)
+
+    rapid_rotators = mcq[np.logical_and(mcq["Prot"] < 5, mcq["Prot"] > 1)]
+    very_rapid = mcq[mcq["Prot"] < 1]
+
+    mdm_rv_var = [11819949, 12736892, 3248885]
+    mdm_targets = obs.select_observing_targets(30)
+    mdm_mcq = au.extract_subtable_from_column(
+        mcq, "kepid", mdm_targets["kepid"])
+    mdm_rvvar = au.extract_subtable_from_column(mdm_mcq, "kepid", mdm_rv_var)
+
+    # Include the APOGEE variable-nonvariable targets.
+    mcq_observing = catalog.select_tidally_synchronized_binaries(
+        mcq, pcut=5, lowperiod=1, lowtemp=4850, hightemp=5600, logg=3.5,
+        teffcol="teff", pcol="Prot", loggcol="logg")
+
+    mcq_observing = catalog.filter_pulsators(mcq_observing, KICcol="KIC")
+
+    apogee = catin.mcquillan_dr14_overlap()
+    mcq_observing = catalog.join_by_2MASS_key(
+        mcq_observing, apogee, "tm_designation", "tm_designation", 
+        join_type="left", conflict_suffixes=("_KIC", "_APOGEE"))
+    del(apogee)
+    
+    # Remove APOGEE giants
+    autodwarfs = mcq_observing["LOGG"] < 0
+    mcq_observing["LOGG"][mcq_observing["LOGG"] < 0] = 9999.0
+    mcq_observing = catalog.perform_logg_cut(
+        mcq_observing, lowlogg=3.5, loggcol="LOGG")
+    mcq_observing["LOGG"][mcq_observing["LOGG"] == 9999.0] = -9999.0
+
+    # Remove objects which are already observed to be RV variable
+    mcq_observing["VSCATTER"] = mcq_observing["VSCATTER"].filled(-9999.0)
+    apo_var = catalog.perform_vscatter_cut(
+        mcq_observing, lowv=1, vcol="VSCATTER")
+    mcq_observing = catalog.perform_vscatter_cut(
+        mcq_observing, highv=1, vcol="VSCATTER")
+    print(len(apo_var))
+    mcq_observing["VSCATTER"] = np.ma.masked_values(mcq_observing["VSCATTER"],
+                                                 -9999.0)
+    
+    # Remove objects which have been observed enough to indicate non
+    # RV-variability.
+    mcq_observing["NVISITS"] = mcq_observing["NVISITS"].filled(0)
+    apo_nonvar = catalog.perform_cut(mcq_observing, "NVISITS", lowval=4,
+                                     invert_inequality=True)
+    mcq_observing = catalog.perform_cut(mcq_observing, "NVISITS", highval=4)
+    mcq_observing["NVISITS"] = np.ma.masked_values(mcq_observing["NVISITS"], 0)
+
+    hr.absmag_teff_plot(
+        mcq["teff"], mcq["M_K"], color=bc.black, marker=".", ls="", 
+        label="Full McQuillan")
+    hr.absmag_teff_plot(
+        rapid_rotators["teff"], rapid_rotators["M_K"], color=bc.pink, 
+        marker="d", ls="", label="1 day < Prot < 5 day")
+    hr.absmag_teff_plot(
+        very_rapid["teff"], very_rapid["M_K"], color=bc.purple,
+        marker="d", ls="", label="Prot < 1 day")
+
+    hr.absmag_teff_plot(
+        mdm_mcq["teff"], mdm_mcq["M_K"], color=bc.blue, marker="*", ls="",
+        label="MDM Nonvariable", ms=9)
+    hr.absmag_teff_plot(
+        mdm_rvvar["teff"], mdm_rvvar["M_K"], color=bc.sky_blue, marker="*", 
+        ls="", label="MDM Variable", ms=9)
+    hr.absmag_teff_plot(
+        apo_nonvar["teff"], apo_nonvar["M_K"], color=bc.blue, marker="^", ls="",
+        label="APOGEE Nonvariable", ms=9)
+    hr.absmag_teff_plot(
+        apo_var["teff"], apo_var["M_K"], color=bc.sky_blue, marker="^", 
+        ls="", label="APOGEE Variable", ms=9)
+
+    plt.xlabel("Huber Teff (K)")
+    plt.ylabel("M_K")
+    plt.legend(loc="upper right")
+
+###############################################################################
+# Check uncertainties #
+###############################################################################
+
+def compare_abs_mag_composite_uncertainties(
+        teffs, sigK, highdist, lowdist, dist):
+    '''Compare the uncertainties of k-band photometry gaia distances.
+    
+    Plot the k-band variance vs the variance due to the uncertainty in the
+    distance.'''
+    plt.plot(teffs, (sigK)**2, color=bc.orange, marker="o", ls="")
+    plt.plot(teffs, (5*(highdist + lowdist)/dist/np.log(10)/2)**2,
+             color=bc.purple, marker="d", ls="")
+    hr.invert_x_axis()
+    plt.xlabel("Teff (K)")
+    plt.ylabel("Variance")
+
+def compare_observed_age_uncertainties(
+        MKhi, MKlow, teffs, lowage=1, highage=10):
+    plt.plot(teffs, (MKhi + MKlow)/2, color=bc.black, marker="o", ls="")
+    highmag = calc_DSEP_model_mags(teffs, np.zeros(len(teffs)), "Ks", age=highage)
+    lowmag = calc_DSEP_model_mags(teffs, np.zeros(len(teffs)), "Ks", age=lowage)
+    ageerr = lowmag - highmag
+    sortindices = np.argsort(teffs)
+    plt.plot(teffs[sortindices], ageerr[sortindices], color=bc.red, marker="", 
+             ls="-")
+
+    
+    
