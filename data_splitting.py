@@ -596,6 +596,39 @@ class KeplerSplitter(DataSplitter):
                     unclassified_indices]
         self._setup_indices(splitnames, indexarr, crit)
 
+    def split_mk_evstate(
+            self, teff_col="TEFF", mk_col="M_K", 
+            giant_subgiant_points=[(5000, 0.7), (3500, 0.7)],
+            subgiant_dwarf_points=[(5015, 2.4), (5625, 2.4)], 
+            splitnames=("Giant", "Subgiant", "Dwarf", "NO_EV"), 
+            crit="APOGEE Evolutionary State"):
+        '''Split the cool dwarf sample into evolutionary states using M_K.
+
+        Split the catalog according to the K-band absolute magnitude.'''
+        self.split_evstate(
+            teff_col=teff_col, logg_col=mk_col,
+            giant_subgiant_points=giant_subgiant_points,
+            subgiant_dwarf_points=subgiant_dwarf_points, splitnames=splitnames,
+            crit=crit)
+
+    def split_Berger_evstate(
+            self, class_col="class", splitnames=(
+                "Berger Giant", "Berger Subgiant", "Berger Main Sequence", 
+                "Berger Cool Binary"), crit="Berger Evolutionary State"):
+        '''Split sample according to the evolutionary state in Berger (2018).
+
+        Berger et al (2018) classified objects in the Teff-Luminosity plane as
+        being giants, subgiants, main sequence dwarfs, and binaries on the cool
+        end, where the main sequence splits from subgiants.'''
+        dwarf_indices = self.data[class_col] == 0
+        subgiant_indices = self.data[class_col] == 1
+        giant_indices = self.data[class_col] == 2
+        binary_indices = self.data[class_col] == 3
+
+        indexarr = [giant_indices, subgiant_indices, dwarf_indices,
+                    binary_indices]
+        self._setup_indices(splitnames, indexarr, crit)
+
 class McQuillanSplitter(KeplerSplitter):
     '''Keep an organized database of various cuts on McQuillan data.'''
 
@@ -665,22 +698,8 @@ class GaiaSplitter(KeplerSplitter):
         indexarr = [good_indices, bad_indices, no_parallax_indices]
         self._setup_indices(splitnames, indexarr, crit)
 
-    def split_mk_evstate(
-            self, teff_col="TEFF", mk_col="M_K", 
-            giant_subgiant_points=[(5000, 0.7), (3500, 0.7)],
-            subgiant_dwarf_points=[(5015, 2.34), (5625, 2.46)], 
-            splitnames=("Giant", "Subgiant", "Dwarf", "NO_EV"), 
-            crit="APOGEE Evolutionary State"):
-        '''Split the cool dwarf sample into evolutionary states using M_K.
 
-        Split the catalog according to the K-band absolute magnitude.'''
-        self.split_evstate(
-            teff_col=teff_col, logg_col=mk_col,
-            giant_subgiant_points=giant_subgiant_points,
-            subgiant_dwarf_points=subgiant_dwarf_points, splitnames=splitnames,
-            crit=crit)
-
-class APOGEESplitter(GaiaSplitter):
+class APOGEESplitter(KeplerSplitter):
     '''Keep an organized database of various cuts on APOGEE data.'''
 
     def __init__(self, data=None, splitgroups=None, indices=None, 
@@ -1093,10 +1112,15 @@ def initialize_general_APOGEE(aposplit):
 
     aposplit.split_dlsb()
 
-    aposplit.split_parallax_quality()
-
+    # Absolute K-band magnitude
     aposplit.data["M_K"] = (
-        aposplit.data["K"] - 5 * np.log10(aposplit.data["parallax"]/100))
+        aposplit.data["K"] - 5 * np.log10(aposplit.data["dis"]/10))
+    aposplit.data["M_K_err1"] = aposplit.data["K_ERR"]**2 + (
+        5 * (aposplit.data["disem"]) / aposplit.data["dis"] / np.log(10))**2
+    aposplit.data["M_K_err2"] = aposplit.data["K_ERR"]**2 + (
+        5 * (aposplit.data["disep"]) / aposplit.data["dis"] / np.log(10))**2
+
+    aposplit.split_Berger_evstate()
 
 def initialize_cool_KICs(kicsplit):
     '''Initialize cool dwarfs that have KIC values.'''
@@ -1108,15 +1132,15 @@ def initialize_cool_KICs(kicsplit):
         teff_crit="KIC Teff")
     kicsplit.split_logg("log(g)", 4.0, ("Jen Giant", "Jen Dwarf"),
                            logg_crit="KIC logg")
-#   kicsplit.split_logg("LOGG_FIT", [3.5, 4.2], ("Giant", "Subgiant", "Dwarf"))
+
     kicsplit.split_mk_evstate(crit="Subgiant Split")
     # I want to split by the huber log(g)s as well.
-    kicsplit.split_evstate(
-        teff_col="teff", logg_col="logg", 
-        giant_subgiant_points=[(5000, 3.5), (3500, 3.5)], 
-        subgiant_dwarf_points=[(5690, 4.2), (4640, 4.2)], splitnames=(
-            "Huber giants", "Huber subgiants", "Huber dwarfs", "No Huber EV"), 
-        crit="Huber evolutionary state")
+    kicsplit.split_logg_evstate(
+        teff_col="TEFF", logg_col="LOGG_FIT", 
+        splitnames=(
+            "APOGEE Giant", "APOGEE Subgiant", "APOGEE Dwarf", "No APOGEE EV"), 
+        crit="APOGEE evolutionary state")
+    
     kicsplit.split_cool_dwarfs()
 
 def initialize_asteroseismic_sample(aposplit):
@@ -1125,6 +1149,10 @@ def initialize_asteroseismic_sample(aposplit):
     This will set aside the asteroseismic dwarfs from the rest of the sample.'''
     # First split the asteroseismic targets
     aposplit.split_asteroseismic_dwarfs()
+
+    # Split between hot and cool
+    aposplit.split_teff(
+        "TEFF_COR", 5500, ("Cool", "Hot"), teff_crit="APOGEE Teff")
 
     # Now split the spectroscopic targets
     aposplit.split_logg("LOGG_FIT", [3.5, 4.0], (
@@ -1143,6 +1171,11 @@ def initialize_asteroseismic_sample(aposplit):
 
     # Split by McQuillan Periods
     aposplit.split_McQuillan_periods(kiccol=aposplit.kic_col)
+
+    aposplit.data["M_K"] = (
+        aposplit.data["K_MAG_2M"] - 5 * np.log10(aposplit.data["dis"]/10))
+
+    aposplit.split_Berger_evstate()
 
 def initialize_mcquillan_sample(mcqsplit):
     '''Makes a series of cuts related to the rotation period of the targets.'''

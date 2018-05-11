@@ -245,6 +245,18 @@ def read_Gaia_DR2_Kepler(gaia_dr2_kep_path=paths.GAIA_DR2_KEPLER_OVERLAP):
 
     return dr2
 
+def read_Berger_DR2_Kepler(berger_dr2_kep=paths.BERGER_DR2_KEPLER):
+    '''Read in the Gaia parameters in Berger et al (2018).'''
+    desired_cols = [
+        "KIC", "source_id", "dis", "disep", "disem", "rad", "radep", "radem", 
+        "class\\\\"]
+    berger = Table.read(berger_dr2_kep, format="ascii.csv",
+                        include_names=desired_cols, delimiter="&")
+    berger.rename_column("class\\\\", "class")
+    berger["class"] = np.asarray(npstr.replace(berger["class"], "\\\\", ""),
+                                 dtype=np.int)
+    return berger
+
 def APOGEE_TGAS(tgas_kep_path=paths.TGAS_KEPLER_OVERLAP,
                 apopath=paths.DR14_ALLSTAR_PATH):
     '''Read in stars observed in both APOGEE and TGAS.'''
@@ -490,14 +502,16 @@ def read_Geller_M67(geller=paths.HEAD_DIR / "aj518354t2_mrt.txt"):
 
 @au.shortcut_file(paths.SHORTCUT_MCQUILLAN_STELLPARM)
 def mcquillan_with_stelparms(
-    mcq_path=paths.MCQUILLAN_CATALOG, kic_path=paths.KIC_CATALOG):
+    mcq_path=paths.MCQUILLAN_CATALOG, kic_path=paths.KIC_CATALOG,
+        gaia_path=paths.GAIA_DR2_KEPLER_OVERLAP):
     '''Read McQuillan catalog with full KIC stellar parameters.
 
     Read in the McQuillan detections along with the KIC DR25 stellar
     parameters.
     '''
     mcq = read_McQuillan_catalog(mcq_path)
-    stellcat = read_KIC_DR25_catalog(kic_path)
+    stellcat = stelparms_with_Gaia(kic_path, gaia_path)
+    del(stellcat["KIC"])
     mcquillancat = au.join_by_id(
         mcq, stellcat, "KIC", "kepid", join_type="left")
     trim_McQuillan_catalog(mcquillancat)
@@ -712,15 +726,14 @@ def stelparms_triple_KIC(
     pinsonneaultcat = read_Pinsonneault_2012_catalog(pinpath)
     joinedcat = au.join_by_id(
         hubercat, pinsonneaultcat, "kepid", "KIC", join_type="left")
-    del(joinedcat["KIC"])
     return joinedcat
 
 def stelparms_with_Gaia(
         parmpath=paths.KIC_CATALOG, gaiapath=paths.GAIA_DR2_KEPLER_OVERLAP):
     kiccat = read_KIC_DR25_catalog(parmpath)
-    gaiacat = read_Gaia_DR2_Kepler(gaiapath)
+    gaiacat = read_Berger_DR2_Kepler()
 
-    joinedcat = au.join_by_id(kiccat, gaiacat, "kepid", "kepid")
+    joinedcat = au.join_by_id(kiccat, gaiacat, "kepid", "KIC")
     return joinedcat
 
 ###########
