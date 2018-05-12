@@ -961,6 +961,60 @@ class APOGEESplitter(KeplerSplitter):
 
         self._setup_complement_index(splitnames, full_sample, cool_crit)
 
+    def split_modified_Berger_EVstate(
+            self, teff_col="TEFF", feh_col="FE_H", MK_col="M_K", class_col="class",
+            cool_limit=5500, splitnames=(
+                "Berger Giant", "Berger Subgiant", 
+                "Modified Berger Main Sequence", "Modified Berger Cool Binary"), 
+            crit="Modified Berger Evolutionary State"):
+        '''Split sample according to the evolutionary state in Berger (2018).
+
+        Berger et al (2018) classified objects in the Teff-Luminosity plane as
+        being giants, subgiants, main sequence dwarfs, and binaries on the cool
+        end, where the main sequence splits from subgiants.
+        
+        This scheme modifies the original Berger classification by performing a
+        color-dependent cut on the K-band magnitude excess '''
+        fulldwarf_indices = np.logical_or(
+            self.data[class_col] == 0, self.data[class_col] == 3)
+        subgiant_indices = self.data[class_col] == 1
+        giant_indices = self.data[class_col] == 2
+
+        # We can only classify photometric binaries cooler than cool_limit.
+        # Also classify bad objects according to the original Berger
+        # classification.
+        cool_dwarf_indices = np.logical_and(
+            fulldwarf_indices, np.logical_and(
+                self.data[teff_col] > 0, self.data[teff_col] < 5500))
+
+        magdiff = samp.calc_photometric_excess(
+            self.data[teff_col][cool_dwarf_indices],
+            self.data[feh_col][cool_dwarf_indices], "Ks",
+            self.data[MK_col][cool_dwarf_indices], age=3)
+        phot_binary_div_points = [(5427, -0.60), (3946, -0.14)]
+        dividing_line = (phot_binary_div_points[0][1] + 
+            (phot_binary_div_points[0][1] - phot_binary_div_points[1][1]) /
+            (phot_binary_div_points[0][0] - phot_binary_div_points[1][0]) *
+            (self.data[teff_col][cool_dwarf_indices] - 
+             phot_binary_div_points[0][0]))
+        phot_binary_indices = magdiff < dividing_line
+
+        dwarf_indices = np.zeros(len(cool_dwarf_indices))
+        binary_indices = np.zeros(len(cool_dwarf_indices))
+        dwarf_indices[cool_dwarf_indices] = ~phot_binary_indices
+        binary_indices[cool_dwarf_indices] = phot_binary_indices
+        # Add in objects with bad APOGEE fits
+        dwarf_indices = np.logical_or(dwarf_indices, np.logical_and(
+            self.data[teff_col] <= 0, self.data[class_col] == 0))
+        binary_indices = np.logical_or(binary_indices, np.logical_and(
+            self.data[teff_col] <= 0, self.data[class_col] == 3))
+        # Add back hot dwarfs
+        dwarf_indices = np.logical_or(dwarf_indices, np.logical_and(
+            fulldwarf_indices, self.data[teff_col] > 5500))
+        indexarr = [giant_indices, subgiant_indices, dwarf_indices,
+                    binary_indices]
+        self._setup_indices(splitnames, indexarr, crit)
+
 
     def subsample_len(self, namelist):
         '''Get the size of a subsample.
@@ -1119,8 +1173,14 @@ def initialize_general_APOGEE(aposplit):
         5 * (aposplit.data["disem"]) / aposplit.data["dis"] / np.log(10))**2
     aposplit.data["M_K_err2"] = aposplit.data["K_ERR"]**2 + (
         5 * (aposplit.data["disep"]) / aposplit.data["dis"] / np.log(10))**2
+    # Problems with masked data.
+    # This is probably something that can be fixed upstream...
+    if aposplit.data["M_K_err1"].mask == False:
+        aposplit.data["M_K_err1"].mask = np.zeros(len(aposplit.data), dtype=bool)
+    if aposplit.data["M_K_err2"].mask == False:
+        aposplit.data["M_K_err2"].mask = np.zeros(len(aposplit.data), dtype=bool)
 
-    aposplit.split_Berger_evstate()
+    aposplit.split_modified_Berger_EVstate()
 
 def initialize_cool_KICs(kicsplit):
     '''Initialize cool dwarfs that have KIC values.'''
@@ -1175,7 +1235,7 @@ def initialize_asteroseismic_sample(aposplit):
     aposplit.data["M_K"] = (
         aposplit.data["K_MAG_2M"] - 5 * np.log10(aposplit.data["dis"]/10))
 
-    aposplit.split_Berger_evstate()
+    aposplit.split_modified_Berger_EVstate()
 
 def initialize_mcquillan_sample(mcqsplit):
     '''Makes a series of cuts related to the rotation period of the targets.'''
