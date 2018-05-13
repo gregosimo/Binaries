@@ -1232,8 +1232,19 @@ def initialize_asteroseismic_sample(aposplit):
     # Split by McQuillan Periods
     aposplit.split_McQuillan_periods(kiccol=aposplit.kic_col)
 
+    # Absolute K-band magnitude
     aposplit.data["M_K"] = (
         aposplit.data["K_MAG_2M"] - 5 * np.log10(aposplit.data["dis"]/10))
+    aposplit.data["M_K_err1"] = aposplit.data["K_MAG_ERR"]**2 + (
+        5 * (aposplit.data["disem"]) / aposplit.data["dis"] / np.log(10))**2
+    aposplit.data["M_K_err2"] = aposplit.data["K_MAG_ERR"]**2 + (
+        5 * (aposplit.data["disep"]) / aposplit.data["dis"] / np.log(10))**2
+    # Problems with masked data.
+    # This is probably something that can be fixed upstream...
+    if aposplit.data["M_K_err1"].mask == False:
+        aposplit.data["M_K_err1"].mask = np.zeros(len(aposplit.data), dtype=bool)
+    if aposplit.data["M_K_err2"].mask == False:
+        aposplit.data["M_K_err2"].mask = np.zeros(len(aposplit.data), dtype=bool)
 
     aposplit.split_modified_Berger_EVstate()
 
