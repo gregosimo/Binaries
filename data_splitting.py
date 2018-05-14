@@ -1246,7 +1246,7 @@ def initialize_asteroseismic_sample(aposplit):
     if aposplit.data["M_K_err2"].mask == False:
         aposplit.data["M_K_err2"].mask = np.zeros(len(aposplit.data), dtype=bool)
 
-    aposplit.split_modified_Berger_EVstate()
+    aposplit.split_modified_Berger_EVstate(teff_col="TEFF_COR")
 
 def initialize_mcquillan_sample(mcqsplit):
     '''Makes a series of cuts related to the rotation period of the targets.'''

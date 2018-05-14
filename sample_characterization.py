@@ -198,7 +198,8 @@ def phot_rapid_rotator_fraction_spec_detection(periods, radii, vsini_limits):
     return frac
 
 def spectroscopic_photometric_rotation_fraction_comparison_plot(
-        vsinis, periods, radii, min_limit=5, max_limit=20):
+        vsinis, periods, radii, min_limit=5, max_limit=20, color=bc.black,
+        label=""):
     '''Plot spectroscopic and corresponding photometric rapid rotator fractions.
 
     Plot the spectroscopic rapid rotator fraction accepting detection limits
@@ -208,20 +209,19 @@ def spectroscopic_photometric_rotation_fraction_comparison_plot(
     vsini_bins = np.arange(min_limit, max_limit+2)
     # I want to make sure the whole sample is counted within the histogram. So
     # I set the bin edges to be an interval which encompasses the full sample. 
-    bin_edges = np.insert(
-        vsini_bins, [0, len(vsini_bins)], [min(vsinis), max(vsinis)])
-    # I haven't fully planned what behavior would occur if the vsini bin range
-    # is larger than the range of vsinis.
+    bin_edges = vsini_bins
+    bin_edges = np.insert(bin_edges, 0, min(vsinis))
+    if vsini_bins[-1] < max(vsinis):
+        bin_edges = np.insert(bin_edges, len(bin_edges), max(vsinis))
     assert vsini_bins[0] > min(vsinis)
-    assert vsini_bins[-1] < max(vsinis)
 
     bindiff = vsini_bins[1] - vsini_bins[0]
     assert np.all(np.diff(vsini_bins) == bindiff)
     ax1 = plt.gca()
     spec_hist, bins = np.histogram(vsinis, bins=bin_edges, density=False)
     spec_cumhist = np.cumsum(spec_hist) / len(vsinis)
-    ax1.step(bins[:-1]+bindiff/2, spec_cumhist, where="post", color=bc.black,
-             label="Spectroscopic")
+    ax1.step(bins[:-1]+bindiff/2, spec_cumhist, where="post", color=color,
+             label="{0} Spectroscopic".format(label), linestyle="-")
         
     upper_rapid_frac = (au.binomial_upper(
         spec_cumhist*len(vsinis), len(vsinis)) - spec_cumhist)
@@ -232,8 +232,8 @@ def spectroscopic_photometric_rotation_fraction_comparison_plot(
     vel_periods = rot.period_to_velocities(periods, radii)
     phot_hist, bins = np.histogram(vel_periods, bins=bin_edges, density=False)
     phot_cumhist = np.cumsum(phot_hist) / len(vel_periods)
-    ax1.step(bins[:-1]+bindiff/2, phot_cumhist, where="post", color=bc.red,
-             label="Photometric")
+    ax1.step(bins[:-1]+bindiff/2, phot_cumhist, where="post", color=color,
+             label="{0} Photometric".format(label), linestyle='--')
 
     upper_phot_rapid_frac = (au.binomial_upper(
         phot_cumhist*len(vel_periods), len(vel_periods)) - phot_cumhist)
@@ -243,24 +243,14 @@ def spectroscopic_photometric_rotation_fraction_comparison_plot(
         lower_phot_rapid_frac, upper_phot_rapid_frac])
 
     bin_mean = vsini_bins
-    ax1.errorbar(bin_mean, spec_cumhist[:-1], yerr=rapid_frac_errs[:,:-1], 
-                 color=bc.black, linestyle="None", capsize=4) 
-    ax1.errorbar(bin_mean, phot_cumhist[:-1], yerr=phot_rapid_frac_errs[:,:-1], 
-                 color=bc.red, capsize=4, linestyle="None")
-    ax2 = ax1.twinx()
-    ticks = ax1.get_yticks()
-    print(ticks)
-    fracticks = 1 - ticks
-    print(fracticks)
-    ax2.set_yticks(ticks)
-    ax2.set_yticklabels(fracticks)
-    ax1.set_xlim(min_limit-bindiff/2, max_limit+bindiff/2)
-    ax2.set_xlim(min_limit-bindiff/2, max_limit+bindiff/2)
-    ax1.set_ylabel(r"$N (< v \sin i) / N$")
-    ax1.set_xlabel(r"$v \sin i$")
-    ax2.set_ylabel("Rapid Rotator Fraction")
-    ax2.set_ylim(0.7, 1.0)
-    plt.sca(ax1)
+    ax1.errorbar(
+        bin_mean, spec_cumhist[:len(bin_mean)], 
+        yerr=rapid_frac_errs[:,:len(bin_mean)], color=color, linestyle="None", 
+        capsize=4) 
+    ax1.errorbar(
+        bin_mean, phot_cumhist[:len(bin_mean)], 
+        yerr=phot_rapid_frac_errs[:,:len(bin_mean)], color=color, capsize=4, 
+        linestyle="None")
 
 def plot_rapid_rotation_detection_limits(
         vsinis, min_limit=5, max_limit=20, color=bc.black, label="", ls="-"):
@@ -275,12 +265,11 @@ def plot_rapid_rotation_detection_limits(
     vsini_bins = np.arange(min_limit, max_limit+2)
     # I want to make sure the whole sample is counted within the histogram. So
     # I set the bin edges to be an interval which encompasses the full sample. 
-    bin_edges = np.insert(
-        vsini_bins, [0, len(vsini_bins)], [min(vsinis), max(vsinis)])
-    # I haven't fully planned what behavior would occur if the vsini bin range
-    # is larger than the range of vsinis.
+    bin_edges = vsini_bins
+    bin_edges = np.insert(bin_edges, 0, min(vsinis))
+    if vsini_bins[-1] < max(vsinis):
+        bin_edges = np.insert(bin_edges, len(bin_edges), max(vsinis))
     assert vsini_bins[0] > min(vsinis)
-    assert vsini_bins[-1] < max(vsinis)
 
     bindiff = vsini_bins[1] - vsini_bins[0]
     assert np.all(np.diff(vsini_bins) == bindiff)
@@ -298,8 +287,10 @@ def plot_rapid_rotation_detection_limits(
 
 
     bin_mean = vsini_bins
-    ax1.errorbar(bin_mean, spec_cumhist[:-1], yerr=rapid_frac_errs[:,:-1], 
-                 color=color, linestyle="None", capsize=4) 
+    ax1.errorbar(
+        bin_mean, spec_cumhist[:len(bin_mean)],
+        yerr=rapid_frac_errs[:,:len(bin_mean)], color=color, linestyle="None", 
+        capsize=4) 
 
 ###############################################################################
 # Comparing KIC values #

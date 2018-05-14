@@ -662,7 +662,8 @@ def compare_rotation_velocity_radius(
 
 def plot_vsini_velocity(
     vsini, period, radii, raderr_below, raderr_above, color='k', ax=None, 
-        vsini_fracerr=0.15, label="", xticks=10, yticks=10, sini_label=True):
+        vsini_fracerr=0.15, label="", xticks=10, yticks=10, sini_label=True,
+        marker="*"):
     '''Make a plot of vsini vs velocity.
 
     Vsini will be on the y-axis while velocity will be on the x-axis. The
@@ -676,7 +677,7 @@ def plot_vsini_velocity(
 
     ax.errorbar(
         infvel, vsini, xerr=[-downvel, upvel], yerr=vsini_fracerr*vsini/2, 
-        color=color, ls="None", marker="*")
+        color=color, ls="None", marker=marker)
     au.adjust_axes(ax, 0, infvel+upvel, 0, vsini*(1+vsini_fracerr/2),
                    xticks, yticks)
     min_x, max_x = ax.get_xlim()
@@ -720,18 +721,20 @@ def plot_vsini_velocity(
 
 def plot_rotation_radius(
         vsini, period, radii, raderr_below, raderr_above, color="k", ax=None,
-        vsini_fracerr=0.15, label="", xticks=0.2, yticks=1, sini_label=True):
+        vsini_fracerr=0.15, label="", xticks=0.2, yticks=1, sini_label=True,
+        marker="*"):
     '''Plot the radius against inferred radius.
     
     Radius will be on the y-axis while inferred radius will be on the x-axis.'''
     if not ax:
-        ax = plt.subplots(111, figsize=(5,5))
+        ax = plt.subplots(111, figsize=(10,10))
 
     inferred_radii = rotation_radius(vsini, period)
 
     ax.errorbar(
         inferred_radii, radii, yerr=[-raderr_below, raderr_above],
-        xerr=vsini_fracerr*inferred_radii/2, color=color, ls="None", marker="*")
+        xerr=vsini_fracerr*inferred_radii/2, color=color, ls="None",
+        marker=marker)
     au.adjust_axes(ax, 0, inferred_radii+raderr_above, 0, 
                    radii*(1+vsini_fracerr/2), xticks, yticks)
     min_x, max_x = ax.get_xlim()
@@ -739,11 +742,14 @@ def plot_rotation_radius(
     # Show sini = 1 and sini = 1/2.
     med_x = min_x + 0.8*(max_x - min_x)
     med_y = min_y + 0.8*(max_y - min_y)
-    if max_y > max_x:
+    if max_y < max_x:
         bound_point = max_x, max_x
     else:
         bound_point = max_y, max_y
     ax.plot([0, bound_point[0]], [0, bound_point[1]], 'k-', lw=3)
+    ax.fill_between([0, bound_point[0]], [0, 0], 
+                    [0, bound_point[1]], hatch="\\", facecolor="white",
+                    edgecolor="gray")
 
     if max_y > max_x/2:
         half_bound = max_x/2, max_x
@@ -772,7 +778,8 @@ def plot_rotation_radius(
 
 def plot_rotation_period(
         vsini, period, radii, raderr_below, raderr_above, color="k", ax=None,
-        vsini_fracerr=0.15, label="", xticks=0.2, yticks=1, sini_label=True):
+        vsini_fracerr=0.15, label="", xticks=0.2, yticks=1, sini_label=True,
+        marker="*"):
     '''Plot the radius against inferred radius.
     
     Radius will be on the y-axis while inferred radius will be on the x-axis.'''
@@ -802,7 +809,7 @@ def plot_rotation_period(
     ax.errorbar(
         inferred_period, period, 
         xerr=[-inferred_period_err_down, inferred_period_err_up], color=color,
-        ls="None", marker="*")
+        ls="None", marker=marker)
     au.adjust_axes(
         ax, 0, inferred_period+inferred_period_err_up, 0,
         inferred_period*(1+vsini_fracerr/2), xticks, yticks)
@@ -815,6 +822,9 @@ def plot_rotation_period(
         bound_point = max_x, max_x
     else:
         bound_point = max_y, max_y
+    ax.fill_between([0, bound_point[0]], [max_y, max_y], 
+                    [0, bound_point[1]], hatch="\\", facecolor="white",
+                    edgecolor="gray")
     ax.plot([0, bound_point[0]], [0, bound_point[1]], 'k-', lw=3)
 
     if max_y/2 > max_x:
@@ -844,14 +854,14 @@ def plot_rotation_period(
 
 def plot_rotation_velocity_radius(
         vsini, period, radii, raderr_below, raderr_above, color="k",
-        subplot_tup=None, label=""):
+        subplot_tup=None, label="", marker="*"):
     '''Make a 3-paneled figure comparing measured and inferred radii.
 
     This function plots vsini vs inferred v, radius vs inferred rsini, and
     period vs inferred P/sini. It assumes the inputted data already contain the
     necessary cuts.'''
     if not subplot_tup:
-        subplot_tup = plt.subplots(1, 3, figsize=(15, 5))
+        subplot_tup = plt.subplots(1, 3, figsize=(30, 10))
         label_sini = True
     else:
         label_sini = False
@@ -861,17 +871,17 @@ def plot_rotation_velocity_radius(
     plot_vsini_velocity(
         vsini, period, radii, raderr_below, raderr_above, ax=ax1, 
         vsini_fracerr=vsini_fractional_error, xticks=10, yticks=10,
-        color=color, sini_label=label_sini)
+        color=color, sini_label=label_sini, marker=marker)
 
     plot_rotation_radius(
         vsini, period, radii, raderr_below, raderr_above, ax=ax2, 
         vsini_fracerr=vsini_fractional_error, xticks=1, yticks=0.2,
-        color=color, sini_label=False)
+        color=color, sini_label=False, marker=marker)
 
     plot_rotation_period(
         vsini, period, radii, raderr_below, raderr_above, ax=ax3, 
         vsini_fracerr=vsini_fractional_error, xticks=0.5, yticks=5,
-        color=color, sini_label=False)
+        color=color, sini_label=False, marker=marker)
 
     return subplot_tup
 
