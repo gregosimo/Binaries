@@ -931,11 +931,27 @@ def plot_photometric_binary_excess(teffs, fehs, mag, photvals, age=3):
 
     hr.absmag_teff_plot(
         teffs[~phot_binary_indices], magdiff[~phot_binary_indices], marker=".", 
-        color=bc.black, ls="", label="Single Stellar locus")
+        color=bc.algae, ls="", label="Single Stellar locus")
     hr.absmag_teff_plot(
         teffs[phot_binary_indices], magdiff[phot_binary_indices], marker=".", 
-        color=bc.red, ls="", label="Photometric Binaries")
+        color=bc.green, ls="", label="Photometric Binaries")
     hr.absmag_teff_plot(teffs, dividing_line, ls="-", color=bc.black, marker="")
+
+    # Compare to a 14 Gyr isochrone
+    modelteffs = np.linspace(min(teffs), max(teffs), 100)
+    highmags = calc_DSEP_model_mags(
+        modelteffs, np.zeros(len(modelteffs)), mag, age=14)
+    modeldiff = calc_photometric_excess(
+        modelteffs, np.zeros(len(modelteffs)), mag, highmags, age=age)
+    hr.absmag_teff_plot(modelteffs, modeldiff, ls="-", color=bc.red, marker="",
+                        label="[Fe/H] = 0.0")
+    lowmetmags = calc_DSEP_model_mags(
+        modelteffs, np.zeros(len(modelteffs))-0.5, mag, age=14)
+    modeldiff = calc_photometric_excess(
+        modelteffs, np.zeros(len(modelteffs))-0.5, mag, lowmetmags, age=age)
+    hr.absmag_teff_plot(modelteffs, modeldiff, ls="-", color=bc.blue,
+                        marker="", label="[Fe/H] = -0.5")
+
     plt.xlim(5500, 3500)
     plt.ylim(0.3, -2.2)
     plt.xlabel("Teff (K)")
@@ -1039,8 +1055,8 @@ def compare_abs_mag_composite_uncertainties(
     plt.ylabel("Variance")
 
 def compare_observed_age_uncertainties(
-        MKhi, MKlow, teffs, lowage=1, highage=10):
-    plt.plot(teffs, (MKhi + MKlow)/2, color=bc.black, marker="o", ls="")
+        MKhi, MKlow, teffs, lowage=1, highage=10, markercolor=bc.black):
+    plt.plot(teffs, (MKhi + MKlow)/2, color=markercolor, marker="o", ls="")
     highmag = calc_DSEP_model_mags(teffs, np.zeros(len(teffs)), "Ks", age=highage)
     lowmag = calc_DSEP_model_mags(teffs, np.zeros(len(teffs)), "Ks", age=lowage)
     ageerr = lowmag - highmag

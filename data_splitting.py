@@ -1088,8 +1088,8 @@ class APOKASCSplitter(APOGEESplitter):
         APOGEE_KEPLER_COOLDWARF, names would be ("APOGEE_KEPLER_COOLDWARF",
         "Not APOGEE_KEPLER_COOLDWARF") and target_crit would just be
         "APOGEE_KEPLER_COOLDWARF".'''
-
-        indices = npstr.find(self.data[aspcapcol], target_label) >= 0
+        strcol = au.byte_to_unicode_cast(self.data[aspcapcol])
+        indices = npstr.find(strcol, target_label) >= 0
         if not splitnames:
             splitnames = (target_label, "Not " + target_label)
         if not target_crit:
