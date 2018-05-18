@@ -881,28 +881,33 @@ def calc_DSEP_model_mags(teffs, fehs, mag, age=3):
     For a variety of temperatures with associated metallicities, calculate the
     absolute magnitude in a given band for each of those temperatures. The age
     of the distribution can also be specified.'''
-    magarr = np.zeros(len(teffs))
-    # A dictionary referencing DSEP models according to metallicity.
-    DSEP_models = {}
-    rounded_metallicities = np.round(fehs*2, 1)/2
-    # What to do about -9999 or masked arrays
-    for i in range(len(rounded_metallicities)):
-        try:
-            dsep_interper = DSEP_models[rounded_metallicities[i]]
-        except KeyError:
-            dsep_interper = sed.DSEPInterpolator(
-                age, rounded_metallicities[i], highT=7000)
+    # If there is only one metallicity, then just make a single isochrone.
+    if np.isscalar(fehs):
+        dsep_interper = sed.DSEPInterpolator(age, fehs, highT=7000)
+        magarr = dsep_interper.teff_to_abs_mag(teffs, mag)
+    else:
+        magarr = np.zeros(len(teffs))
+        # A dictionary referencing DSEP models according to metallicity.
+        DSEP_models = {}
+        rounded_metallicities = np.round(fehs*2, 1)/2
+        # What to do about -9999 or masked arrays
+        for i in range(len(rounded_metallicities)):
+            try:
+                dsep_interper = DSEP_models[rounded_metallicities[i]]
+            except KeyError:
+                dsep_interper = sed.DSEPInterpolator(
+                    age, rounded_metallicities[i], highT=7000)
 
-        teffpoint = teffs[i]
-        try:
-            magarr[i] = dsep_interper.teff_to_abs_mag(teffpoint, mag)
-            assert fehs[i] - rounded_metallicities[i] < 0.05
-        # This will be called if the DSEP interpolator has one of the values
-        # being out of bounds.
-        except subprocess.CalledProcessError:
-            magarr[i] = np.nan
-        else:
-            assert teffpoint > 0
+            teffpoint = teffs[i]
+            try:
+                magarr[i] = dsep_interper.teff_to_abs_mag(teffpoint, mag)
+                assert fehs[i] - rounded_metallicities[i] < 0.05
+            # This will be called if the DSEP interpolator has one of the values
+            # being out of bounds.
+            except subprocess.CalledProcessError:
+                magarr[i] = np.nan
+            else:
+                assert teffpoint > 0
 
     return magarr
 
@@ -936,21 +941,6 @@ def plot_photometric_binary_excess(teffs, fehs, mag, photvals, age=3):
         teffs[phot_binary_indices], magdiff[phot_binary_indices], marker=".", 
         color=bc.green, ls="", label="Photometric Binaries")
     hr.absmag_teff_plot(teffs, dividing_line, ls="-", color=bc.black, marker="")
-
-    # Compare to a 14 Gyr isochrone
-    modelteffs = np.linspace(min(teffs), max(teffs), 100)
-    highmags = calc_DSEP_model_mags(
-        modelteffs, np.zeros(len(modelteffs)), mag, age=14)
-    modeldiff = calc_photometric_excess(
-        modelteffs, np.zeros(len(modelteffs)), mag, highmags, age=age)
-    hr.absmag_teff_plot(modelteffs, modeldiff, ls="-", color=bc.red, marker="",
-                        label="[Fe/H] = 0.0")
-    lowmetmags = calc_DSEP_model_mags(
-        modelteffs, np.zeros(len(modelteffs))-0.5, mag, age=14)
-    modeldiff = calc_photometric_excess(
-        modelteffs, np.zeros(len(modelteffs))-0.5, mag, lowmetmags, age=age)
-    hr.absmag_teff_plot(modelteffs, modeldiff, ls="-", color=bc.blue,
-                        marker="", label="[Fe/H] = -0.5")
 
     plt.xlim(5500, 3500)
     plt.ylim(0.3, -2.2)
