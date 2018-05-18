@@ -12,6 +12,7 @@ import statop as stat
 
 import path_config as paths
 import catalog
+import sample_characterization as samp
 
 ###############################################################################
 # Reading Kepler/APOGEE catalogs #
@@ -734,6 +735,9 @@ def stelparms_with_Gaia(
     gaiacat = read_Berger_DR2_Kepler()
 
     joinedcat = au.join_by_id(kiccat, gaiacat, "kepid", "KIC", join_type="left")
+    samp.generate_abs_mag_column_with_errors(
+        joinedcat, "kmag", "kmag_err", "M_K", "M_K_err1", "M_K_err2",
+        null_value=np.nan)
     return joinedcat
 
 ###########

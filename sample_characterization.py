@@ -615,6 +615,47 @@ def generate_DSEP_radius_column_with_errors(
     apotable[topraderrcol] = apotable[radcol] - apotable[topraderrcol]
 
 ###############################################################################
+# Create a absolute magnitude #
+###############################################################################
+
+def calc_abs_magnitude(appmag, dist):
+    '''Calculate absolute magnitude given an apparent magnitude and distance.
+
+    Applies the usual relation M = m - 5 log10 (d/10) to calculate absolute
+    magnitude.'''
+
+    absmag = appmag - 5 * np.log10(dist / 10)
+    return absmag
+
+def generate_abs_mag_column(apotable, appcol, abscol, distcol="dis"):
+    '''Create a column of absolute magnitude given apparent and distances.
+
+    The column of input apparent magnitudes and distances as well as the output
+    column name.
+    '''
+    apotable[abscol] = calc_abs_magnitude(apotable[appcol], apotable[distcol])
+
+def generate_abs_mag_column_with_errors(
+    apotable, appcol, apperrcol, abscol, absupcol, absdowncol, distcol="dis", 
+    distupcol="disep", distdowncol="disem", null_value=-9999.0):
+    '''Create absolute magnitude columns with Gaia info and photometry.
+
+    This calculates the given K-band absolute magnitude using the usual
+    relation. It also approximates errors by adding the terms in quadrature.
+    For blended objects, the null value for the K-band magnitude is propagated.
+    '''
+    generate_abs_mag_column(apotable, appcol, abscol, distcol)
+    # If the photometry is bad, label the absolute magnitude as bad as well.
+    apotable[absupcol] = np.where(
+        apotable[apperrcol] != null_value, apotable[apperrcol]**2 + (
+        5 * (apotable[distdowncol]) / apotable[distcol] / np.log(10))**2,
+        null_value)
+    apotable[absdowncol] = np.where(
+        apotable[apperrcol] > 0, apotable[apperrcol]**2 + (
+        5 * (apotable[distupcol]) / apotable[distcol] / np.log(10))**2,
+        null_value)
+
+###############################################################################
 # Asteroseismic log(g) determination #
 ###############################################################################
 
