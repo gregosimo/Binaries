@@ -611,10 +611,11 @@ class KeplerSplitter(DataSplitter):
             subgiant_dwarf_points=subgiant_dwarf_points, splitnames=splitnames,
             crit=crit)
 
-    def split_Berger_evstate(
+    def split_Berger_EVstate(
             self, class_col="class", splitnames=(
                 "Berger Giant", "Berger Subgiant", "Berger Main Sequence", 
-                "Berger Cool Binary"), crit="Berger Evolutionary State"):
+                "Berger Cool Binary", "Missing Berger Class"), 
+            crit="Berger Evolutionary State"):
         '''Split sample according to the evolutionary state in Berger (2018).
 
         Berger et al (2018) classified objects in the Teff-Luminosity plane as
@@ -624,10 +625,25 @@ class KeplerSplitter(DataSplitter):
         subgiant_indices = self.data[class_col] == 1
         giant_indices = self.data[class_col] == 2
         binary_indices = self.data[class_col] == 3
+        missing_indices = self.data[class_col].mask
 
         indexarr = [giant_indices, subgiant_indices, dwarf_indices,
-                    binary_indices]
+                    binary_indices, missing_indices]
         self._setup_indices(splitnames, indexarr, crit)
+
+    def split_photometric_quality(
+            self, phot_err_col, splitnames=(
+                "Good Photometry", "Bad photometry"), crit="Photometry Cut"):
+        '''Split sample according to photometry quality.
+
+        Some of the targets do not have good K-band photometry. This function
+        separates those with photometry from those without. This function
+        basically uses the existence of an error in phot_err_col to flag
+        whether the photometry is good. If not, then the corresponding value is
+        a upper limit.'''
+        good_indices = self.data[phot_err_col] > 0
+
+        self._setup_complement_index(splitnames, good_indices, crit)
 
 class McQuillanSplitter(KeplerSplitter):
     '''Keep an organized database of various cuts on McQuillan data.'''
@@ -965,7 +981,8 @@ class APOGEESplitter(KeplerSplitter):
             self, teff_col="TEFF", feh_col="FE_H", MK_col="M_K", class_col="class",
             cool_limit=5500, splitnames=(
                 "Berger Giant", "Berger Subgiant", 
-                "Modified Berger Main Sequence", "Modified Berger Cool Binary"), 
+                "Modified Berger Main Sequence", "Modified Berger Cool Binary",
+            "No Berger Classification"), 
             crit="Modified Berger Evolutionary State"):
         '''Split sample according to the evolutionary state in Berger (2018).
 
@@ -979,6 +996,7 @@ class APOGEESplitter(KeplerSplitter):
             self.data[class_col] == 0, self.data[class_col] == 3)
         subgiant_indices = self.data[class_col] == 1
         giant_indices = self.data[class_col] == 2
+        missing_indices = self.data[class_col].mask
 
         # We can only classify photometric binaries cooler than cool_limit.
         # Also classify bad objects according to the original Berger
@@ -1012,7 +1030,7 @@ class APOGEESplitter(KeplerSplitter):
         dwarf_indices = np.logical_or(dwarf_indices, np.logical_and(
             fulldwarf_indices, self.data[teff_col] > 5500))
         indexarr = [giant_indices, subgiant_indices, dwarf_indices,
-                    binary_indices]
+                    binary_indices, missing_indices]
         self._setup_indices(splitnames, indexarr, crit)
 
 
@@ -1166,19 +1184,26 @@ def initialize_general_APOGEE(aposplit):
 
     aposplit.split_dlsb()
 
+    aposplit.split_photometric_quality(
+        "K_ERR", splitnames=("Good K", "Blend"), crit="MK blend")
+
     # Absolute K-band magnitude
     aposplit.data["M_K"] = (
         aposplit.data["K"] - 5 * np.log10(aposplit.data["dis"]/10))
-    aposplit.data["M_K_err1"] = aposplit.data["K_ERR"]**2 + (
-        5 * (aposplit.data["disem"]) / aposplit.data["dis"] / np.log(10))**2
-    aposplit.data["M_K_err2"] = aposplit.data["K_ERR"]**2 + (
-        5 * (aposplit.data["disep"]) / aposplit.data["dis"] / np.log(10))**2
+    aposplit.data["M_K_err1"] = np.where(
+        aposplit.data["K_ERR"] > 0, aposplit.data["K_ERR"]**2 + (
+        5 * (aposplit.data["disem"]) / aposplit.data["dis"] / np.log(10))**2,
+        -9999.0)
+    aposplit.data["M_K_err2"] = np.where(
+        aposplit.data["K_ERR"] > 0, aposplit.data["K_ERR"]**2 + (
+        5 * (aposplit.data["disep"]) / aposplit.data["dis"] / np.log(10))**2,
+        -9999.0)
     # Problems with masked data.
     # This is probably something that can be fixed upstream...
-    if aposplit.data["M_K_err1"].mask == False:
-        aposplit.data["M_K_err1"].mask = np.zeros(len(aposplit.data), dtype=bool)
-    if aposplit.data["M_K_err2"].mask == False:
-        aposplit.data["M_K_err2"].mask = np.zeros(len(aposplit.data), dtype=bool)
+#   if aposplit.data["M_K_err1"].mask == False:
+#       aposplit.data["M_K_err1"].mask = np.zeros(len(aposplit.data), dtype=bool)
+#   if aposplit.data["M_K_err2"].mask == False:
+#       aposplit.data["M_K_err2"].mask = np.zeros(len(aposplit.data), dtype=bool)
 
     aposplit.split_modified_Berger_EVstate()
 
@@ -1232,25 +1257,39 @@ def initialize_asteroseismic_sample(aposplit):
     # Split by McQuillan Periods
     aposplit.split_McQuillan_periods(kiccol=aposplit.kic_col)
 
+    aposplit.split_photometric_quality(
+        "K_MAG_ERR", splitnames=("Good K", "Blend"), crit="MK blend")
+
     # Absolute K-band magnitude
     aposplit.data["M_K"] = (
         aposplit.data["K_MAG_2M"] - 5 * np.log10(aposplit.data["dis"]/10))
-    aposplit.data["M_K_err1"] = aposplit.data["K_MAG_ERR"]**2 + (
-        5 * (aposplit.data["disem"]) / aposplit.data["dis"] / np.log(10))**2
-    aposplit.data["M_K_err2"] = aposplit.data["K_MAG_ERR"]**2 + (
-        5 * (aposplit.data["disep"]) / aposplit.data["dis"] / np.log(10))**2
-    # Problems with masked data.
-    # This is probably something that can be fixed upstream...
-    if aposplit.data["M_K_err1"].mask == False:
-        aposplit.data["M_K_err1"].mask = np.zeros(len(aposplit.data), dtype=bool)
-    if aposplit.data["M_K_err2"].mask == False:
-        aposplit.data["M_K_err2"].mask = np.zeros(len(aposplit.data), dtype=bool)
+    aposplit.data["M_K_err1"] = np.where(
+        aposplit.data["K_MAG_ERR"] > 0, aposplit.data["K_MAG_ERR"]**2 + (
+        5 * (aposplit.data["disem"]) / aposplit.data["dis"] / np.log(10))**2,
+        -9999.0)
+    aposplit.data["M_K_err2"] = np.where(
+        aposplit.data["K_MAG_ERR"] > 0, aposplit.data["K_MAG_ERR"]**2 + (
+        5 * (aposplit.data["disep"]) / aposplit.data["dis"] / np.log(10))**2,
+        -9999.0)
 
     aposplit.split_modified_Berger_EVstate(teff_col="TEFF_COR")
 
 def initialize_mcquillan_sample(mcqsplit):
     '''Makes a series of cuts related to the rotation period of the targets.'''
+    mcqsplit.split_teff(
+        "teff", [3700, 5450], (
+            "Too Cool", "Right Teff", "Too Hot"),
+        teff_crit="Huber Teff")
+    
     mcqsplit.split_period([1, 3], ["Too rapid", "Rapid", "Slow"])
+    mcqsplit.data["M_K"] = (
+        mcqsplit.data["kmag"] - 5 * np.log10(mcqsplit.data["dis"]/10))
+    mcqsplit.data["M_K_err1"] = mcqsplit.data["kmag_err"]**2 + (
+        5 * (mcqsplit.data["disem"]) / mcqsplit.data["dis"] / np.log(10))**2
+    mcqsplit.data["M_K_err2"] = mcqsplit.data["kmag_err"]**2 + (
+        5 * (mcqsplit.data["disep"]) / mcqsplit.data["dis"] / np.log(10))**2
+
+    mcqsplit.split_Berger_EVstate()
 
 def initialize_asteroseismic_periods(aposplit):
     '''Initialize the asteroseismic sample with McQuillan periods.'''
