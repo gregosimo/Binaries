@@ -1134,6 +1134,7 @@ def plot_Stauffer_Hartmann_Selection_CMD():
              label="APOGEE")
     plt.xlabel("B-V")
     plt.ylabel("V")
+    plt.legend(loc="upper right")
     hr.invert_y_axis()
     plt.figure()
     plt.plot(full_BVcolor, full_VIcolor, color=bc.black, marker=".", ls="")
