@@ -3312,6 +3312,161 @@ def triple_hr_comparison_plot(
         plot_isochrone(color_mag_nir, label="{0:.2g} Gyr".format(age))
         hr.invert_y_axis()
 
+def compare_subgiant_lines():
+    '''Compare where the subgiant line occurs.
+
+    We want to verify the temperature at which this happens is the same for
+    radius and K-band absolute magnitude. If that's the case, then we can use
+    K-band absolute magnitudes to split between dwarfs and subgiants.'''
+
+    oldsolmet = DSEPInterpolator(feh=0.0, age=14, minlogG=1.0)
+    oldlowmet = DSEPInterpolator(feh=-0.5, age=14, minlogG=1.0)
+    oldhighmet = DSEPInterpolator(feh=0.5, age=14, minlogG=1.0)
+
+    oldsolmetdata = oldsolmet._get_isochrone_data("Ks")
+    oldsolmet_teff = 10**oldsolmetdata["LogTeff"]
+    oldsolmet_radius = 10**(
+        oldsolmetdata["LogL/Lo"] - 2 * (
+            oldsolmetdata["LogTeff"] - np.log10(5778)))
+    oldsolmet_mk = oldsolmetdata["Ks"]
+
+    oldlowmetdata = oldlowmet._get_isochrone_data("Ks")
+    oldlowmet_teff = 10**oldlowmetdata["LogTeff"]
+    oldlowmet_radius = 10**(
+        oldlowmetdata["LogL/Lo"] - 2 * (
+            oldlowmetdata["LogTeff"] - np.log10(5778)))
+    oldlowmet_mk = oldlowmetdata["Ks"]
+
+    oldhighmetdata = oldhighmet._get_isochrone_data("Ks")
+    oldhighmet_teff = 10**oldhighmetdata["LogTeff"]
+    oldhighmet_radius = 10**(
+        oldhighmetdata["LogL/Lo"] - 2 * (
+            oldhighmetdata["LogTeff"] - np.log10(5778)))
+    oldhighmet_mk = oldhighmetdata["Ks"]
+
+    plt.figure()
+    plt.plot(oldsolmet_teff, oldsolmet_radius, 'k-')
+    plt.plot(oldlowmet_teff, oldlowmet_radius, 'b-')
+    plt.plot(oldhighmet_teff, oldhighmet_radius, 'r-')
+    hr.invert_x_axis()
+    plt.ylim(0, 2)
+    plt.xlabel("Teff (K)")
+    plt.ylabel("Radius (Rsun)")
+
+    plt.figure()
+    plt.plot(oldsolmet_teff, oldsolmet_mk, 'k-', label="[Fe/H]=0.0")
+    plt.plot(oldlowmet_teff, oldlowmet_mk, 'b-', label="[Fe/H]=-0.5")
+    plt.plot(oldhighmet_teff, oldhighmet_mk, 'r-', label="[Fe/H]=0.5")
+    plt.legend(loc="upper right")
+    hr.invert_x_axis()
+    plt.ylim(4, 1)
+    plt.xlabel("Teff (K)")
+    plt.ylabel("M_K")
+
+def DSEP_subgiant_point(feh, age=14, lowR=1.0, highR=1.75):
+    '''Calculate the point where stars cool down on the subgiant branch.
+    
+    This function basically treats the region around Teff(R) as a quadratic and
+    solves for the maximum temperature.'''
+
+    isochrone = DSEPInterpolator(feh=feh, age=age, minlogG=1.0)
+    isodata = isochrone._get_isochrone_data("Ks")
+    iso_teff = 10**isodata["LogTeff"]
+    iso_radius = 10**(
+        isodata["LogL/Lo"] - 2 * (
+            isodata["LogTeff"] - np.log10(5778)))
+    bracket_indices = np.logical_and(iso_radius > lowR, iso_radius < highR)
+
+    coeffs = np.polyfit(
+        iso_radius[bracket_indices], iso_teff[bracket_indices], 2)
+    pred_poly = np.poly1d(coeffs)
+    rad_grid = np.linspace(lowR, highR, 100)
+    teff_pred = pred_poly(rad_grid)
+
+    min_rad = -coeffs[1]/2/coeffs[0]
+    min_teff = pred_poly(min_rad)
+
+    return (min_rad, min_teff)
+
+def DSEP_subgiant_point_mk(feh, age=14, lowK=2.6, highK=3.2):
+    '''Calculate the point at which stars cool down in MK space.
+
+    This function basically treats the region around Teff(R) as a quadratic and
+    solves for the maximum temperature.'''
+
+    isochrone = DSEPInterpolator(feh=feh, age=age, minlogG=1.0)
+    isodata = isochrone._get_isochrone_data("Ks")
+    iso_teff = 10**isodata["LogTeff"]
+    iso_MK = isodata["Ks"]
+    bracket_indices = np.logical_and(iso_MK > lowK, iso_MK < highK)
+
+    coeffs = np.polyfit(
+        iso_MK[bracket_indices], iso_teff[bracket_indices], 2)
+    pred_poly = np.poly1d(coeffs)
+
+    min_mk = -coeffs[1]/2/coeffs[0]
+    min_teff = pred_poly(min_mk)
+
+    return (min_mk, min_teff)
+
+    # These functions are useful to visualizing the area where the polynomial
+    # interpolation occurs.
+    MK_grid = np.linspace(lowK, highK, 100)
+    teff_pred = pred_poly(MK_grid)
+    plt.plot(iso_MK[bracket_indices], iso_teff[bracket_indices], "k-")
+    plt.plot(MK_grid, teff_pred, 'r-')
+    plt.plot(min_mk, min_teff, 'g*')
+
+def DSEP_subgiant_point_metallicity(lowfeh=-0.5, highfeh=0.5, age=14):
+    '''Plot how the subgiant point changes with metallicity.'''
+    fehs = np.arange(lowfeh, highfeh+0.1, 0.1)
+    radmins = np.zeros(len(fehs))
+    teffradmins = np.zeros(len(fehs))
+    mkmins = np.zeros(len(fehs))
+    teffmkmins = np.zeros(len(fehs))
+    for i, feh in enumerate(fehs):
+        min_rad, min_teff_rad = DSEP_subgiant_point(feh, age=age)
+        min_mk, min_teff_mk = DSEP_subgiant_point_minimum(feh, age=age)
+        radmins[i] = min_rad
+        teffradmins[i] = min_teff_rad
+        mkmins[i] = min_mk
+        teffmkmins[i] = min_teff_mk
+
+    plt.figure()
+    plt.plot(fehs, teffradmins, 'k-', label="Radius")
+    plt.plot(fehs, teffmkmins, 'r-', label=r"$M_K$")
+    plt.xlabel("[Fe/H]")
+    plt.ylabel("Maximum Teff reached")
+
+    plt.figure()
+    meanmk = np.mean(mkmins)
+    plt.plot(fehs, mkmins, 'k-')
+    plt.plot([fehs[0], fehs[-1]], [meanmk, meanmk], 'k--')
+    plt.xlabel("[Fe/H]")
+    plt.ylabel("MK at maximum Teff")
+
+def DSEP_subgiant_point_minimum(feh, age=14, lowK=2.6, highK=3.2):
+    '''Calculate the point at which stars cool down in MK space.
+
+    This function basically just picks the maximum Teff on the grid. I think
+    the grid spacing is fine enough that the uncertainty from doing this is
+    lower than deviations from quadraticity.'''
+
+    isochrone = DSEPInterpolator(feh=feh, age=age, minlogG=1.0)
+    isodata = isochrone._get_isochrone_data("Ks")
+    iso_teff = 10**isodata["LogTeff"]
+    iso_MK = isodata["Ks"]
+    bracket_indices = np.logical_and(iso_MK > lowK, iso_MK < highK)
+
+    max_index = np.argmax(iso_teff)
+
+    max_mk = iso_MK[max_index]
+    max_teff = iso_teff[max_index]
+
+    return (max_mk, max_teff)
+
+
+
 ###############################################################################
 # Reddening Routines #
 ###############################################################################
