@@ -733,7 +733,7 @@ def stelparms_with_Gaia(
     kiccat = read_KIC_DR25_catalog(parmpath)
     gaiacat = read_Berger_DR2_Kepler()
 
-    joinedcat = au.join_by_id(kiccat, gaiacat, "kepid", "KIC")
+    joinedcat = au.join_by_id(kiccat, gaiacat, "kepid", "KIC", join_type="left")
     return joinedcat
 
 ###########
