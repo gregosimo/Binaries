@@ -964,7 +964,7 @@ class APOGEESplitter(KeplerSplitter):
     def split_modified_Berger_EVstate(
             self, teff_col="TEFF", feh_col="FE_H", MK_col="M_K", class_col="class",
             cool_limit=5500, splitnames=(
-                "Berger Giant", "Berger Modified Berger Subgiant", 
+                "Berger Giant", "Berger Subgiant", 
                 "Modified Berger Main Sequence", "Modified Berger Cool Binary"), 
             crit="Modified Berger Evolutionary State"):
         '''Split sample according to the evolutionary state in Berger (2018).
@@ -975,11 +975,10 @@ class APOGEESplitter(KeplerSplitter):
         
         This scheme modifies the original Berger classification by performing a
         color-dependent cut on the K-band magnitude excess '''
-        giant_indices = self.data[class_col] == 2
-        nongiant_indices
         fulldwarf_indices = np.logical_or(
             self.data[class_col] == 0, self.data[class_col] == 3)
         subgiant_indices = self.data[class_col] == 1
+        giant_indices = self.data[class_col] == 2
 
         # We can only classify photometric binaries cooler than cool_limit.
         # Also classify bad objects according to the original Berger
