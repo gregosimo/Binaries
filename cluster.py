@@ -1,4 +1,4 @@
-from astropy.table import Table
+from astropy.table import Table, vstack
 import astropy.units as u
 from scipy.interpolate import interp1d
 from scipy import stats
@@ -10,6 +10,9 @@ import path_config as paths
 import astropy_util as au
 import sed
 import catalog
+import biovis_colors as bc
+import hrplots as hr
+import read_catalog as catin
 
 class Cluster_Data(object):
     '''Class to represent the data of a cluster. 
@@ -1056,6 +1059,88 @@ def pleiades_band_errs(pleaides, band):
 
     return pleaides[errcol]
 
+###############################################################################
+# Check Pleiades selection #
+###############################################################################
+
+def plot_Stauffer_Hartmann_Selection_CMD():
+    '''Plot all targets that had photometry available in Stauffer & Hartmann.
+
+    This is a first step to figuring out what the selection effect was for
+    Stauffer & Hartmann (1987). This will plot the targets from Stauffer
+    (1982), Stauffer (1984), as well as the new photometry obtained in Stauffer
+    & Hartmann (1987).'''
+
+    ubvphot = catin.read_Pleiades_WEBDA_photometry()
+    s82_ubv = ubvphot[ubvphot["Ref"] == 312]
+    s84_ubv = ubvphot[ubvphot["Ref"] == 132]
+    sh87_ubv = ubvphot[ubvphot["Ref"] == 144]
+    pre_ubv = vstack([s82_ubv, s84_ubv, sh87_ubv])
+
+    vriphot = catin.read_Pleiades_WEBDA_VRIk_photometry()
+    s82_vrik = vriphot[vriphot["Ref"] == 29]
+    s84_vrik = vriphot[vriphot["Ref"] == 41]
+    sh87_vrik = vriphot[vriphot["Ref"] == 44]
+    pre_vrik = vstack([s82_vrik, s84_vrik, sh87_vrik])
+
+    fullphot = au.join_by_id(pre_ubv, pre_vrik, "No", "No", join_type="outer",
+                             conflict_suffixes=("_UBV", "_VRI"))
+    fullphot["V"] = np.where(
+        fullphot["V_VRI"].mask, fullphot["V_UBV"], fullphot["V_VRI"])
+
+    full_Vmag = fullphot["V"]
+    full_BVcolor = fullphot["BV"]
+    full_UBcolor = fullphot["UB"]
+    full_VRcolor = fullphot["VRk"]
+    full_RIcolor = fullphot["RIk"]
+    full_VIcolor = full_VRcolor + full_RIcolor
+
+    fullvsini = catin.read_Pleiades_WEBDA_vsini()
+    sh87_vsini = fullvsini[fullvsini["Ref"] == 105]
+
+    spec_targets = au.join_by_id(
+        sh87_vsini, fullphot, "No", "No", join_type="left")
+
+    spec_Vmag = spec_targets["V"]
+    spec_BVcolor = spec_targets["BV"]
+    spec_UBcolor = spec_targets["UB"]
+    spec_VRcolor = spec_targets["VRk"]
+    spec_RIcolor = spec_targets["RIk"]
+    spec_VIcolor = spec_VRcolor + spec_RIcolor
+
+    coords = catin.read_Pleiades_WEBDA_coordinates()
+    sh87_coords = au.extract_subtable_from_column(
+        coords, "No", sh87_vsini["No"])
+
+    apogee = catin.Stauffer_APOGEE_overlap()
+    apo_webda = au.join_by_ra_dec(
+        apogee, sh87_coords, "RA", "DEC", "RA", "Dec", join_type="left")
+    apo_targets = au.extract_subtable_from_column(
+        spec_targets, "No", apo_webda["No"])
+
+    apo_Vmag = apo_targets["V"]
+    apo_BVcolor = apo_targets["BV"]
+    apo_UBcolor = apo_targets["UB"]
+    apo_VRcolor = apo_targets["VRk"]
+    apo_RIcolor = apo_targets["RIk"]
+    apo_VIcolor = apo_VRcolor + apo_RIcolor
+
+    plt.figure()
+    plt.plot(full_BVcolor, full_Vmag, color=bc.black, marker=".", ls="",
+             label="Photometric Sample")
+    plt.plot(spec_BVcolor, spec_Vmag, color=bc.red, marker="o", ls="",
+             label="Stauffer & Hartmann (1987)")
+    plt.plot(apo_BVcolor, apo_Vmag, color=bc.blue, marker="*", ls="",
+             label="APOGEE")
+    plt.xlabel("B-V")
+    plt.ylabel("V")
+    hr.invert_y_axis()
+    plt.figure()
+    plt.plot(full_BVcolor, full_VIcolor, color=bc.black, marker=".", ls="")
+    plt.plot(spec_BVcolor, spec_VIcolor, color=bc.red, marker="o", ls="")
+    plt.plot(apo_BVcolor, apo_VIcolor, color=bc.blue, marker="*", ls="")
+    plt.xlabel("B-V")
+    plt.ylabel("V-I")
 
 if __name__ == "__main__":
     pleiades_members = read_Bouy_15_good_members()

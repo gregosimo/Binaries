@@ -923,6 +923,40 @@ def read_MAST_file(resultfile):
     results = read_split_file(resultfile, format="ascii.csv", data_start=2)
     return results
 
+# WEBDA
+
+def read_Pleiades_WEBDA_UBV_photometry(
+        photfile=paths.WEBDA_PLEIADES_UBV_PHOTOMETRY):
+    '''Read in the UBV photometry archived on WEBDA for the Pleiades.'''
+    tbl = Table.read(str(photfile), format="ascii.tab", data_start=2)
+    return tbl
+
+def read_Pleiades_WEBDA_VRIk_photometry(
+        photfile=paths.WEBDA_PLEIADES_VRIk_PHOTOMETRY):
+    '''Read in the VRIk photometry archived on WEBDA for the Pleiades.'''
+    tbl = Table.read(str(photfile), format="ascii.tab", data_start=2)
+    return tbl
+
+def read_Pleiades_WEBDA_vsini(
+        vsinifile=paths.WEBDA_PLEIADES_VSINI):
+    '''Read in the vsini table archived on WEBDA for the Pleiades.'''
+    tbl = Table.read(str(vsinifile), format="ascii.tab", data_start=2)
+    return tbl
+
+def read_Pleiades_WEBDA_coordinates(
+        coofile=paths.WEBDA_PLEIADES_COORDINATES):
+    '''Read in the table of Pleiades coordinates on WEBDA.'''
+    tbl = Table.read(str(coofile), format="ascii.tab", data_start=2)
+    coords = SkyCoord(tbl["RA"], tbl["Dec"], unit=(u.hourangle, u.degree),
+                      frame="fk4", equinox="B1950")
+    del(tbl["RA"])
+    del(tbl["Dec"])
+    modern_frame = FK5(equinox="J2000")
+    modern_coords = coords.transform_to(modern_frame)
+    tbl["RA"] = modern_coords.ra
+    tbl["Dec"] = modern_coords.dec
+    return tbl
+
 ###############################################################################
 # Utilities #
 ###############################################################################
