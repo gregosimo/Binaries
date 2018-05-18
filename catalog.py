@@ -1316,7 +1316,8 @@ def search_in_ASPCAPFLAGS(aspcapflags, flagval):
     Returns an index array which indicates which values in aspcapflags have the
     string given in flagval within. This helps with general manipulation of the
     aspcapflags parameter without having to pull up the bitmask array.'''
-    indexarr = npstr.find(aspcapflags, flagval) >= 0
+    strcol = au.byte_to_unicode_cast(aspcapflags)
+    indexarr = npstr.find(strcol, flagval) >= 0
     return indexarr
 
 def bad_ASPCAP_indices(aspcapflags, warn=False):
