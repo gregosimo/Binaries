@@ -1160,9 +1160,7 @@ def create_combined_rotation_splitter(baseclass):
 def initialize_general_APOGEE(aposplit):
     '''Initialize the most general and applicable cuts to APOGEE'''
     aposplit.split_teff(
-        "TEFF", [4500, 5450], (
-            "Too Cool", "Right Teff", "Too Hot"),
-        teff_crit="APOGEE Teff")
+        "TEFF", [5500], ("Cool", "Hot"), teff_crit="APOGEE Teff")
     
     aposplit.split_mag(
         "H", [7, 11], ("H Bright", "H Jen", "H Faint"), mag_crit="H")
@@ -1173,10 +1171,12 @@ def initialize_general_APOGEE(aposplit):
 
     aposplit.split_original_KIC_params()
 
+    aposplit.split_Gaia_distances()
+
     aposplit.split_McQuillan_periods(kiccol=aposplit.kic_col)
 
     aposplit.split_vsini(
-        [0, 7, 12], ("No Vsini", "Vsini nondet", "Vsini marginal", "Vsini det"))
+        [0, 7, 10], ("No Vsini", "Vsini nondet", "Vsini marginal", "Vsini det"))
 
     aposplit.split_vscatter(
         [0, 1], ("Single Visit", "RV Nonvariable", "RV Variable"), 
@@ -1186,24 +1186,6 @@ def initialize_general_APOGEE(aposplit):
 
     aposplit.split_photometric_quality(
         "K_ERR", splitnames=("Good K", "Blend"), crit="MK blend")
-
-    # Absolute K-band magnitude
-    aposplit.data["M_K"] = (
-        aposplit.data["K"] - 5 * np.log10(aposplit.data["dis"]/10))
-    aposplit.data["M_K_err1"] = np.where(
-        aposplit.data["K_ERR"] > 0, aposplit.data["K_ERR"]**2 + (
-        5 * (aposplit.data["disem"]) / aposplit.data["dis"] / np.log(10))**2,
-        -9999.0)
-    aposplit.data["M_K_err2"] = np.where(
-        aposplit.data["K_ERR"] > 0, aposplit.data["K_ERR"]**2 + (
-        5 * (aposplit.data["disep"]) / aposplit.data["dis"] / np.log(10))**2,
-        -9999.0)
-    # Problems with masked data.
-    # This is probably something that can be fixed upstream...
-#   if aposplit.data["M_K_err1"].mask == False:
-#       aposplit.data["M_K_err1"].mask = np.zeros(len(aposplit.data), dtype=bool)
-#   if aposplit.data["M_K_err2"].mask == False:
-#       aposplit.data["M_K_err2"].mask = np.zeros(len(aposplit.data), dtype=bool)
 
     aposplit.split_modified_Berger_EVstate()
 
