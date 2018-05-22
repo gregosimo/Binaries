@@ -37,6 +37,7 @@ import matplotlib.pyplot as plt
 from astropy.modeling import models, fitting
 from astropy.modeling.polynomial import Polynomial1D
 import astropy_util as au
+import scipy
 
 import catalog
 import hrplots as hr
@@ -1129,4 +1130,57 @@ def compare_observed_age_uncertainties(
              ls="-")
 
     
+###############################################################################
+# Rapid Rotator Stellar Evolution #
+###############################################################################
+
+def mark_Kraft_break_evolution(metallicity):
+    '''Show where stars at the Kraft break evolve to in HR diagram.'''
+    # Find Kraft break boundary in mass.
+    young_dsep = sed.DSEPInterpolator(age=1, feh=metallicity, highT=7000,
+                                      minlogG=1.0)
+    kraft_mass = young_dsep.teff_to_mass(6200)
+
+    ages = np.arange(1, 11, 0.5)
+    kraft_teffs = []
+    kraft_ks = []
+    for age in ages:
+        # Interpolate HR diagram location.
+        dsep = sed.DSEPInterpolator(age=age, feh=metallicity, highT=7000,
+                                    minlogG=1.0)
+        try:
+            kraft_teffs.append(dsep.mass_to_teff(kraft_mass))
+            kraft_ks.append(dsep.mass_to_abs_mag(kraft_mass, "Ks"))
+        except:
+            pass
+        iso_data = dsep._get_isochrone_data("Ks")
+        iso_teff = 10**iso_data["LogTeff"]
+        iso_K = iso_data["Ks"]
+        # Plot at age intervals.
+        hr.absmag_teff_plot(iso_teff, iso_K, color=bc.black, ls="-",
+                            marker="")
+    hr.absmag_teff_plot(kraft_teffs, kraft_ks, color=bc.pink, ls="-", marker="x") 
+
+def Kraft_break_expected_values(teffs):
+    '''Plot number of super-Kraft objects scattering to lower temperatures.'''
+    teff_bins = np.linspace(5000, 6000, 21, endpoint=True)
     
+    ASPCAP_error = 163
+    teffmat = (teff_bins - teffs[:,np.newaxis]) / ASPCAP_error
+
+    erfmat = (1+scipy.special.erf(teffmat/np.sqrt(2)))/2
+    erfbins = np.sum(erfmat, axis=0)
+
+    plt.step(teff_bins, erfbins)
+    hr.invert_x_axis()
+    plt.xlabel("APOGEE Teff (K)")
+    plt.ylabel(
+        "Expected number of super-Kraft break stars scattering below Teff")
+
+###############################################################################
+# Turnoff Age Metallicity #
+###############################################################################
+
+def age_metallicity(metallicities, teffs, Ks):
+    '''Plot different bins to see turnoff age.'''
+

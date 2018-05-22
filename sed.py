@@ -424,6 +424,28 @@ class DSEPInterpolator(object):
             raise
         return mags
 
+    def teff_to_mass(self, teffs, bands=1, branch="lower"):
+        '''Convert Teff to a mass.'''
+        logteff_to_mass = self._load_interpdict(
+            "LogTeff", "M/Mo", branch=branch)
+
+        logteffvals = np.log10(teffs)
+        try:
+            mass = logteff_to_mass(logteffvals)
+        except ValueError:
+            teff_inputs = _spline_x_data(logteff_to_mass)
+            min_teff, max_teff = 10**teff_inputs[0], 10**teff_inputs[-1]
+            too_low = teffs < min_teff
+            too_high = teffs > max_teff
+            if np.count_nonzero(too_low):
+                print("Included Teffs are lower than {0:1f}".format(
+                    min_teff))
+            if np.count_nonzero(too_high):
+                print("Included Teffs are higher than {0:1f}".format(
+                    max_teff))
+            raise
+        return mass
+
     def mass_to_abs_mag(self, masses, outmag, bands=1):
         '''Convert a mass to an absolute magnitude.'''
         mass_to_mag = self._load_interpdict("M/Mo", outmag)
