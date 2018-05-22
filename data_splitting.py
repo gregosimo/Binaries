@@ -915,6 +915,21 @@ class APOGEESplitter(KeplerSplitter):
 
         self._setup_complement_index(splitnames, indices, target_crit)
 
+    def split_combined_targeting(
+            self, target_list, splitnames, target_crit):
+        '''Select objects which fall under any of multiple targeting flags.
+
+        Split off targets which fall in any of the targeting flags contained in
+        target_list. Splitnames should be a 2-tuple which contains the names
+        for the sample falling under the targeting regime, and the sample not.
+        Additionally, target_crit should be a unique explanatory identifier for
+        this type of targeting split.
+        '''
+        indexlist = [
+            catalog.target_indices(self.data, targ) for targ in target_list]
+        indices = au.multi_logical_or(*indexlist)
+
+        self._setup_complement_index(splitnames, indices, target_crit)
     def split_eclipsing_binaries(
             self, kiccol="kepid", splitnames=("Kepler EB", "Not EB"), 
             eb_crit="Eclipsing Binaries"):
@@ -1157,6 +1172,57 @@ def create_combined_rotation_splitter(baseclass):
 # Initialize Splitters #
 ###############################################################################
 
+def initialize_full_APOGEE(aposplit):
+    '''Initialize a the full APOGEE Sample.
+
+    Because very little will be done with the full APOGEE sample, this will
+    be a pretty rough cut.'''
+    aposplit.split_targeting("APOGEE_KEPLER_COOLDWARF")
+    aposplit.split_targeting("APOGEE2_APOKASC_DWARF")
+    aposplit.split_by_ASPCAP_flags()
+
+    aposplit.split_mag(
+        "H", [7, 11], ("H Bright", "H Jen", "H Faint"), mag_crit="H")
+    aposplit.split_teff(
+        "SDSS-Teff", [0, 5500], ("No SDSS Teff", "Jen Cool", "Jen Hot"), 
+        teff_crit="SDSS Teff")
+    aposplit.split_teff(
+        "K-Teff", [0, 5500], ("No KIC Teff", "KIC Jen Cool", "KIC Jen Hot"), 
+        teff_crit="KIC Teff")
+    aposplit.split_teff(
+        "TEFF", [0, 5500], ("Bad APOGEE Teff", "Cool", "Hot"),
+        teff_crit="APOGEE Teff")
+    aposplit.split_logg(
+        "log(g)", [0, 4.0], ("No KIC logg", "Jen Giant", "Jen Dwarf"), 
+        logg_crit="KIC logg")
+    aposplit.split_combined_targeting(
+        ["APOGEE_KEPLER_COOLDWARF", "APOGEE2_APOKASC_DWARF"],
+        ("Targeted", "Not Targeted"), "Targeting")
+
+    aposplit.split_McQuillan_periods(kiccol=aposplit.kic_col)
+
+    aposplit.split_vsini(
+        [0, 7, 10], ("No Vsini", "Vsini nondet", "Vsini marginal", "Vsini det"))
+
+    aposplit.split_vscatter(
+        [0, 1], ("Single Visit", "RV Nonvariable", "RV Variable"), 
+        invert_inequality=True)
+
+    aposplit.split_dlsb()
+
+    aposplit.split_photometric_quality(
+        "K_ERR", splitnames=("Good K", "Blend"), crit="MK blend")
+
+    aposplit.split_modified_Berger_EVstate()
+
+    aposplit.split_cool_dwarfs()
+
+def general_to_hot_kic_sample(apogeesplitter):
+    '''Get the subset of the hot sample that has KIC parameters.'''
+    hot_kic = apogeesplitter.split_subsample([
+        "APOGEE2_APOKASC_DWARF", "Orig KIC Present"])
+    return hot_kic
+
 def initialize_general_APOGEE(aposplit):
     '''Initialize the most general and applicable cuts to APOGEE'''
     aposplit.split_teff(
@@ -1170,8 +1236,6 @@ def initialize_general_APOGEE(aposplit):
     aposplit.split_by_ASPCAP_flags()
 
     aposplit.split_original_KIC_params()
-
-    aposplit.split_Gaia_distances()
 
     aposplit.split_McQuillan_periods(kiccol=aposplit.kic_col)
 
@@ -1191,24 +1255,7 @@ def initialize_general_APOGEE(aposplit):
 
 def initialize_cool_KICs(kicsplit):
     '''Initialize cool dwarfs that have KIC values.'''
-    kicsplit.split_teff(
-        "SDSS-Teff", [0, 5500], ("No SDSS Teff", "Jen Cool", "Jen Hot"), 
-        teff_crit="SDSS Teff")
-    kicsplit.split_teff(
-        "K-Teff", 5500, ("KIC Jen Cool", "KIC Jen Hot"), 
-        teff_crit="KIC Teff")
-    kicsplit.split_logg("log(g)", 4.0, ("Jen Giant", "Jen Dwarf"),
-                           logg_crit="KIC logg")
-
     kicsplit.split_mk_evstate(crit="Subgiant Split")
-    # I want to split by the huber log(g)s as well.
-    kicsplit.split_logg_evstate(
-        teff_col="TEFF", logg_col="LOGG_FIT", 
-        splitnames=(
-            "APOGEE Giant", "APOGEE Subgiant", "APOGEE Dwarf", "No APOGEE EV"), 
-        crit="APOGEE evolutionary state")
-    
-    kicsplit.split_cool_dwarfs()
 
 def initialize_asteroseismic_sample(aposplit):
     '''Initialize the sample for asteroseismic targets.
