@@ -618,42 +618,75 @@ def generate_DSEP_radius_column_with_errors(
 # Create a absolute magnitude #
 ###############################################################################
 
-def calc_abs_magnitude(appmag, dist):
-    '''Calculate absolute magnitude given an apparent magnitude and distance.
+def calc_abs_magnitude(appmag, dist, extinction):
+    '''Absolute magnitude given apparent magnitude, distance, and extinction.
 
-    Applies the usual relation M = m - 5 log10 (d/10) to calculate absolute
+    Applies the usual relation M = m - 5 log10 (d/10) - A to calculate absolute
     magnitude.'''
 
-    absmag = appmag - 5 * np.log10(dist / 10)
+    absmag = appmag - 5 * np.log10(dist / 10) - extinction
     return absmag
 
-def generate_abs_mag_column(apotable, appcol, abscol, distcol="dis"):
-    '''Create a column of absolute magnitude given apparent and distances.
+def generate_abs_mag_column(
+        apotable, appcol, abscol, v_to_ext, avcol="Av",  distcol="dis"):
+    '''Create a extinction-corrected column of absolute magnitudes.
 
-    The column of input apparent magnitudes and distances as well as the output
-    column name.
+    For the table in apotable, use the data in appcol, distcol, and avcol to
+    generate absolute magnitudes, which will be stored in abscol. A function
+    which converts Av to the extinction in a given band to the extinction in
+    the desired band also needs to be passed.
     '''
-    apotable[abscol] = calc_abs_magnitude(apotable[appcol], apotable[distcol])
+    new_ext = v_to_ext(apotable[avcol])
+    apotable[abscol] = calc_abs_magnitude(
+        apotable[appcol], apotable[distcol], new_ext)
 
 def generate_abs_mag_column_with_errors(
-    apotable, appcol, apperrcol, abscol, absupcol, absdowncol, distcol="dis", 
-    distupcol="disep", distdowncol="disem", null_value=-9999.0):
+        apotable, appcol, apperrcol, abscol, absupcol, absdowncol, v_to_ext,
+        v_err_to_ext_err, distcol="dis", distupcol="disep", 
+        distdowncol="disem", avcol="av", avupcol="av_err1", 
+        avdowncol="av_err2", null_value=np.nan):
     '''Create absolute magnitude columns with Gaia info and photometry.
 
     This calculates the given K-band absolute magnitude using the usual
     relation. It also approximates errors by adding the terms in quadrature.
     For blended objects, the null value for the K-band magnitude is propagated.
     '''
-    generate_abs_mag_column(apotable, appcol, abscol, distcol)
+    generate_abs_mag_column(
+        apotable, appcol, abscol, v_to_ext, avcol, distcol)
     # If the photometry is bad, label the absolute magnitude as bad as well.
     apotable[absupcol] = np.where(
-        apotable[apperrcol] != null_value, apotable[apperrcol]**2 + (
-        5 * (apotable[distdowncol]) / apotable[distcol] / np.log(10))**2,
+        apotable[apperrcol] != null_value, 
+        np.sqrt(apotable[apperrcol]**2 + (
+            5 * (apotable[distdowncol]) / apotable[distcol] / np.log(10))**2 + 
+                v_err_to_ext_err(apotable[avcol], apotable[avupcol])**2), 
         null_value)
     apotable[absdowncol] = np.where(
-        apotable[apperrcol] > 0, apotable[apperrcol]**2 + (
-        5 * (apotable[distupcol]) / apotable[distcol] / np.log(10))**2,
+        apotable[apperrcol] != null_value, 
+        np.sqrt(apotable[apperrcol]**2 + (
+            5 * (apotable[distupcol]) / apotable[distcol] / np.log(10))**2 + 
+                v_err_to_ext_err(apotable[avcol], apotable[avdowncol])**2), 
         null_value)
+
+##########################
+# Extinction Conversions #
+##########################
+
+def AV_to_AK(av):
+    '''Convert Av to Ak extinctions.
+    
+    This uses the Fitzpatrick (1999) relation assuming Rv=3.1.'''
+    ak = av / 3.1 * 0.355
+    return ak
+
+def AV_err_to_AK_err(av, av_err):
+    '''Convert Av error to Ak error
+        
+    This uncertainty takes into account uncertainty in Av as well as
+    uncertainty in the Fitzpatrick (1999) relation.'''
+    sigk = np.sqrt(
+        ((0.025 * av)**2 + (0.355 * av_err)**2))/3.1
+    return sigk
+
 
 ###############################################################################
 # Asteroseismic log(g) determination #

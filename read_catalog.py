@@ -682,6 +682,8 @@ def dr14_with_KIC_stelparms(
     apopath=paths.DR14_ALLSTAR_PATH, kicpath=paths.KIC_CATALOG,
     origpath=paths.ORIG_KIC_ABRIDGED, pinpath=paths.PINSONNEAULT_CORRECTIONS):
     '''Read in Kepler DR14 targets with Huber stellar parameters.'''
+    # Note that this table is fully cross-matched with Gaia!
+    # There are no targets without matching Gaia detections.
     apo = read_dr14_allStar(apopath, opt="kepler")
     kiccat = stelparms_triple_KIC(origpath, pinpath, kicpath)
     apokic = catalog.join_by_2MASS_key(
@@ -737,6 +739,7 @@ def stelparms_with_Gaia(
     joinedcat = au.join_by_id(kiccat, gaiacat, "kepid", "KIC", join_type="left")
     samp.generate_abs_mag_column_with_errors(
         joinedcat, "kmag", "kmag_err", "M_K", "M_K_err1", "M_K_err2",
+        samp.AV_to_AK, samp.AV_err_to_AK_err,
         null_value=np.nan)
     return joinedcat
 
