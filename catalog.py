@@ -1356,6 +1356,7 @@ def good_aspcap_fits(apotable, aspcapcol="ASPCAPFLAG"):
 target_dict = {
     "APOGEE_KEPLER_COOLDWARF": ("APOGEE_TARGET2", 16), 
     "APOGEE2_APOKASC_DWARF": ("APOGEE2_TARGET1", 28),
+    "APOGEE2_APOKASC": ("APOGEE2_TARGET1", 30),
     "APOGEE_KEPLER_SEISMO": ("APOGEE_TARGET1", 27)}
 
 def target_indices(fulltable, targetlabel):

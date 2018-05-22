@@ -1179,6 +1179,7 @@ def initialize_full_APOGEE(aposplit):
     be a pretty rough cut.'''
     aposplit.split_targeting("APOGEE_KEPLER_COOLDWARF")
     aposplit.split_targeting("APOGEE2_APOKASC_DWARF")
+    aposplit.split_targeting("APOGEE2_APOKASC")
     aposplit.split_by_ASPCAP_flags()
 
     aposplit.split_mag(
@@ -1196,7 +1197,7 @@ def initialize_full_APOGEE(aposplit):
         "log(g)", [0, 4.0], ("No KIC logg", "Jen Giant", "Jen Dwarf"), 
         logg_crit="KIC logg")
     aposplit.split_combined_targeting(
-        ["APOGEE_KEPLER_COOLDWARF", "APOGEE2_APOKASC_DWARF"],
+        ["APOGEE_KEPLER_COOLDWARF", "APOGEE2_APOKASC"],
         ("Targeted", "Not Targeted"), "Targeting")
 
     aposplit.split_McQuillan_periods(kiccol=aposplit.kic_col)
