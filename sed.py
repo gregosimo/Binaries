@@ -656,6 +656,24 @@ def check_sequence_double_valued(vals):
     else:
         return False
 
+###############################################################################
+# Plot isochrones #
+###############################################################################
+
+def plot_DSEP_isochrone_mk(interp, **kwargs):
+    '''Plot the given isochrone in teff-MK space.
+    
+    Arguments to be passed to the underlying hr.absmag_teff_plot function.'''
+    interp_data = interp._get_isochrone_data("Ks")
+    hr.absmag_teff_plot(
+        10**interp_data["LogTeff"], interp_data["Ks"], **kwargs)
+
+def plot_isochrone_at_ages(feh, ages, **kwargs):
+    '''Plot isochrone at the given ages.'''
+    for age in ages:
+        interp = DSEPInterpolator(age, feh, highT=7000, minlogG=3.5)
+        plot_DSEP_isochrone_mk(interp, **kwargs)
+
 # Internal DSEP Routines #
 ##########################
 
