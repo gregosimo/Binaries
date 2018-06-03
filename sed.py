@@ -342,7 +342,7 @@ DSEP_lookup = {"M/Mo": -1, "LogL/Lo": -1, "LogTeff": -1, "LogG": -1, "B": 1,
 class DSEPInterpolator(object):
     '''Class to automatically handle interpolation of DSEP isochrones.'''
 
-    def __init__(self, age, feh, Y=1, afe=2, lowT=3500, highT=6000,
+    def __init__(self, age, feh, Y=1, afe=2, lowT=3000, highT=6000,
                  minlogG=4.2):
         '''Create DSEP Interpolator object set to a given age and metallicity.'''
         self.iso = {}
@@ -423,6 +423,35 @@ class DSEPInterpolator(object):
                     max_teff))
             raise
         return mags
+
+    def teff_err_to_abs_mag_err(self, teffs, teff_err, outmag, bands=1,
+                                branch="lower"):
+        '''Convert an error in temperature to absolute magnitude.
+
+        Note that this function only calculates the magnitude uncertainty due
+        to temperature.'''
+        logteff_to_mag = self._load_interpdict(
+            "LogTeff", outmag, branch=branch)
+
+        logteff_deriv = logteff_to_mag.derivative()
+        try:
+            err = logteff_deriv(np.log10(teffs)) * teff_err / teffs / np.log(10)
+        except ValueError:
+            teff_inputs = _spline_x_data(logteff_to_mag)
+            min_teff, max_teff = 10**teff_inputs[0], 10**teff_inputs[-1]
+            too_low = teffs < min_teff
+            too_high = teffs > max_teff
+            if np.count_nonzero(too_low):
+                print("Included Teffs are lower than {0:1f}".format(
+                    min_teff))
+            if np.count_nonzero(too_high):
+                print("Included Teffs are higher than {0:1f}".format(
+                    max_teff))
+            raise
+        return mags
+
+        return err
+        
 
     def teff_to_mass(self, teffs, bands=1, branch="lower"):
         '''Convert Teff to a mass.'''
@@ -751,10 +780,25 @@ def format_DSEP_isochrone_filename(feh, afe, Y, bands):
 
     The bands is basically a suffix which contains every band that is contained
     in the isochrone. For example, one isochrone contains UBVRIJHKsKp.'''
-    afe_val = 0.2 * (afe - 2)
-    feh_sign = assign_DSEP_sign(feh)
-    afe_sign = assign_DSEP_sign(afe_val)
 
+    afe_temp = "afe{afe_sign}{afe:01d}"
+    afe_str = fill_afe_filename_template(afe_temp, afe)
+
+    y_temp = "{y}"
+    y_str = fill_y_filename_template(y_temp, Y)
+
+    feh_temp = "feh{feh_sign}{feh:03d}"
+    feh_str = fill_feh_filename_template(feh_temp, feh)
+
+    band_temp = "{suf}"
+    band_str = fill_band_suffix_filename_template(band_temp, bands)
+
+    finalstr = "{0}{1}{2}.{3}".format(feh_str, afe_str, y_str, band_str)
+
+    return finalstr
+
+def fill_y_filename_template(template, Y):
+    '''Fill in the Y portion of the filename template.'''
     if Y == 1:
         ystring = ""
     elif Y == 2:
@@ -763,7 +807,25 @@ def format_DSEP_isochrone_filename(feh, afe, Y, bands):
         ystring = "y40"
     else:
         raise ValueError("Y={0:.2g} not supported.".format(Y))
-    
+
+    return template.format(y=ystring)
+
+def fill_feh_filename_template(template, feh):
+    '''Fills in the [Fe/H] portion of the filename template.'''
+    feh_sign = assign_DSEP_sign(feh)
+    num_index = template.index("d")-1
+    width = int(template[num_index:num_index+1])
+    return template.format(feh_sign=feh_sign, feh=int(abs(feh)*10**(width-1)))
+
+def fill_afe_filename_template(template, afe):
+    '''Fills in the [a/Fe] portion of the filename template.'''
+    afe_val = 0.2 * (afe - 2)
+    afe_sign = assign_DSEP_sign(afe_val)
+
+    return template.format(afe_sign=afe_sign, afe=int(abs(afe_val)*10))
+
+def fill_band_suffix_filename_template(template, bands):
+    '''Fill in the suffix which depends on the band label.'''
     # When placing extra bands, make sure the numbers line up with the values
     # in the "iso_interp_feh.f" file. 
     if bands == 1:
@@ -779,11 +841,11 @@ def format_DSEP_isochrone_filename(feh, afe, Y, bands):
     else:
         raise ValueError("Band number not recognized")
 
-    filename_template = "feh{0}{1:02d}afe{2}{3:01d}{4}.{5}".format(
-        feh_sign, int(abs(feh)*10), afe_sign, int(abs(afe_val)*10), ystring, 
-        suffix)
+    return template.format(suf=suffix)
 
-    return filename_template
+def fill_age_filename_template(template, age):
+    '''Fill in the age for a template filename.'''
+    return template.format(age=int(age*1000))
 
 def format_DSEP_age_isochrone_filename(age, feh, afe, y, bands):
     '''Formats the filename of a post-split age file.
@@ -799,8 +861,15 @@ def format_DSEP_age_isochrone_filename(age, feh, afe, y, bands):
     The bands is basically a suffix which contains every band that is contained
     in the isochrone. For example, one isochrone contains UBVRIJHKsKp.'''
 
-    age_prefix = "a{0:05d}".format(int(age*1000))
-    return age_prefix + format_DSEP_isochrone_filename(feh, afe, y, bands)
+    age_template = "a{age:05d}"
+    age_str = fill_age_filename_template(age_template, age)
+
+    nonage_str = format_DSEP_isochrone_filename(feh, afe, y, bands)
+
+    finalstr = "{0}{1}".format(age_str, nonage_str)
+
+    return finalstr
+
 
 def interpolate_split_multi_isochrones(
     fehs, outputdir, bands=1, Y=1, afe=2, isochrones=paths.DSEP_ISOCHRONES,
@@ -3650,6 +3719,26 @@ def binary_luminosity_ratio_evolution():
         massratio))
     plt.legend(loc="upper right")
 
+def alpha_bin(alphas):
+    '''Assign the values of alpha to that appropriate for DSEP.'''
+    # These are the alpha/Fe bins that will be fed into DSEP.
+    alpha_binedges = np.arange(-0.1, 0.9, 0.2)
+    # a/Fe < -0.1 corresponds to 1, and a/Fe > 0.7 corresponds to 6.
+    alpha_bins = np.digitize(alphas, alpha_binedges)+1
+    return alpha_bins
+
+def alpha_compatible_with_metallicity(alphas, fehs):
+    '''Validate whether the alpha values are compatible with the metallicities.
+
+    DSEP may crash if the metallicity and alpha enhancement are not compatible.
+    In particular, high alpha enhancements are only available for low
+    metallicity stars.'''
+    # DSEP should crash or something if the metallicity and alpha enhancement
+    # are not compatible. In particular, high alpha enhancements are only
+    # available for low metallicity stars. I want to ensure that this will be
+    # the case before running into weird DSEP bugs.
+    assert(np.all(np.logical_or(alphas < 0.3, fehs <= 0.0)))
+
 ###############################################################################
 # Spline Routines #
 ###############################################################################
@@ -3757,7 +3846,7 @@ def ensure_array_increasing(xvals, yvals):
     sorted_xvals_indices = np.argsort(newxvals)
     sorted_xvals = newxvals[sorted_xvals_indices]
     sorted_yvals = newyvals[sorted_xvals_indices]
-    assert np.all(sorted_xvals_indices - np.arange(len(sorted_xvals)) < 4)
+    assert np.all(sorted_xvals_indices - np.arange(len(sorted_xvals)) < 5)
 
     return sorted_xvals, sorted_yvals
     
