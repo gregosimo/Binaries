@@ -40,7 +40,7 @@ class DataSplitter:
             self.indices = indices
 
     def split_by_col(self, col, splitvalues, splitnames, crit,
-                     invert_inequality=False):
+                     null_value=None, invert_inequality=False):
         '''Make a simple split in the dataset using one column.
 
         The column name used for the split should be given as col. The values
@@ -55,6 +55,10 @@ class DataSplitter:
         splitvalues[-1], vals >= splitvalues[-1]. Setting the
         invert_inequality flag to true will change <= to < and > to >=.
 
+        If a null_value is given, then splitnames will have to have an extra
+        name which classifies all targets that are equal to null_value.
+        Null_value can be NaN, any finite value, or np.ma.masked.
+
         Note that due to the exclusion mechanism as part of the DataSplitter,
         that splitnames are not allowed to begin with a tilde (~) character.
         '''
@@ -66,7 +70,10 @@ class DataSplitter:
 
         # Anytime an ordered comparison needs to be made, things can get weird 
         # with masked values. Let me know if any are encountered.
-        assert not np.any(np.ma.getmask(colvalues))
+        if null_value is not np.ma.masked:
+            assert not np.any(np.ma.getmask(colvalues))
+        if null_value is not np.nan:
+            assert np.all(np.logical_not(np.isnan(colvalues)))
         
         try:
             ordered_splitvalues = sorted(splitvalues)
@@ -105,24 +112,37 @@ class DataSplitter:
             # Invert_inequality basically transforms < to <= and >= to >
             if not invert_inequality:
                 # First make the lowest table.
-                indexlist.append(colvalues < splitvalues[0])
+                indexlist.append(np.ma.filled(colvalues < splitvalues[0], 0))
                 # Then make intermediate tables.
                 for i, (low, high) in enumerate(zip(
                         splitvalues[:-1], splitvalues[1:])):
-                    indexlist.append(np.logical_and(
-                        colvalues >= low, colvalues < high))
+                    indexlist.append(np.ma.filled(np.logical_and(
+                        colvalues >= low, colvalues < high), 0))
                 # Now make the highest table.
-                indexlist.append(colvalues >= splitvalues[-1])
+                indexlist.append(np.ma.filled(colvalues >= splitvalues[-1], 0))
             else:
                 # First make the lowest table.
-                indexlist.append(colvalues <= splitvalues[0])
+                indexlist.append(np.ma.filled(colvalues <= splitvalues[0], 0))
                 # Then make intermediate tables.
                 for i, (low, high) in enumerate(zip(
                         splitvalues[:-1], splitvalues[1:])):
-                    indexlist.append(np.logical_and(
-                        colvalues > low, colvalues <= high))
+                    indexlist.append(np.ma.filled(np.logical_and(
+                        colvalues > low, colvalues <= high), 0))
                 # Now make the highest table.
-                indexlist.append(colvalues > splitvalues[-1])
+                indexlist.append(np.ma.filled(colvalues > splitvalues[-1], 0))
+
+            # If we have a null_value, gather up all of those.
+            if null_value is not None:
+                indexlist.append(au.check_null(colvalues, null_value))
+                # If null_value can be compared, then remove it from the other
+                # indices.
+                if null_value == null_value:
+                    newindexlist = []
+                    for ind in indexlist[:-1]:
+                        newindexlist.append(
+                            np.logical_and(ind, np.logical_not(indexlist[-1])))
+                    newindexlist.append(indexlist[-1])
+                    indexlist = newindexlist
         except:
             self._restore_crit(crit, backup_indices)
             raise
@@ -134,6 +154,9 @@ class DataSplitter:
 
         Avoid repetitively setting the values in self.indices to the actual
         indices and setting the crit values.'''
+        if len(splitnames) != len(indices):
+            raise ValueError("Got {0} names. Expected {1}.".format(
+                len(splitnames), len(indices)))
         for name, index in zip(splitnames, indices):
             self.indices[name] = index
         self.splitgroups[crit] = set(splitnames)
@@ -409,7 +432,7 @@ class KeplerSplitter(DataSplitter):
         self.tm_col = tm_col
 
     def split_logg(self, col, splitvalues, splitnames, logg_crit="logg",
-                   invert_inequality=False):
+                   null_value=None, invert_inequality=False):
         '''Split the data by log(g).
 
         Since there are many different ways to measure log(g), the desired
@@ -421,8 +444,9 @@ class KeplerSplitter(DataSplitter):
 
         For more information on invert_inequality, see split_by_col.
         '''
-        self.split_by_col(col, splitvalues, splitnames, logg_crit, 
-                          invert_inequality)
+        self.split_by_col(
+            col, splitvalues, splitnames, logg_crit, null_value=null_value, 
+            invert_inequality=invert_inequality)
 
     def split_Ciardi_logg(
         self, loggcol, teffcol, splitnames=("Giant", "Dwarf"), 
@@ -475,7 +499,7 @@ class KeplerSplitter(DataSplitter):
         self._setup_indices(splitnames, indexlist, color_crit)
 
     def split_teff(self, col, splitvalues, splitnames, teff_crit="teff",
-                   invert_inequality=False):
+                   null_value=None, invert_inequality=False):
         '''Split the data by Teff.
 
         Since there are many different ways to measure Teff, the desired
@@ -487,8 +511,9 @@ class KeplerSplitter(DataSplitter):
 
         For more information on invert_inequality, see split_by_col.
         '''
-        self.split_by_col(col, splitvalues, splitnames, teff_crit, 
-                          invert_inequality)
+        self.split_by_col(
+            col, splitvalues, splitnames, teff_crit, null_value=null_value, 
+            invert_inequality=invert_inequality)
 
     def split_sufficient_quarter_obs(
             self, qneeded=8, qused=range(3, 15), quartercol="st_quarters", 
@@ -545,7 +570,8 @@ class KeplerSplitter(DataSplitter):
 
         For more information on invert_inequality, see split_by_col.
         '''
-        self.split_by_col(magcol, mags, splitnames, mag_crit, invert_inequality)
+        self.split_by_col(magcol, mags, splitnames, mag_crit,
+                          invert_inequality=invert_inequality)
 
     def split_evstate(
             self, teff_col="teff", logg_col="LOGG_FIT", 
@@ -632,8 +658,9 @@ class KeplerSplitter(DataSplitter):
         self._setup_indices(splitnames, indexarr, crit)
 
     def split_photometric_quality(
-            self, phot_err_col, splitnames=(
-                "Good Photometry", "Bad photometry"), crit="Photometry Cut"):
+            self, phot_col, phot_err_col, splitnames=(
+                "Detection", "Blend" "Bad photometry"), crit="Photometry Cut",
+            null_value=np.ma.masked):
         '''Split sample according to photometry quality.
 
         Some of the targets do not have good K-band photometry. This function
@@ -641,9 +668,24 @@ class KeplerSplitter(DataSplitter):
         basically uses the existence of an error in phot_err_col to flag
         whether the photometry is good. If not, then the corresponding value is
         a upper limit.'''
-        good_indices = self.data[phot_err_col] > 0
+        det_indices = self.data[phot_err_col] != null_value
+        blend_indices = np.logical_and(self.data[phot_col] != null_value,
+                                       self.data[phot_err_col] == null_value)
+        bad_indices = self.data[phot_col] == null_value
 
-        self._setup_complement_index(splitnames, good_indices, crit)
+        indexarr = [det_indices, blend_indices, bad_indices]
+        self._setup_indices(splitnames, indexarr, crit)
+
+    def split_Gaia(self, dist_col="dis", splitnames=("In Gaia", "Not in Gaia"),
+                   gaia_crit="Gaia present"):
+        '''Split sample based on the presence of Gaia distances.
+        
+        Not all of the Kepler sample has Gaia distances. In order to deal with
+        that, this function splits the sample into whether there are Gaia
+        distances or not.'''
+        good_indices = ~self.data[dist_col].mask
+        
+        self._setup_complement_index(splitnames, good_indices, gaia_crit)
 
 class McQuillanSplitter(KeplerSplitter):
     '''Keep an organized database of various cuts on McQuillan data.'''
@@ -671,7 +713,7 @@ class McQuillanSplitter(KeplerSplitter):
         For more information on invert_inequality, see split_by_col.
         '''
         self.split_by_col(pcol, splitvalues, splitnames, period_crit, 
-                          invert_inequality)
+                          invert_inequality=invert_inequality)
 
 class GaiaSplitter(KeplerSplitter):
     '''Split dataset with Gaia information.'''
@@ -726,7 +768,7 @@ class APOGEESplitter(KeplerSplitter):
         sample. If not, then it will be read in manually.'''
         if not data:
             data = catin.dr14_with_KIC_stelparms()
-            data["LOGG_FIT"] = data["FPARAM"][:,1]
+            data["ALPHA_FE"] = data["ALPHA_M"] + data["M_H"] - data["FE_H"]
         super().__init__(data, splitgroups=splitgroups, indices=indices, 
                          kic_col=kic_col, tm_col=tm_col)
 
@@ -743,10 +785,10 @@ class APOGEESplitter(KeplerSplitter):
         For more information on invert_inequality, see split_by_col.
         '''
         self.split_by_col(col, splitvalues, splitnames, vscatter_crit, 
-                          invert_inequality)
+                          invert_inequality=invert_inequality)
 
     def split_vsini(self, splitvalues, splitnames, col="VSINI",
-                    vsini_crit="VSINI", invert_inequality=False):
+                    vsini_crit="VSINI", null_value=None, invert_inequality=False):
         '''Split the data by vsini.
 
         Split the sample based on the boundaries given in splitvalues. The
@@ -757,8 +799,23 @@ class APOGEESplitter(KeplerSplitter):
 
         For more information on invert_inequality, see split_by_col.
         '''
-        self.split_by_col(col, splitvalues, splitnames, vsini_crit, 
-                          invert_inequality)
+        self.split_by_col(
+            col, splitvalues, splitnames, vsini_crit, null_value=null_value,
+            invert_inequality=invert_inequality)
+
+    def split_metallicity(self, splitvalues, splitnames, col="M_H",
+                          met_crit="Metallicity", invert_inequality=False):
+        '''Split the data according to metallicity.
+
+        Split the sample based on the boundaries given in splitvalues. The
+        names for the categories should be given in splitnames. Those choice of
+        metallicity can be specified with the col keyword.
+
+        For more information on invert_inequality, see split_by_col.
+        '''
+        self.split_by_col(col, splitvalues, splitnames, met_crit,
+                          invert_inequality=invert_inequality)
+
 
     def split_spectroscopic_rapid_rotators(
         self, splitperiods, splitnames, radius_col="radius", 
@@ -783,7 +840,7 @@ class APOGEESplitter(KeplerSplitter):
             np.maximum(self.data[vsini_col], det_limit), 
             self.data[radius_col])[0]
         self.split_by_col(tempcol, splitperiods, splitnames, rapid_crit, 
-                          invert_inequality)
+                          invert_inequality=invert_inequality)
         del(self.data[tempcol])
         assert tempcol not in self.data.colnames
 
@@ -993,8 +1050,8 @@ class APOGEESplitter(KeplerSplitter):
         self._setup_complement_index(splitnames, full_sample, cool_crit)
 
     def split_modified_Berger_EVstate(
-            self, teff_col="TEFF", feh_col="FE_H", MK_col="M_K", class_col="class",
-            cool_limit=5500, splitnames=(
+            self, teff_col="TEFF", feh_col="FE_H", alpha_col="ALPHA_FE", 
+            MK_col="M_K", class_col="class", cool_limit=5500, splitnames=(
                 "Berger Giant", "Berger Subgiant", 
                 "Modified Berger Main Sequence", "Modified Berger Cool Binary",
             "No Berger Classification"), 
@@ -1022,7 +1079,8 @@ class APOGEESplitter(KeplerSplitter):
 
         magdiff = samp.calc_photometric_excess(
             self.data[teff_col][cool_dwarf_indices],
-            self.data[feh_col][cool_dwarf_indices], "Ks",
+            self.data[feh_col][cool_dwarf_indices], 
+            self.data[alpha_col][cool_dwarf_indices], "Ks",
             self.data[MK_col][cool_dwarf_indices], age=3)
         phot_binary_div_points = [(5427, -0.60), (3946, -0.14)]
         dividing_line = (phot_binary_div_points[0][1] + 
@@ -1162,7 +1220,6 @@ def create_combined_rotation_splitter(baseclass):
             These objects ought to have both vsinis and rotational periods.'''
             if not data:
                 data = catin.dr14_with_KIC_stelparms()
-                data["LOGG_FIT"] = data["FPARAM"][:,1]
             super().__init__(data, splitgroups=splitgroups, indices=indices, 
                              kic_col=kic_col, tm_col=tm_col)
 
@@ -1185,17 +1242,17 @@ def initialize_full_APOGEE(aposplit):
     aposplit.split_mag(
         "H", [7, 11], ("H Bright", "H Jen", "H Faint"), mag_crit="H")
     aposplit.split_teff(
-        "SDSS-Teff", [0, 5500], ("No SDSS Teff", "Jen Cool", "Jen Hot"), 
-        teff_crit="SDSS Teff")
+        "SDSS-Teff", [5500], ("Jen Cool", "Jen Hot", "No SDSS Teff"), 
+        teff_crit="SDSS Teff", null_value=np.ma.masked)
     aposplit.split_teff(
-        "K-Teff", [0, 5500], ("No KIC Teff", "KIC Jen Cool", "KIC Jen Hot"), 
-        teff_crit="KIC Teff")
+        "K-Teff", [5500], ("KIC Jen Cool", "KIC Jen Hot", "No KIC Teff"), 
+        teff_crit="KIC Teff", null_value=np.ma.masked)
     aposplit.split_teff(
-        "TEFF", [0, 5500], ("Bad APOGEE Teff", "Cool", "Hot"),
-        teff_crit="APOGEE Teff")
+        "TEFF", [5500], ("Cool", "Hot", "Bad APOGEE Teff"),
+        teff_crit="APOGEE Teff", null_value=np.ma.masked)
     aposplit.split_logg(
-        "log(g)", [0, 4.0], ("No KIC logg", "Jen Giant", "Jen Dwarf"), 
-        logg_crit="KIC logg")
+        "KIC logg", [4.0], ("Jen Giant", "Jen Dwarf", "No KIC logg"), 
+        logg_crit="KIC logg", null_value=np.ma.masked)
     aposplit.split_combined_targeting(
         ["APOGEE_KEPLER_COOLDWARF", "APOGEE2_APOKASC"],
         ("Targeted", "Not Targeted"), "Targeting")
@@ -1203,7 +1260,8 @@ def initialize_full_APOGEE(aposplit):
     aposplit.split_McQuillan_periods(kiccol=aposplit.kic_col)
 
     aposplit.split_vsini(
-        [0, 7, 10], ("No Vsini", "Vsini nondet", "Vsini marginal", "Vsini det"))
+        [7, 10], ("Vsini nondet", "Vsini marginal", "Vsini det", "No Vsini"),
+        null_value=np.ma.masked)
 
     aposplit.split_vscatter(
         [0, 1], ("Single Visit", "RV Nonvariable", "RV Variable"), 
@@ -1212,7 +1270,10 @@ def initialize_full_APOGEE(aposplit):
     aposplit.split_dlsb()
 
     aposplit.split_photometric_quality(
-        "K_ERR", splitnames=("Good K", "Blend"), crit="MK blend")
+        "kmag", "kmag_err", splitnames=("K Detection", "Blend", "Bad K"), 
+        crit="MK blend")
+
+    aposplit.split_Gaia()
 
     aposplit.split_modified_Berger_EVstate()
 

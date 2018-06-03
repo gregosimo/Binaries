@@ -3,7 +3,6 @@ import numpy as np
 from astropy.table import Table
 import pytest
 
-import catalog
 from data_splitting import DataSplitter
 
 tablestring = '''
@@ -18,20 +17,20 @@ tablestring = '''
 class CustomSplitter(DataSplitter):
     '''Simple splitter for testing purposes'''
     def split_a(self, splitvalues, splitnames, col="a", a_crit="a",
-                invert_inequality=False):
+                null_value=None, invert_inequality=False):
         '''Split by a'''
-        self.split_by_col(col, splitvalues, splitnames, a_crit, 
-                          invert_inequality)
+        self.split_by_col(
+            col, splitvalues, splitnames, a_crit, null_value, invert_inequality)
     def split_b(self, splitvalues, splitnames, col="b", b_crit="b",
-                invert_inequality=False):
+                null_value=None, invert_inequality=False):
         '''Split by b'''
-        self.split_by_col(col, splitvalues, splitnames, b_crit, 
-                          invert_inequality)
+        self.split_by_col(
+            col, splitvalues, splitnames, b_crit, null_value, invert_inequality)
     def split_c(self, splitvalues, splitnames, col="c", c_crit="c",
-                invert_inequality=False):
+                null_value=None, invert_inequality=False):
         '''Split by c'''
-        self.split_by_col(col, splitvalues, splitnames, c_crit, 
-                          invert_inequality)
+        self.split_by_col(
+            col, splitvalues, splitnames, c_crit, null_value, invert_inequality)
 
 @pytest.fixture
 def typical_splitter():
@@ -41,6 +40,20 @@ def typical_splitter():
     column b.'''
     a = Table.read(tablestring, format="ascii.fixed_width")
     b = CustomSplitter(a)
+    return b
+
+@pytest.fixture
+def masked_splitter():
+    '''Generate a table with masked values.
+    
+    Column "a" has a masked value of NaN. Column "b" has a masked value that is
+    -9999.99. And Column "c" is a masked value.'''
+    a = Table.read(tablestring, format="ascii.fixed_width")
+    m = Table(a, masked=True)
+    m["a"][3] = np.nan
+    m["b"][1] = -9999.99
+    m["c"][2] = np.ma.masked
+    b = CustomSplitter(m)
     return b
 
 def test_empty_split(typical_splitter):
@@ -176,3 +189,45 @@ def test_split_name_conflict(typical_splitter):
     with pytest.raises(ValueError):
         typical_splitter.split_b([3], ["low_b", "high_a"])
 
+def test_too_few_names(typical_splitter):
+    '''Test that splitting with too few names yields an error.'''
+    with pytest.raises(ValueError):
+        typical_splitter.split_a(3, ["single_a"])
+    with pytest.raises(ValueError):
+        typical_splitter.split_a([3, 4, 5], ["low_a", "high_a"])
+
+def test_too_many_names(typical_splitter):
+    '''Test that splitting with too many names yields an error.'''
+    with pytest.raises(ValueError):
+        typical_splitter.split_a(3, ["low_a", "med_a", "high_a"])
+    with pytest.raises(ValueError):
+        typical_splitter.split_a(
+            [3, 4, 5], [
+                "low_a", "low_medium", "medium", "medium_high", "high_a"])
+
+def test_null_value(masked_splitter):
+    '''Test that splitting with a null value works correctly.'''
+    masked_splitter.split_a(
+        [3], ["low_a", "high_a", "no_a"], null_value=np.nan)
+    masked_splitter.split_b(
+        [4, 6.1], ["low_b", "med_b", "high_b", "no_b"], null_value=-9999.99)
+    masked_splitter.split_c(
+        2, ["low_c", "high_c", "no_c"], null_value = np.ma.masked)
+    assert np.all(masked_splitter.indices["low_a"] == [
+        False, False, True, False, True])
+    assert np.all(masked_splitter.indices["no_a"] == [
+        False, False, False, True, False])
+    assert np.all(masked_splitter.indices["low_b"] == [
+        True, False, False, False, False])
+    assert np.all(masked_splitter.indices["no_b"] == [
+        False, True, False, False, False])
+    assert np.all(masked_splitter.indices["high_c"] == [
+        False, True, False, True, False])
+    assert np.all(masked_splitter.indices["no_c"] == [
+        False, False, True, False, False])
+
+def test_null_too_few_names(masked_splitter):
+    '''Test that omitting the null category will lead to an error.'''
+    with pytest.raises(ValueError):
+        masked_splitter.split_a(
+            3, ["low_a", "high_a"], null_value=np.nan)

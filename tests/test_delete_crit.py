@@ -3,7 +3,6 @@ import numpy as np
 from astropy.table import Table
 import pytest
 
-import catalog
 from data_splitting import DataSplitter
 
 tablestring = '''
@@ -18,17 +17,20 @@ tablestring = '''
 class CustomSplitter(DataSplitter):
     '''Simple splitter for testing purposes'''
     def split_a(self, splitvalues, splitnames, col="a", a_crit="a",
-                invert_inequality=False):
+                null_value=None, invert_inequality=False):
         '''Split by a'''
-        self.split_by_col(col, splitvalues, splitnames, a_crit, invert_inequality)
+        self.split_by_col(
+            col, splitvalues, splitnames, a_crit, null_value, invert_inequality)
     def split_b(self, splitvalues, splitnames, col="b", b_crit="b",
-                invert_inequality=False):
+                null_value=None, invert_inequality=False):
         '''Split by b'''
-        self.split_by_col(col, splitvalues, splitnames, b_crit, invert_inequality)
+        self.split_by_col(
+            col, splitvalues, splitnames, b_crit, null_value, invert_inequality)
     def split_c(self, splitvalues, splitnames, col="c", c_crit="c",
-                invert_inequality=False):
+                null_value=None, invert_inequality=False):
         '''Split by c'''
-        self.split_by_col(col, splitvalues, splitnames, c_crit, invert_inequality)
+        self.split_by_col(
+            col, splitvalues, splitnames, c_crit, null_value, invert_inequality)
 
 @pytest.fixture
 def typical_splitter():
