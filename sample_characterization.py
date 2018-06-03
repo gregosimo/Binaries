@@ -575,7 +575,8 @@ def generate_DSEP_radius_column(
     radiusarr = np.zeros(len(apotable))
     # A dictionary referencing DSEP models according to metallicity.
     DSEP_models = {}
-    rounded_metallicities = np.round(apotable[fehcol]*2, 1)/2
+    # I want to round metallicity to the nearest hundredth
+    rounded_metallicities = np.round(apotable[fehcol], 2)
     # What to do about -9999 or masked arrays
     for i in range(len(rounded_metallicities)):
         try:
@@ -950,28 +951,35 @@ def check_evstate_classifications(teff, logg, bollum, kmag):
 # Photometric binarity #
 ###############################################################################
 
-def calc_DSEP_model_mags(teffs, fehs, mag, age=3):
+def calc_DSEP_model_mags(teffs, fehs, alpha_fe, mag, age=3):
     '''A predicted absolute magnitude given teff.
 
     For a variety of temperatures with associated metallicities, calculate the
     absolute magnitude in a given band for each of those temperatures. The age
     of the distribution can also be specified.'''
+    alpha_ind = sed.alpha_bin(alpha_fe)
+    sed.alpha_compatible_with_metallicity(alpha_fe, fehs)
     # If there is only one metallicity, then just make a single isochrone.
     if np.isscalar(fehs):
-        dsep_interper = sed.DSEPInterpolator(age, fehs, highT=7000)
+        dsep_interper = sed.DSEPInterpolator(
+            age, fehs, afe=alpha_ind, highT=7000)
         magarr = dsep_interper.teff_to_abs_mag(teffs, mag)
     else:
         magarr = np.zeros(len(teffs))
         # A dictionary referencing DSEP models according to metallicity.
         DSEP_models = {}
         rounded_metallicities = np.round(fehs*2, 1)/2
+
         # What to do about -9999 or masked arrays
         for i in range(len(rounded_metallicities)):
+            mettup = (rounded_metallicities[i], alpha_ind[i])
             try:
-                dsep_interper = DSEP_models[rounded_metallicities[i]]
+                dsep_interper = DSEP_models[mettup]
             except KeyError:
                 dsep_interper = sed.DSEPInterpolator(
-                    age, rounded_metallicities[i], highT=7000)
+                    age, rounded_metallicities[i], afe=alpha_ind[i], 
+                    highT=7000)
+                DSEP_models[mettup] = dsep_interper
 
             teffpoint = teffs[i]
             try:
@@ -986,12 +994,12 @@ def calc_DSEP_model_mags(teffs, fehs, mag, age=3):
 
     return magarr
 
-def calc_photometric_excess(teffs, fehs, mag, photvals, age=3):
+def calc_photometric_excess(teffs, fehs, alphas, mag, photvals, age=3):
     '''Calculate the photometric excess above a given isochrone.
 
     Calculate the magnitude difference between photvals and an isochrone
     solution for the given teff, [Fe/H] and age for the given mag.'''
-    DSEPmags = calc_DSEP_model_mags(teffs, fehs, mag, age=age)
+    DSEPmags = calc_DSEP_model_mags(teffs, fehs, alphas, mag, age=age)
     magdiff = photvals - DSEPmags
 
     return magdiff
@@ -1129,6 +1137,33 @@ def compare_observed_age_uncertainties(
     plt.plot(teffs[sortindices], ageerr[sortindices], color=bc.red, marker="", 
              ls="-")
 
+def plot_DSEP_uncertainties(lower_ms_data):
+    '''Show the DSEP vs. lower MS uncertainties.'''
+    solmet_data = lower_ms_data[np.logical_and(
+        lower_ms_data["FE_H"] > -0.75, lower_ms_data["FE_H"] < -0.25)]
+    hr.absmag_teff_plot(solmet_data["TEFF"], solmet_data["M_K"],
+                        color=bc.black, ls="", marker=".")
+    teff_bins = np.arange(3500, 5250+650, 500)
+    teff_indices = np.digitize(solmet_data["TEFF"], teff_bins)
+    medians = np.zeros(len(teff_bins)-1)
+    for i in range(len(medians)):
+        medians[i] = np.percentile(solmet_data["M_K"][teff_indices == i+1], 75)
+    avg_bin = (teff_bins[:-1]+teff_bins[1:])/2
+
+    hr.absmag_teff_plot(avg_bin, medians, color=bc.black, ls="--", marker=".")
+
+    iso = sed.DSEPInterpolator(3.0, -0.5, highT=5500, lowT=3000)
+    iso_data = iso._get_isochrone_data("Ks")
+    iso_trimmed = iso_data[10**iso_data["LogTeff"] > 3500]
+    hr.absmag_teff_plot(10**iso_trimmed["LogTeff"], iso_trimmed["Ks"],
+                        color=bc.red, marker="o", ls="")
+    dsep_k = iso.teff_to_abs_mag(avg_bin, "Ks")
+    hr.absmag_teff_plot(avg_bin, dsep_k, color=bc.red, ls="-", marker=".")
+    
+    displacement = medians - dsep_k - (np.mean(medians) - np.mean(dsep_k))
+    print("RMS difference: {0:.2f}".format(np.std(displacement)))
+    
+
     
 ###############################################################################
 # Rapid Rotator Stellar Evolution #
@@ -1178,9 +1213,9 @@ def Kraft_break_expected_values(teffs):
         "Expected number of super-Kraft break stars scattering below Teff")
 
 ###############################################################################
-# Turnoff Age Metallicity #
+# Cool Dwarf Contamination #
 ###############################################################################
 
-def age_metallicity(metallicities, teffs, Ks):
-    '''Plot different bins to see turnoff age.'''
-
+def cool_dwarf_contaminants(teffs):
+    '''Plot number of subgiants scattering to lower temperatures.'''
+    pass
