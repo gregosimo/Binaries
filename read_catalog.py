@@ -79,11 +79,15 @@ def read_KIC_DR25_catalog(kicpath=paths.KIC_CATALOG):
     kiccat["feh"].unit = "Dex"
     kiccat["feh_err1"].unit = "Dex"
     kiccat["feh_err2"].unit = "Dex"
+    au.set_numeric_fill_values(kiccat, -9999)
     return kiccat
 
 def read_Pinsonneault_2012_catalog(pinpath=paths.PINSONNEAULT_CORRECTIONS):
     '''Read the corrected catalog from Pinsonneault et al (2012).'''
-    pincat = Table.read(str(pinpath), format="ascii.cds")
+    desired_cols = [
+        "KIC", "SDSS-Teff", "e_SDSS-Teff", "E_SDSS-Teff", "K-Teff"]
+    pincat = Table.read(str(pinpath), format="ascii.cds",
+                        include_names=desired_cols)
     return pincat
 
 def read_van_Saders_file(vspath=paths.VAN_SADERS_SDSS):
@@ -243,6 +247,7 @@ def read_Gaia_DR2_Kepler(gaia_dr2_kep_path=paths.GAIA_DR2_KEPLER_OVERLAP):
     dr2 = Table.read(gaia_dr2_kep_path, format="ascii.csv", 
                      include_names=desired_cols)
     dr2.rename_column("ID", "kepid")
+    au.set_numeric_fill_values(dr2, -9999)
 
     return dr2
 
@@ -254,6 +259,7 @@ def read_Berger_DR2_Kepler(berger_dr2_kep=paths.BERGER_DR2_KEPLER):
     berger = Table.read(berger_dr2_kep, format="ascii.csv",
                         include_names=desired_cols, delimiter="&")
     berger.rename_column("class\\\\", "class")
+    au.set_numeric_fill_values(berger, -9999)
     berger["class"] = np.asarray(npstr.replace(berger["class"], "\\\\", ""),
                                  dtype=np.int)
     return berger
@@ -328,6 +334,16 @@ def read_dr14_allStar(allstarpath=paths.DR14_ALLSTAR_PATH, opt="kepler"):
     WARNING: If opt is set to "", then full table will take 
     several hours to fit into memory.
     '''
+    desired_cols = [
+        "APOGEE_ID", "LOCATION_ID", "J", "J_ERR", "H", "H_ERR", "K", "K_ERR",
+        "RA", "DEC", "APOGEE_TARGET1", "APOGEE_TARGET2", "APOGEE_TARGET3",
+        "TARGFLAGS", "NVISITS", "STARFLAG", "STARFLAGS", "ANDFLAG", "ANDFLAGS",
+        "VHELIO_AVG", "VSCATTER", "VERR", "VERR_MED", "APOGEE2_TARGET1",
+        "APOGEE2_TARGET2", "APOGEE2_TARGET3", "SNREV", "MIN_H", "MAX_H",
+        "MIN_JK", "MAX_JK", "TEFF", "TEFF_ERR", "LOGG", "LOGG_ERR",
+        "VMICRO", "VMACRO", "VSINI", "M_H", "M_H_ERR", "ALPHA_M",
+        "ALPHA_M_ERR", "ASPCAPFLAG", "ASPCAPFLAGS", "FE_H", "PMRA", "PMDEC",
+        "PM_SRC", "ALL_VISITS", "VISITS"]
     if opt:
             allstar_hdus = fits.open(str(allstarpath), memmap=True)
             allstar_indices = allstar_hdus[2]
@@ -350,7 +366,12 @@ def read_dr14_allStar(allstarpath=paths.DR14_ALLSTAR_PATH, opt="kepler"):
             allstar = Table(allstar_kepler)
     else:
         allstar = Table.read(str(allstarpath), format="fits")
-    return allstar
+
+    short_allstar = allstar[desired_cols]
+    short_allstar["LOGG_FIT"] = allstar["FPARAM"][:,1]
+
+    au.mask_numeric_fill_values(short_allstar, -9999)
+    return short_allstar
 
 def read_Rafa_rotation(rottable=paths.RAFA_SAVITA_PERIODS):
     '''Reads in the rotation periods as determined by Rafa's pipeline.
@@ -417,7 +438,10 @@ def read_abridged_original_KIC(kicpath=paths.ORIG_KIC_ABRIDGED):
 
     This table will read in the original KIC parameters for all Kepler
     targets.'''
+    desired_cols = ["Kepler ID", "Teff (deg K)", "Log G (cm/s/s)"]
     kictable = read_MAST_file(kicpath)
+    kictable = kictable[desired_cols]
+    au.set_numeric_fill_values(kictable, -9999)
     return kictable
 
 def read_Dressing_Charbonneau_table(dcpath=paths.DRESSING_CHARBONNEAU_PROPS):
@@ -707,10 +731,8 @@ def stelparms_with_original_KIC(parmpath=paths.KIC_CATALOG,
     origcat = read_abridged_original_KIC(kicpath)
     orig_subtable = Table([
         origcat["Kepler ID"], origcat["Teff (deg K)"], 
-        origcat["Log G (cm/s/s)"], origcat["Metallicity (solar=0.0)"],
-        origcat["Radius (solar=1.0)"], origcat["Parallax (arcsec)"]], names=(
-            "kepid", "KIC Teff", "KIC logg", "KIC [Fe/H]", "KIC radius", 
-            "KIC parallax"))
+        origcat["Log G (cm/s/s)"]], names=(
+            "kepid", "KIC Teff", "KIC logg"))
     newcat = au.join_by_id(kiccat, orig_subtable, "kepid", "kepid",
                            join_type="left")
     return newcat
