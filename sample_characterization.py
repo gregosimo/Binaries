@@ -1137,31 +1137,36 @@ def compare_observed_age_uncertainties(
     plt.plot(teffs[sortindices], ageerr[sortindices], color=bc.red, marker="", 
              ls="-")
 
-def plot_DSEP_uncertainties(lower_ms_data):
+def plot_DSEP_uncertainties(lower_ms_data, low_met=-0.25, high_met=0.25):
     '''Show the DSEP vs. lower MS uncertainties.'''
     solmet_data = lower_ms_data[np.logical_and(
-        lower_ms_data["FE_H"] > -0.75, lower_ms_data["FE_H"] < -0.25)]
+        lower_ms_data["FE_H"] > low_met, lower_ms_data["FE_H"] < high_met)]
     hr.absmag_teff_plot(solmet_data["TEFF"], solmet_data["M_K"],
-                        color=bc.black, ls="", marker=".")
-    teff_bins = np.arange(3500, 5250+650, 500)
+                        color=bc.black, ls="", marker=".", label="")
+    teff_bins = np.arange(3500, 5250+250, 250)
     teff_indices = np.digitize(solmet_data["TEFF"], teff_bins)
     medians = np.zeros(len(teff_bins)-1)
     for i in range(len(medians)):
-        medians[i] = np.percentile(solmet_data["M_K"][teff_indices == i+1], 75)
+        try:
+            medians[i] = np.percentile(solmet_data["M_K"][teff_indices == i+1], 65)
+        except IndexError:
+            medians[i] = np.ma.masked
     avg_bin = (teff_bins[:-1]+teff_bins[1:])/2
 
-    hr.absmag_teff_plot(avg_bin, medians, color=bc.black, ls="--", marker=".")
+    hr.absmag_teff_plot(avg_bin, medians, color=bc.black, ls="--", marker=".",
+                        label="65th percentile")
 
-    iso = sed.DSEPInterpolator(3.0, -0.5, highT=5500, lowT=3000)
+    iso = sed.DSEPInterpolator(5.5, (high_met+low_met)/2, highT=5500, lowT=3000)
     iso_data = iso._get_isochrone_data("Ks")
     iso_trimmed = iso_data[10**iso_data["LogTeff"] > 3500]
     hr.absmag_teff_plot(10**iso_trimmed["LogTeff"], iso_trimmed["Ks"],
-                        color=bc.red, marker="o", ls="")
+                        color=bc.red, marker="o", ls="", label="DSEP")
     dsep_k = iso.teff_to_abs_mag(avg_bin, "Ks")
     hr.absmag_teff_plot(avg_bin, dsep_k, color=bc.red, ls="-", marker=".")
     
     displacement = medians - dsep_k - (np.mean(medians) - np.mean(dsep_k))
     print("RMS difference: {0:.2f}".format(np.std(displacement)))
+    plt.title("{0:.2f} < [Fe/H] < {1:.2f}".format(low_met, high_met))
     
 
     
