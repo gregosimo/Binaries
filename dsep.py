@@ -12,6 +12,7 @@ import catalog
 import path_config as paths
 import hrplots as hr
 import matplotlib.pyplot as plt
+import sed
 
 
 DSEP_lookup = {"M/Mo": -1, "LogL/Lo": -1, "LogTeff": -1, "LogG": -1, "B": 1, 
@@ -24,7 +25,7 @@ DSEP_lookup = {"M/Mo": -1, "LogL/Lo": -1, "LogTeff": -1, "LogG": -1, "B": 1,
 class DSEPInterpolator(object):
     '''Class to automatically handle interpolation of DSEP isochrones.'''
 
-    def __init__(self, age, feh, Y=1, afe=2, lowT=3000, highT=6000,
+    def __init__(self, age, feh, Y=1, afe=2, lowT=3250, highT=6000,
                  minlogG=4.2):
         '''Create DSEP Interpolator object set to a given age and metallicity.'''
         self.iso = {}
@@ -242,7 +243,7 @@ class DSEPInterpolator(object):
                 assert (fromcol, tocol, altmarker) not in self.interpdicts
                 # Get fromdata
                 try:
-                    fromblue, fromred = split_color(fromcol)
+                    fromblue, fromred = sed.split_color(fromcol)
                 except IndexError:
                     fromiso = self._get_isochrone_data(fromcol)
                     fromdata = fromiso[fromcol]
@@ -252,7 +253,7 @@ class DSEPInterpolator(object):
                     fromdata = fromisoblue[fromblue] - fromisored[fromred]
                 # Get todata
                 try:
-                    toblue, tored = split_color(tocol)
+                    toblue, tored = sed.split_color(tocol)
                 except IndexError:
                     toiso = self._get_isochrone_data(tocol)
                     todata = toiso[tocol]
@@ -260,6 +261,9 @@ class DSEPInterpolator(object):
                     toisoblue = self._get_isochrone_data(toblue)
                     toisored = self._get_isochrone_data(tored)
                     todata = toisoblue[toblue] - toisored[tored]
+
+                col_precision = {"LogTeff": 3}
+                fromdata = np.round(fromdata, col_precision[fromcol])
 
                 # Check if created branch is double-valued.
                 doubletup = check_sequence_double_valued(fromdata)
@@ -369,6 +373,26 @@ def check_sequence_double_valued(vals):
         return (min_index, "min")
     else:
         return False
+
+def alpha_bin(alphas):
+    '''Assign the values of alpha to that appropriate for DSEP.'''
+    # These are the alpha/Fe bins that will be fed into DSEP.
+    alpha_binedges = np.arange(-0.1, 0.9, 0.2)
+    # a/Fe < -0.1 corresponds to 1, and a/Fe > 0.7 corresponds to 6.
+    alpha_bins = np.digitize(alphas, alpha_binedges)+1
+    return alpha_bins
+
+def alpha_compatible_with_metallicity(alphas, fehs):
+    '''Validate whether the alpha values are compatible with the metallicities.
+
+    DSEP may crash if the metallicity and alpha enhancement are not compatible.
+    In particular, high alpha enhancements are only available for low
+    metallicity stars.'''
+    # DSEP should crash or something if the metallicity and alpha enhancement
+    # are not compatible. In particular, high alpha enhancements are only
+    # available for low metallicity stars. I want to ensure that this will be
+    # the case before running into weird DSEP bugs.
+    assert(np.all(np.logical_or(alphas < 0.3, fehs <= 0.0)))
 
 ###############################################################################
 # Plot isochrones #
@@ -499,7 +523,8 @@ def ensure_array_increasing(xvals, yvals):
     sorted_xvals_indices = np.argsort(newxvals)
     sorted_xvals = newxvals[sorted_xvals_indices]
     sorted_yvals = newyvals[sorted_xvals_indices]
-    assert np.all(sorted_xvals_indices - np.arange(len(sorted_xvals)) < 5)
+    xdiffs = np.diff(newxvals)
+    assert abs(min(xdiffs)) < 3*min(xdiffs[xdiffs > 0])
 
     return sorted_xvals, sorted_yvals
 

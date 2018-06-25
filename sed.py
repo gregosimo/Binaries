@@ -3039,31 +3039,6 @@ def binary_luminosity_ratio_evolution():
         massratio))
     plt.legend(loc="upper right")
 
-def alpha_bin(alphas):
-    '''Assign the values of alpha to that appropriate for DSEP.'''
-    # These are the alpha/Fe bins that will be fed into DSEP.
-    alpha_binedges = np.arange(-0.1, 0.9, 0.2)
-    # a/Fe < -0.1 corresponds to 1, and a/Fe > 0.7 corresponds to 6.
-    alpha_bins = np.digitize(alphas, alpha_binedges)+1
-    return alpha_bins
-
-def alpha_compatible_with_metallicity(alphas, fehs):
-    '''Validate whether the alpha values are compatible with the metallicities.
-
-    DSEP may crash if the metallicity and alpha enhancement are not compatible.
-    In particular, high alpha enhancements are only available for low
-    metallicity stars.'''
-    # DSEP should crash or something if the metallicity and alpha enhancement
-    # are not compatible. In particular, high alpha enhancements are only
-    # available for low metallicity stars. I want to ensure that this will be
-    # the case before running into weird DSEP bugs.
-    assert(np.all(np.logical_or(alphas < 0.3, fehs <= 0.0)))
-
-
-
-
-
-    
 if __name__ == "__main__":
 
     Bouy_Colors_plot_excesses()
