@@ -566,108 +566,11 @@ def generate_radius_column(
 
     apotable[radcol] = radius_column
 
-def generate_DSEP_radius_column(
-    apotable, teffcol="TEFF", fehcol="FE_H", age=3, radcol="APOGEE radius"):
-    '''Add a radius column to apotable.
-
-    The column to convert teff to radius should be given as Teffcol. The radius
-    will be stored in the radcol column.'''
-    radiusarr = np.zeros(len(apotable))
-    # A dictionary referencing DSEP models according to metallicity.
-    DSEP_models = {}
-    # I want to round metallicity to the nearest hundredth
-    rounded_metallicities = np.round(apotable[fehcol], 2)
-    # What to do about -9999 or masked arrays
-    for i in range(len(rounded_metallicities)):
-        try:
-            dsep_interper = DSEP_models[rounded_metallicities[i]]
-        except KeyError:
-            dsep_interper = sed.DSEPInterpolator(age, rounded_metallicities[i])
-
-        teffpoint = apotable[teffcol][i]
-        try:
-            radiusarr[i] = dsep_interper.teff_to_radius_interpolation_sb(teffpoint)
-        # This will be called if the DSEP interpolator has one of the values
-        # being out of bounds.
-        except subprocess.CalledProcessError:
-            radiusarr[i] = np.nan
-        else:
-            assert teffpoint > 0
-
-    apotable[radcol] = radiusarr
-
-def generate_DSEP_radius_column_with_errors(
-        apotable, teffcol="TEFF", fehcol="FE_H", ageval=3, oldage=10,
-        youngage=1, radcol="DSEP radius", topraderrcol="DSEP radius upper",
-        bottomraderrcol="DSEP radius lower"):
-    '''Add radius and error columns to apotable.
-
-    The columns that will be added are a column for the radius, the upper limit
-    and the lower limit. The ages corresponding to the representative, old, and
-    young limits should also be specified.'''
-    generate_DSEP_radius_column(
-        apotable, teffcol=teffcol, fehcol=fehcol, age=ageval, radcol=radcol)
-    generate_DSEP_radius_column(
-        apotable, teffcol=teffcol, fehcol=fehcol, age=youngage,
-        radcol=bottomraderrcol)
-    apotable[bottomraderrcol] = apotable[radcol] - apotable[bottomraderrcol]
-    generate_DSEP_radius_column(
-        apotable, teffcol=teffcol, fehcol=fehcol, age=oldage,
-        radcol=topraderrcol)
-    apotable[topraderrcol] = apotable[radcol] - apotable[topraderrcol]
 
 ###############################################################################
 # Create a absolute magnitude #
 ###############################################################################
 
-def calc_abs_magnitude(appmag, dist, extinction):
-    '''Absolute magnitude given apparent magnitude, distance, and extinction.
-
-    Applies the usual relation M = m - 5 log10 (d/10) - A to calculate absolute
-    magnitude.'''
-
-    absmag = appmag - 5 * np.log10(dist / 10) - extinction
-    return absmag
-
-def generate_abs_mag_column(
-        apotable, appcol, abscol, v_to_ext, avcol="Av",  distcol="dis"):
-    '''Create a extinction-corrected column of absolute magnitudes.
-
-    For the table in apotable, use the data in appcol, distcol, and avcol to
-    generate absolute magnitudes, which will be stored in abscol. A function
-    which converts Av to the extinction in a given band to the extinction in
-    the desired band also needs to be passed.
-    '''
-    new_ext = v_to_ext(apotable[avcol])
-    apotable[abscol] = calc_abs_magnitude(
-        apotable[appcol], apotable[distcol], new_ext)
-
-def generate_abs_mag_column_with_errors(
-        apotable, appcol, apperrcol, abscol, absupcol, absdowncol, v_to_ext,
-        v_err_to_ext_err, distcol="dis", distupcol="disep", 
-        distdowncol="disem", avcol="av", avupcol="av_err1", 
-        avdowncol="av_err2", null_value=np.nan):
-    '''Create absolute magnitude columns with Gaia info and photometry.
-
-    This calculates the given K-band absolute magnitude using the usual
-    relation. It also approximates errors by adding the terms in quadrature.
-    For blended objects, the null value for the K-band magnitude is propagated.
-    '''
-    generate_abs_mag_column(
-        apotable, appcol, abscol, v_to_ext, avcol, distcol)
-    # If the photometry is bad, label the absolute magnitude as bad as well.
-    apotable[absupcol] = np.where(
-        apotable[apperrcol] != null_value, 
-        np.sqrt(apotable[apperrcol]**2 + (
-            5 * (apotable[distdowncol]) / apotable[distcol] / np.log(10))**2 + 
-                v_err_to_ext_err(apotable[avcol], apotable[avupcol])**2), 
-        null_value)
-    apotable[absdowncol] = np.where(
-        apotable[apperrcol] != null_value, 
-        np.sqrt(apotable[apperrcol]**2 + (
-            5 * (apotable[distupcol]) / apotable[distcol] / np.log(10))**2 + 
-                v_err_to_ext_err(apotable[avcol], apotable[avdowncol])**2), 
-        null_value)
 
 ##########################
 # Extinction Conversions #
