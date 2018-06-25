@@ -6,7 +6,7 @@ import shutil
 import numpy as np
 from scipy.interpolate import interp1d,InterpolatedUnivariateSpline
 from astropy.table import Table
-import astropy_utils as au
+import astropy_util as au
 
 import catalog
 import path_config as paths
@@ -756,3 +756,30 @@ def format_DSEP_isochrone_filename(feh, afe, Y, bands):
     finalstr = "{0}{1}{2}.{3}".format(feh_str, afe_str, y_str, band_str)
 
     return finalstr
+
+def sign_switch(val, pos_sym, neg_sym, zero=0):
+    '''Return symbol based on sign of val.
+
+    This function will return pos_sym if val is positive, neg_sym if val is
+    negative. If val is zero, then the behavior depends on the zero flag. If
+    zero is 0, then an empty string is returned. If zero is positive, then the
+    positive symbol will be returned. If zero is negative, then the negative
+    symbol will be returned.
+    '''
+    if val > 0:
+        sym = pos_sym
+    elif val < 0:
+        sym = neg_sym
+    elif val == 0:
+        if zero > 0:
+            sym = pos_sym
+        elif zero < 0:
+            sym = pos_sym
+        elif zero == 0:
+            sym = ""
+        else:
+            raise ValueError("Zero argument should be a number.")
+    else:
+        ValueError("Value to needs to be a number.")
+
+    return sym

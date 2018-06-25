@@ -15,7 +15,6 @@ import matplotlib.pyplot as plt
 import astropy_util as au
 
 import path_config as paths
-import catalog
 import hrplots as hr
 
 DESP_PATH = "/home/regulus/simonian/DSep/"
@@ -2965,93 +2964,23 @@ def DSEP_subgiant_point_minimum(feh, age=14, lowK=2.6, highK=3.2):
 
     return (max_mk, max_teff)
 
-
-
 ###############################################################################
-# Reddening Routines #
+# Convert between absolute and apparent magnitudes #
 ###############################################################################
 
-reddening_coeffs = {"B": 1.337, "V": 1.000, "I": 0.479, "J": 0.282, "H": 0.190,
-                    "K": 0.114, "Ks": 0.114, "Kp": 0.9}
+def calc_abs_magnitude(appmag, dist, extinction):
+    '''Absolute magnitude given apparent magnitude, distance, and extinction.
 
-# These are coefficients that are given by the IRSA dust map service.
-reddening_coeffs = {"B": 1.337, "V": 1.000, "I": 0.479, "J": 0.282, "H": 0.190,
-                    "K": 0.114, "Ks": 0.114, "Kp": 0.9}
+    Applies the usual relation M = m - 5 log10 (d/10) - A to calculate absolute
+    magnitude. Distance should be given in parsecs, and extinction should be in
+    units of total extinction.'''
 
-def redden_mag(band, truemag, EB_V, Rv=3.1):
-    '''Redden the true magnitude value given E(B-V).
-    
-    Uses calculated values from CCM to calculate the reddened magnitude given
-    an E(B-V) value.
-    '''
-    extinction = Rv * reddening_coeffs[band] * EB_V
-    extinctedmag = truemag + extinction
+    absmag = appmag - 5 * np.log10(dist / 10) - extinction
+    return absmag
 
-    return extinctedmag
-
-def deredden_mag(band, extinctedmag, EB_V, Rv=3.1):
-    '''Deredden an observed magnitude given E(B-V).
-
-    Uses calculated values from CCM to obtain the dereddened magnitude given an
-    E(B-V) value.
-    '''
-    extinction = redden_mag(band, 0, EB_V, Rv=Rv)
-    truemag = extinctedmag - extinction
-
-    return truemag
-
-def redden_color(color, truecolor, EB_V, Rv=3.1):
-    '''Redden the true color given E(B-V).
-
-    Use calculated values from CCM to calculate the reddened color given an
-    E(B-V) value.
-    '''
-    blueband, redband = split_color(color)
-    blue_extinction = redden_mag(blueband, 0, EB_V, Rv=Rv)
-    red_extinction = redden_mag(redband, 0, EB_V, Rv=Rv)
-    reddened_color = truecolor + (blue_extinction - red_extinction)
-
-    return reddened_color
-
-def deredden_color(color, extincted_color, EB_V, Rv=3.1):
-    '''Deredden the observed colro given E(B-V).
-
-    Use calculated values from CCM to deredden a cover given an E(B-V) value.
-    '''
-    reddening_coeff = redden_color(color, 0, EB_V, Rv=Rv)
-    dereddened_color = extincted_color - reddening_coeff
-
-    return dereddened_color
 ###############################################################################
 # Miscellaneous Routines
 ###############################################################################
-
-def sign_switch(val, pos_sym, neg_sym, zero=0):
-    '''Return symbol based on sign of val.
-
-    This function will return pos_sym if val is positive, neg_sym if val is
-    negative. If val is zero, then the behavior depends on the zero flag. If
-    zero is 0, then an empty string is returned. If zero is positive, then the
-    positive symbol will be returned. If zero is negative, then the negative
-    symbol will be returned.
-    '''
-    if val > 0:
-        sym = pos_sym
-    elif val < 0:
-        sym = neg_sym
-    elif val == 0:
-        if zero > 0:
-            sym = pos_sym
-        elif zero < 0:
-            sym = pos_sym
-        elif zero == 0:
-            sym = ""
-        else:
-            raise ValueError("Zero argument should be a number.")
-    else:
-        ValueError("Value to needs to be a number.")
-
-    return sym
 
 def sum_binary_color(color1, color2, fluxratio):
     '''Calculate summed color from components.

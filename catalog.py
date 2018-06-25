@@ -1831,14 +1831,6 @@ def generate_DSEP_radius_column_with_errors(
 # Absolute Magnitudes #
 #######################
 
-def calc_abs_magnitude(appmag, dist, extinction):
-    '''Absolute magnitude given apparent magnitude, distance, and extinction.
-
-    Applies the usual relation M = m - 5 log10 (d/10) - A to calculate absolute
-    magnitude.'''
-
-    absmag = appmag - 5 * np.log10(dist / 10) - extinction
-    return absmag
 
 def generate_abs_mag_column(
         apotable, appcol, abscol, v_to_ext, avcol="Av",  distcol="dis"):
