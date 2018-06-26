@@ -804,7 +804,7 @@ class APOGEESplitter(KeplerSplitter):
             invert_inequality=invert_inequality)
 
     def split_metallicity(self, splitvalues, splitnames, col="M_H",
-                          met_crit="Metallicity", invert_inequality=False):
+                          met_crit="Metallicity", null_value=None, invert_inequality=False):
         '''Split the data according to metallicity.
 
         Split the sample based on the boundaries given in splitvalues. The
@@ -813,8 +813,9 @@ class APOGEESplitter(KeplerSplitter):
 
         For more information on invert_inequality, see split_by_col.
         '''
-        self.split_by_col(col, splitvalues, splitnames, met_crit,
-                          invert_inequality=invert_inequality)
+        self.split_by_col(
+            col, splitvalues, splitnames, met_crit, null_value=null_value, 
+            invert_inequality=invert_inequality)
 
 
     def split_spectroscopic_rapid_rotators(
