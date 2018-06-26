@@ -43,10 +43,10 @@ import catalog
 import hrplots as hr
 import biovis_colors as bc
 import data_splitting as data
-import sed
 import rotation_consistency as rot
 import observations as obs
 import read_catalog as catin
+import dsep
 
 ################################################################################
 # Generate binned distributions #
@@ -860,11 +860,11 @@ def calc_DSEP_model_mags(teffs, fehs, alpha_fe, mag, age=3):
     For a variety of temperatures with associated metallicities, calculate the
     absolute magnitude in a given band for each of those temperatures. The age
     of the distribution can also be specified.'''
-    alpha_ind = sed.alpha_bin(alpha_fe)
-    sed.alpha_compatible_with_metallicity(alpha_fe, fehs)
+    alpha_ind = dsep.alpha_bin(alpha_fe)
+    dsep.alpha_compatible_with_metallicity(alpha_fe, fehs)
     # If there is only one metallicity, then just make a single isochrone.
     if np.isscalar(fehs):
-        dsep_interper = sed.DSEPInterpolator(
+        dsep_interper = dsep.DSEPInterpolator(
             age, fehs, afe=alpha_ind, highT=7000)
         magarr = dsep_interper.teff_to_abs_mag(teffs, mag)
     else:
@@ -879,7 +879,7 @@ def calc_DSEP_model_mags(teffs, fehs, alpha_fe, mag, age=3):
             try:
                 dsep_interper = DSEP_models[mettup]
             except KeyError:
-                dsep_interper = sed.DSEPInterpolator(
+                dsep_interper = dsep.DSEPInterpolator(
                     age, rounded_metallicities[i], afe=alpha_ind[i], 
                     highT=7000)
                 DSEP_models[mettup] = dsep_interper
@@ -1059,7 +1059,7 @@ def plot_DSEP_uncertainties(lower_ms_data, low_met=-0.25, high_met=0.25):
     hr.absmag_teff_plot(avg_bin, medians, color=bc.black, ls="--", marker=".",
                         label="65th percentile")
 
-    iso = sed.DSEPInterpolator(5.5, (high_met+low_met)/2, highT=5500, lowT=3000)
+    iso = dsep.DSEPInterpolator(5.5, (high_met+low_met)/2, highT=5500, lowT=3000)
     iso_data = iso._get_isochrone_data("Ks")
     iso_trimmed = iso_data[10**iso_data["LogTeff"] > 3500]
     hr.absmag_teff_plot(10**iso_trimmed["LogTeff"], iso_trimmed["Ks"],
@@ -1080,7 +1080,7 @@ def plot_DSEP_uncertainties(lower_ms_data, low_met=-0.25, high_met=0.25):
 def mark_Kraft_break_evolution(metallicity):
     '''Show where stars at the Kraft break evolve to in HR diagram.'''
     # Find Kraft break boundary in mass.
-    young_dsep = sed.DSEPInterpolator(age=1, feh=metallicity, highT=7000,
+    young_dsep = dsep.DSEPInterpolator(age=1, feh=metallicity, highT=7000,
                                       minlogG=1.0)
     kraft_mass = young_dsep.teff_to_mass(6200)
 
@@ -1089,7 +1089,7 @@ def mark_Kraft_break_evolution(metallicity):
     kraft_ks = []
     for age in ages:
         # Interpolate HR diagram location.
-        dsep = sed.DSEPInterpolator(age=age, feh=metallicity, highT=7000,
+        dsep = dsep.DSEPInterpolator(age=age, feh=metallicity, highT=7000,
                                     minlogG=1.0)
         try:
             kraft_teffs.append(dsep.mass_to_teff(kraft_mass))
