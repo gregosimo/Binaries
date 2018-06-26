@@ -14,9 +14,11 @@ import hrplots as hr
 import matplotlib.pyplot as plt
 import sed
 
+DESP_PATH = "/home/regulus/simonian/DSep/"
+
 
 DSEP_lookup = {"M/Mo": -1, "LogL/Lo": -1, "LogTeff": -1, "LogG": -1, "B": 1, 
-               "V": 1, "J": 1, "H": 1, "K": 1, "Ks": 1}
+               "V": 1, "I": 1, "J": 1, "H": 1, "K": 1, "Ks": 1}
 
 ###############################################################################
 # An object to interface with the DSEP isochrone #
@@ -105,6 +107,17 @@ class DSEPInterpolator(object):
                     max_teff))
             raise
         return mags
+
+    def teff_to_color(self, teffs, color, bands=1, branch="lower"):
+        '''Convert Teff to a color.'''
+        blueband, redband = sed.split_color(color)
+        blue = self.teff_to_abs_mag(
+            teffs, blueband, bands=bands, branch=branch)
+        red = self.teff_to_abs_mag(
+            teffs, redband, bands=bands, branch=branch)
+
+        color = blue-red
+        return color
 
     def teff_err_to_abs_mag_err(self, teffs, teff_err, outmag, bands=1,
                                 branch="lower"):
@@ -524,7 +537,7 @@ def ensure_array_increasing(xvals, yvals):
     sorted_xvals = newxvals[sorted_xvals_indices]
     sorted_yvals = newyvals[sorted_xvals_indices]
     xdiffs = np.diff(newxvals)
-    assert abs(min(xdiffs)) < 3*min(xdiffs[xdiffs > 0])
+    assert abs(min(xdiffs)) < 1*min(xdiffs[xdiffs > 0])
 
     return sorted_xvals, sorted_yvals
 
