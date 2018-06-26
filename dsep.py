@@ -524,7 +524,7 @@ def ensure_array_increasing(xvals, yvals):
     sorted_xvals = newxvals[sorted_xvals_indices]
     sorted_yvals = newyvals[sorted_xvals_indices]
     xdiffs = np.diff(newxvals)
-    assert abs(min(xdiffs)) < 3*min(xdiffs[xdiffs > 0])
+    assert abs(min(xdiffs)) < 4*min(xdiffs[xdiffs > 0])
 
     return sorted_xvals, sorted_yvals
 
