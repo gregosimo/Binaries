@@ -16,8 +16,8 @@ import astropy_util as au
 
 import path_config as paths
 import hrplots as hr
-
-DESP_PATH = "/home/regulus/simonian/DSep/"
+import dsep
+import biovis_colors as bc
 
 class TableHolder(object):
     pass
@@ -266,13 +266,22 @@ def Casagrande_inverted_color(color, teffs, metallicity,
     # the components of the solution:
     a = casagrande_row["a2"]
     b = casagrande_row["a1"] + casagrande_row["a3"] * metallicity
-    theta_eff = 5060 / teffs
+    theta_eff = 5040 / teffs
     c = (casagrande_row["a0"] + casagrande_row["a4"] * metallicity +
          casagrande_row["a5"] * metallicity**2 - theta_eff)
 
     color = (-b + np.sqrt(b**2 - 4 * a * c)) / (2 * a)
 
     return color
+
+def Casagrande_scatter(color, tblpath=paths.CASAGRANDE_TABLE_4):
+    '''Get the temperature scatter that Casagrande measured for the color.'''
+    casagrande_teff_table = read_Casagrande_10_Table_4(tblpath)
+
+    casagrande_scatter = casagrande_teff_table[
+        casagrande_teff_table["Color"] == color]["unc"]
+
+    return casagrande_scatter
 
 def Casagrande_Bolometric_Flux(
     band, mags, color, colorvals, metallicity, extrapolation_exception=True,
@@ -2963,6 +2972,37 @@ def DSEP_subgiant_point_minimum(feh, age=14, lowK=2.6, highK=3.2):
     max_teff = iso_teff[max_index]
 
     return (max_mk, max_teff)
+
+def compare_DSEP_Casagrande_colors(color):
+    '''Plot Teff-color relation predicted by Casagrande and DSEP.'''
+    teffs = np.linspace(4300, 5500, 100)
+
+    cas_convert = {"V-I": "V-IC", "V-Ks": "V-KS"}
+
+    met = -1.0
+    cas_color = cas_convert.get(color, color)
+    cas_col = Casagrande_inverted_color(cas_color, teffs, met)
+    cas_scatter = Casagrande_scatter(cas_color)
+
+    iso = dsep.DSEPInterpolator(5.5, met)
+    iso_old = dsep.DSEPInterpolator(8.0, met)
+    iso_young = dsep.DSEPInterpolator(3.0, met)
+    dsep_col = iso.teff_to_color(teffs, color)
+    old_col = iso_old.teff_to_color(teffs, color)
+    young_col = iso_young.teff_to_color(teffs, color)
+
+    plt.plot(teffs, cas_col, color=bc.blue, marker="", label="Casagrande",
+             ls="-")
+    plt.plot(teffs+cas_scatter, cas_col, color=bc.blue, marker="", ls="--")
+    plt.plot(teffs-cas_scatter, cas_col, color=bc.blue, marker="", ls="--")
+    plt.plot(teffs, dsep_col, color=bc.red, marker="", label="DSEP", ls="-")
+    plt.plot(teffs, old_col, color=bc.red, marker="", ls="--")
+    plt.plot(teffs, young_col, color=bc.red, marker="", ls="--")
+    hr.invert_x_axis()
+    plt.ylabel(color)
+    plt.xlabel("Teff (K)")
+    plt.legend(loc="upper left")
+    plt.title("[Fe/H] = {0:.1f}".format(met))
 
 ###############################################################################
 # Convert between absolute and apparent magnitudes #
