@@ -38,9 +38,8 @@ SDSS3_URL = "http://data.sdss3.org"
 
 NUM_KEPLER_QUARTERS = 17
 
-APOGEE_NULL = -9999.0
-DLSB_PATH = browse.DEFAULT_DLSB_DB
-NON_DLSB_PATH = browse.DEFAULT_NULL_DB
+DLSB_PATH = paths.DLSB_DB
+NON_DLSB_PATH = paths.NODL_DB
 
 
 ################################################################################
@@ -348,13 +347,13 @@ def split_McQuillan_periods(fullsamp, kiccol):
 # APOGEE filters #
 ##################
 
-def invalid_indices(apotable, colname, maskvalue=APOGEE_NULL):
+def invalid_indices(apotable, colname, maskvalue=np.ma.masked):
     '''Mark the indices where the column values are mask values.'''
     badindices = au.mark_selections_in_columns(apotable[colname], [maskvalue])
 
     return badindices
 
-def filter_invalid_APOGEE_entries(apotable, colname, maskvalue=APOGEE_NULL):
+def filter_invalid_APOGEE_entries(apotable, colname, maskvalue=np.ma.masked):
     '''Remove rows from apotable where column values are the mask values.
 
     This will filter apotable where only the rows that do not have the mask

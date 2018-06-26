@@ -16,6 +16,7 @@ import sample_characterization as samp
 import hrplots as hr
 import rotation_consistency as rot
 import eclipsing_binaries as ebs
+import path_config as paths
 
 
 class DataSplitter:
@@ -861,8 +862,7 @@ class APOGEESplitter(KeplerSplitter):
 
     def split_dlsb(
         self, apid_col="APOGEE_ID", dl_names=("DLSB", "No DLSB", "Unknown DLSB"),
-        dlsb_crit="DLSB", dlsb_db=catalog.DLSB_PATH, 
-        nodl_db=catalog.NON_DLSB_PATH):
+        dlsb_crit="DLSB", dlsb_db=paths.DLSB_DB, nodl_db=paths.NODL_DB):
         '''Split sample based on presence of double-lines.
 
         Split the sample based on previous observations of double-lined
