@@ -2973,13 +2973,12 @@ def DSEP_subgiant_point_minimum(feh, age=14, lowK=2.6, highK=3.2):
 
     return (max_mk, max_teff)
 
-def compare_DSEP_Casagrande_colors(color):
+def compare_DSEP_Casagrande_colors(color, met):
     '''Plot Teff-color relation predicted by Casagrande and DSEP.'''
     teffs = np.linspace(4300, 5500, 100)
 
-    cas_convert = {"V-I": "V-IC", "V-Ks": "V-KS"}
+    cas_convert = {"V-I": "V-IC", "V-Ks": "V-KS", "V-K": "V-KS"}
 
-    met = -1.0
     cas_color = cas_convert.get(color, color)
     cas_col = Casagrande_inverted_color(cas_color, teffs, met)
     cas_scatter = Casagrande_scatter(cas_color)
