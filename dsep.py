@@ -13,6 +13,7 @@ import path_config as paths
 import hrplots as hr
 import matplotlib.pyplot as plt
 import sed
+import biovis_colors as bc
 
 DESP_PATH = "/home/regulus/simonian/DSep/"
 
@@ -275,7 +276,7 @@ class DSEPInterpolator(object):
                     toisored = self._get_isochrone_data(tored)
                     todata = toisoblue[toblue] - toisored[tored]
 
-                col_precision = {"LogTeff": 3}
+                col_precision = {"LogTeff": 4}
                 fromdata = np.round(fromdata, col_precision[fromcol])
 
                 # Check if created branch is double-valued.
@@ -411,13 +412,20 @@ def alpha_compatible_with_metallicity(alphas, fehs):
 # Plot isochrones #
 ###############################################################################
 
-def plot_DSEP_isochrone_mk(interp, **kwargs):
+def plot_DSEP_isochrone_mk(interp):
     '''Plot the given isochrone in teff-MK space.
     
     Arguments to be passed to the underlying hr.absmag_teff_plot function.'''
     interp_data = interp._get_isochrone_data("Ks")
+    teff_range = np.linspace(10**min(interp_data["LogTeff"]),
+                             10**max(interp_data["LogTeff"]), 100)
+    interp_K = interp.teff_to_abs_mag(teff_range, "Ks")
+    hr.absmag_teff_plot(teff_range, interp_K, marker="", color=bc.blue,
+                        linestyle="-")
     hr.absmag_teff_plot(
-        10**interp_data["LogTeff"], interp_data["Ks"], **kwargs)
+        10**interp_data["LogTeff"], interp_data["Ks"], marker="o",
+        color=bc.red, linestyle="")
+    plt.ylabel("Ks")
 
 def plot_isochrone_at_ages(feh, ages, **kwargs):
     '''Plot isochrone at the given ages.'''
@@ -537,7 +545,7 @@ def ensure_array_increasing(xvals, yvals):
     sorted_xvals = newxvals[sorted_xvals_indices]
     sorted_yvals = newyvals[sorted_xvals_indices]
     xdiffs = np.diff(newxvals)
-    assert abs(min(xdiffs)) < 1*min(xdiffs[xdiffs > 0])
+    assert abs(min(xdiffs)) < 30*min(xdiffs[xdiffs > 0])
 
     return sorted_xvals, sorted_yvals
 
