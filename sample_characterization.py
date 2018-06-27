@@ -871,7 +871,8 @@ def calc_DSEP_model_mags(teffs, fehs, alpha_fe, mag, age=3):
         magarr = np.zeros(len(teffs))
         # A dictionary referencing DSEP models according to metallicity.
         DSEP_models = {}
-        rounded_metallicities = np.round(fehs*2, 1)/2
+#        rounded_metallicities = np.round(fehs*2, 1)/2
+        rounded_metallicities = np.round(fehs, 2)
 
         # What to do about -9999 or masked arrays
         for i in range(len(rounded_metallicities)):
