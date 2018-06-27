@@ -406,7 +406,70 @@ def alpha_compatible_with_metallicity(alphas, fehs):
     # are not compatible. In particular, high alpha enhancements are only
     # available for low metallicity stars. I want to ensure that this will be
     # the case before running into weird DSEP bugs.
-    assert(np.all(np.logical_or(alphas < 0.3, fehs <= 0.0)))
+    return np.all(np.logical_or(alphas < 0.3, fehs <= 0.0))
+
+###############################################################################
+# Flexible DSEP interpolator #
+###############################################################################
+
+def build_grid_interpolator():
+    '''Build a bilinear interpolator for DSEP isochrones.'''
+    ages = np.concatenate([np.arange(1, 5.25, 0.25), np.arange(5, 15.5, 0.5)])
+    metallicites = np.array([-2.5, -2, -1.5, -1, 0.0, 0.2, 0.3, 0.5])
+    return
+
+def metallicity_dependence(teff, age, afe, band="Ks"):
+    '''Calculate the metallicity dependence of isochrones at fixed params.'''
+    fehs = np.array([-2.4, -2, -1.5, -1, 0.0, 0.2, 0.3, 0.5])
+
+    kvals = np.zeros(len(fehs))
+    for i, feh in enumerate(fehs):
+        if alpha_compatible_with_metallicity(afe, feh):
+            alpha_ind = alpha_bin(afe)
+            iso = DSEPInterpolator(age, feh, afe=alpha_ind)
+            kvals[i] = iso.teff_to_abs_mag(teff, band)
+        else:
+            print(feh)
+            kvals[i] = np.nan
+
+    plt.plot(fehs, kvals, marker="o", ls="-", color=bc.blue)
+    plt.xlabel("[Fe/H]")
+    plt.ylabel(band)
+    plt.title("Metallicity dependence (Age: {0:.2f}, Teff: {1:d}, "
+              "[a/Fe]: {2:.1f})".format(age, teff, afe))
+
+def alpha_dependence(teff, age, feh, band="Ks", K_expect_point=0.0):
+    '''Calculate the alpha dependence of isochrones at fixed params.'''
+    alphas = np.array([-0.2, 0.0, 0.2, 0.4, 0.6, 0.8])
+    alpha_err = 0.013
+
+    kvals = np.zeros(len(alphas))
+    for i, alpha in enumerate(alphas):
+        if alpha_compatible_with_metallicity(alpha, feh):
+            alpha_ind = alpha_bin(alpha)
+            iso = DSEPInterpolator(age, feh, afe=alpha_ind)
+            kvals[i] = iso.teff_to_abs_mag(teff, band)
+        else:
+            print(alpha)
+            kvals[i] = np.nan
+
+    finite_indices = np.isfinite(kvals)
+    polycoeff = np.polyfit(alphas[finite_indices], kvals[finite_indices], 2)
+    polynom = np.poly1d(polycoeff)
+    interp_alphas = np.linspace(min(alphas), max(alphas), 100)
+    interp_ys = polynom(interp_alphas)
+
+    K_expect = (polycoeff[0] * (alpha_err**2 + K_expect_point**2) + 
+                polycoeff[1] * K_expect_point + polycoeff[2])
+    print("Expected K at [a/Fe]={0:.1f}: {1:.3f}".format(
+        K_expect_point, K_expect))
+
+    plt.plot(alphas, kvals, marker="o", ls="", color=bc.blue)
+    plt.plot(interp_alphas, interp_ys, marker="", ls="-", color=bc.red)
+    plt.xlabel("[a/Fe]")
+    plt.ylabel(band)
+    plt.title("Alpha dependence (Age: {0:.2f}, Teff: {1:d}, "
+              "[Fe/H]: {2:.2f})".format(age, teff, feh))
 
 ###############################################################################
 # Plot isochrones #
