@@ -5,6 +5,7 @@ import shutil
 
 import numpy as np
 from scipy.interpolate import interp1d,InterpolatedUnivariateSpline
+from scipy.integrate import quad
 from astropy.table import Table
 import astropy_util as au
 
@@ -28,7 +29,7 @@ DSEP_lookup = {"M/Mo": -1, "LogL/Lo": -1, "LogTeff": -1, "LogG": -1, "B": 1,
 class DSEPInterpolator(object):
     '''Class to automatically handle interpolation of DSEP isochrones.'''
 
-    def __init__(self, age, feh, Y=1, afe=2, lowT=3250, highT=6000,
+    def __init__(self, age, feh, Y=1, afe=2, lowT=3250, highT=7000,
                  minlogG=4.2):
         '''Create DSEP Interpolator object set to a given age and metallicity.'''
         self.iso = {}
@@ -418,51 +419,310 @@ def build_grid_interpolator():
     metallicites = np.array([-2.5, -2, -1.5, -1, 0.0, 0.2, 0.3, 0.5])
     return
 
-def metallicity_dependence(teff, age, afe, band="Ks"):
+def integrate_teff(age, feh, alpha, obs_teff, teff_err=130, band="Ks"):
+    '''Calculate the absolute magnitude over Teff convolved with uncertainties.
+    
+    This function assumes age, [Fe/H], and [a/Fe] are held constant.'''
+    if not alpha_compatible_with_metallicity(alpha, feh):
+        raise ValueError("[a/Fe] not compatible with [Fe/H]")
+    
+    alpha_ind = alpha_bin(alpha)
+    iso = DSEPInterpolator(age, feh, afe=alpha_ind, highT=7000)
+    iso_data = iso._get_isochrone_data("Ks")
+    logteffs = iso_data["LogTeff"]
+    kvals = iso_data["Ks"]
+
+    interper = iso._load_interpdict("LogTeff", "Ks")
+    newinterper = interp1d(
+        interper._data[0], interper._data[1], kind="linear",
+        bounds_error=False, fill_value=0)
+    interp_teffs = np.linspace(min(logteffs), max(logteffs), 100)
+    interp_ys = newinterper(interp_teffs)
+
+    a = max(3000, 10**min(logteffs))
+    b = min(7000, 10**max(logteffs))
+    mean_K, err = quad(teff_error_product, a, b,
+                    args=(obs_teff, teff_err, newinterper))
+
+    return mean_K
+
+def integrate_alpha_over_teff(
+    age, feh, obs_alpha, obs_teff, alpha_err=0.013, teff_err=135, band="Ks"):
+    '''Given Teff, age, and [Fe/H], integrate absolute magnitude over [a/Fe]
+    
+    This convolves the polynomial over alpha with a Gaussian centered on
+    obs_alpha and with a given APOGEE error.'''
+    if not alpha_compatible_with_metallicity(obs_alpha, feh):
+        raise ValueError("[a/Fe] and [Fe/H] are incompatible!")
+    alphas = np.array([-0.2, 0.0, 0.2, 0.4, 0.6, 0.8])
+
+    kvals = np.zeros(len(alphas))
+    for i, alpha in enumerate(alphas):
+        try:
+            kvals[i] = integrate_teff(
+                age, feh, alpha, obs_teff=obs_teff, teff_err=teff_err,
+                band=band)
+        except ValueError:
+            print("No [Fe/H]={0:0.2f} [a/Fe]={1:0.1f}".format(feh, alpha))
+            kvals[i] = np.nan
+
+    try:
+        polycoeff = fit_polynomial(alphas, kvals)
+    except ValueError:
+        K_expect = np.nan
+    else:
+        K_expect = convolve_quartic_gaussian(polycoeff, obs_alpha, alpha_err)
+
+    return K_expect
+
+def integrate_metallicity_and_alpha(
+    teff, age, obs_feh, obs_alpha, feh_err=0.009, alpha_err=0.013, band="Ks"):
+    '''Integrate over metallicity and alpha.'''
+    fehs = np.array([-2.4, -2, -1.5, -1, -0.5, 0.0, 0.2, 0.3, 0.5])
+
+    kvals = np.zeros(len(fehs))
+    for i, feh in enumerate(fehs):
+        kvals[i] = integrate_alpha(teff, age, feh, obs_alpha, band=band)
+
+    try:
+        polycoeff = fit_polynomial(fehs, kvals)
+    except ValueError:
+        K_expect = np.nan
+    else:
+        K_expect = convolve_quartic_gaussian(polycoeff, obs_feh, feh_err)
+
+    return K_expect
+
+def teff_dependence(age, feh, alpha, band="Ks", obs_teff=5000, teff_err=130):
+    '''Calculate the Teff dependence of isochrones at fixed params.'''
+    if not alpha_compatible_with_metallicity(alpha, feh):
+        raise ValueError("[a/Fe] not compatible with [Fe/H]")
+
+    alpha_ind = alpha_bin(alpha)
+    iso = DSEPInterpolator(age, feh, afe=alpha_ind, highT=7000)
+    iso_data = iso._get_isochrone_data("Ks")
+    logteffs = iso_data["LogTeff"]
+    kvals = iso_data["Ks"]
+
+    interper = iso._load_interpdict("LogTeff", "Ks")
+    newinterper = interp1d(
+        interper._data[0], interper._data[1], kind="linear",
+        bounds_error=False, fill_value=0)
+    interp_teffs = np.linspace(min(logteffs), max(logteffs), 100)
+    interp_ys = newinterper(interp_teffs)
+
+    a = max(3000, 10**min(logteffs))
+    b = min(7000, 10**max(logteffs))
+    print(a, b)
+    K_expect = quad(teff_error_product, a, b,
+                    args=(obs_teff, teff_err, newinterper))
+    print("Expected K at T={0:d}: {1:.3f}".format(obs_teff, K_expect[0]))
+    print("Integration Error: {0:3g}".format(K_expect[1]))
+
+    plt.plot(10**logteffs, kvals, marker="o", ls="", color=bc.blue)
+    plt.plot(10**interp_teffs, interp_ys, marker="", ls="-", color=bc.red)
+    plt.xlabel("Teff")
+    plt.ylabel(band)
+    plt.title("Teff dependence (Age: {0:.2f}, [Fe/H]: {1:.2f}, "
+              "[a/Fe]: {2:.1f})".format(age, feh, alpha))
+    hr.invert_x_axis()
+    hr.invert_y_axis()
+
+def alpha_dependence_over_teff(
+    age, feh, obs_teff, obs_alpha, teff_err=130, alpha_err=0.013, band="Ks"):
+    '''Calculate the alpha dependence of isochrones at fixed params.'''
+    alphas = np.array([-0.2, 0.0, 0.2, 0.4, 0.6, 0.8])
+
+    kvals = np.zeros(len(alphas))
+    for i, alpha in enumerate(alphas):
+        try:
+            kvals[i] = integrate_teff(
+                age, feh, alpha, obs_teff, teff_err=teff_err,
+                band=band)
+        except ValueError:
+            print("No [Fe/H]={0:0.2f} [a/Fe]={1:0.1f}".format(feh, alpha))
+            kvals[i] = np.nan
+
+    try:
+        polycoeff = fit_polynomial(alphas, kvals)
+    except ValueError:
+        K_expect = np.nan
+        print("Could not predict K")
+        polycoeff = fit_polynomial(alphas, kvals, bad_fit_error=False)
+    else:
+        if alpha_compatible_with_metallicity(obs_alpha, feh):
+            K_expect = convolve_quartic_gaussian(
+                polycoeff, obs_alpha, alpha_err)
+            print("Expected K at [a/Fe]={0:.1f}: {1:.3f}".format(
+                obs_alpha, K_expect))
+        else:
+            print("Expected [a/Fe] incompatible with given [Fe/H]")
+    polynom = np.poly1d(polycoeff)
+    interp_alphas = np.linspace(min(alphas), max(alphas), 100)
+    interp_ys = polynom(interp_alphas)
+
+    plt.plot(alphas, kvals, marker="o", ls="", color=bc.blue)
+    plt.plot(interp_alphas, interp_ys, marker="", ls="-", color=bc.red)
+    plt.xlabel("[a/Fe]")
+    plt.ylabel(band)
+    plt.title("Alpha dependence (Age: {0:.2f}, [Fe/H]: {1:.2f}), "
+              "integrated over Teff".format(age, feh))
+    hr.invert_y_axis()
+
+def metallicity_dependence_over_alpha_teff(
+    age, obs_feh, obs_alpha, obs_teff, feh_err=0.009, alpha_err=0.013,
+    teff_err=135, band="Ks"):
+    '''Calculate the metallicity dependence after integrating over [a/Fe].
+    
+    This convolves the absolute magnitude averaged over [a/Fe] with a Gaussian
+    centered on obs_feh and with a given APOGEE error.'''
+    fehs = np.array([-2.4, -2, -1.5, -1, -0.5, 0.0, 0.2, 0.3, 0.5])
+
+    kvals = np.zeros(len(fehs))
+    for i, feh in enumerate(fehs):
+        kvals[i] = integrate_alpha_over_teff(
+            age, feh, obs_alpha=obs_alpha, obs_teff=obs_teff,
+            teff_err=teff_err, band=band)
+
+    try:
+        polycoeff = fit_polynomial(fehs, kvals)
+    except ValueError:
+        K_expect = np.nan
+        print("Could not predict K")
+        polycoeff = fit_polynomial(fehs, kvals, bad_fit_error=False)
+    else:
+        K_expect = convolve_quartic_gaussian(polycoeff, obs_feh, feh_err)
+        print("Expected K at [Fe/H]={0:.1f}: {1:.3f}".format(
+            obs_feh, K_expect))
+    polynom = np.poly1d(polycoeff)
+    interp_fehs = np.linspace(min(fehs), max(fehs), 100)
+    interp_ys = polynom(interp_fehs)
+
+
+    plt.plot(fehs, kvals, marker="o", ls="", color=bc.blue)
+    plt.plot(interp_fehs, interp_ys, marker="", ls="-", color=bc.red)
+    hr.invert_y_axis()
+    plt.xlabel("[Fe/H]")
+    plt.ylabel("<{0}>".format(band))
+    plt.title("Metallicity dependence (Age: {0:.2f}, integrated over [a/Fe]"
+              " and Teff)".format(age))
+
+
+def age_dependence_over_metallicity_alpha(
+    teff, obs_feh, obs_alpha, feh_err=0.009, alpha_err=0.013, band="Ks"):
+    '''Calculate the age dependence after integrating over [a/Fe] and [Fe/H].
+
+    This convolves the absolute magnitude averaged over [a/Fe] and [Fe/H] with
+    a uniform distribution between 1-10 Gyr.'''
+    ages = np.concatenate([
+        np.arange(1.0, 5.0, 0.25), np.arange(5, 14.5, 0.5)])
+
+    kvals = np.zeros(len(ages))
+    for i, age in enumerate(ages):
+        kvals[i] = integrate_metallicity_and_alpha(
+            teff, age, obs_feh, obs_alpha, feh_err=feh_err,
+            alpha_err=alpha_err, band=band)
+
+    finite_indices = np.isfinite(kvals)
+    if np.count_nonzero(finite_indices) > 1:
+        a, b = (max(1, min(ages[finite_indices])), 
+                min(10, max(ages[finite_indices])))
+        polycoeff = np.polyfit(ages[finite_indices], kvals[finite_indices], 4)
+        polynom = np.poly1d(polycoeff)
+        interp_ages = np.linspace(a, b, 100)
+        interp_ys = polynom(interp_ages)
+        K_expect = (
+            polycoeff[0] * (b**5 - a**5) / 5 +
+            polycoeff[1] * (b**4 - a**4) / 4 +
+            polycoeff[2] * (b**3 - a**3) / 3 +
+            polycoeff[3] * (b**2 - a**2) / 2 +
+            polycoeff[4] * (b**1 - a**1) / 1) / (b - a)
+    else:
+        K_expect = np.nan
+
+    plt.plot(ages, kvals, marker="o", ls="", color=bc.blue)
+    plt.plot(interp_ages, interp_ys, marker="", ls="-", color=bc.red)
+    hr.invert_y_axis()
+    plt.xlabel("Age")
+    plt.ylabel("<{0}>".format(band))
+    plt.title("Age dependence (Teff: {0:d}, integrated over [Fe/H] and "
+              "[a/Fe])".format(teff))
+
+def metallicity_dependence(teff, age, afe, band="Ks", obs_feh=0.0):
     '''Calculate the metallicity dependence of isochrones at fixed params.'''
-    fehs = np.array([-2.4, -2, -1.5, -1, 0.0, 0.2, 0.3, 0.5])
+    fehs = np.array([-2.4, -2, -1.5, -1, -0.5, 0.0, 0.2, 0.3, 0.5])
+    feh_err = 0.009
 
     kvals = np.zeros(len(fehs))
     for i, feh in enumerate(fehs):
         if alpha_compatible_with_metallicity(afe, feh):
             alpha_ind = alpha_bin(afe)
             iso = DSEPInterpolator(age, feh, afe=alpha_ind)
-            kvals[i] = iso.teff_to_abs_mag(teff, band)
+            try:
+                kvals[i] = iso.teff_to_abs_mag(teff, band)
+            except ValueError:
+                kvals[i]= np.nan
         else:
             print(feh)
             kvals[i] = np.nan
 
-    plt.plot(fehs, kvals, marker="o", ls="-", color=bc.blue)
+    try:
+        polycoeff = fit_polynomial(fehs, kvals)
+    except ValueError:
+        K_expect = np.nan
+        print("Could not predict K")
+        polycoeff = fit_polynomial(fehs, kvals, bad_fit_error=False)
+    else:
+        K_expect = convolve_quartic_gaussian(polycoeff, obs_feh, feh_err)
+        print("Expected K at [Fe/H]={0:.1f}: {1:.3f}".format(
+            obs_feh, K_expect))
+    polynom = np.poly1d(polycoeff)
+    interp_fehs = np.linspace(min(fehs), max(fehs), 100)
+    interp_ys = polynom(interp_fehs)
+
+    plt.plot(fehs, kvals, marker="o", ls="", color=bc.blue)
+    plt.plot(interp_fehs, interp_ys, marker="", ls="-", color=bc.red)
     plt.xlabel("[Fe/H]")
     plt.ylabel(band)
     plt.title("Metallicity dependence (Age: {0:.2f}, Teff: {1:d}, "
               "[a/Fe]: {2:.1f})".format(age, teff, afe))
+    hr.invert_y_axis()
 
-def alpha_dependence(teff, age, feh, band="Ks", K_expect_point=0.0):
+def alpha_dependence(teff, age, feh, band="Ks", obs_alpha=0.0, alpha_err=0.013):
     '''Calculate the alpha dependence of isochrones at fixed params.'''
     alphas = np.array([-0.2, 0.0, 0.2, 0.4, 0.6, 0.8])
-    alpha_err = 0.013
 
     kvals = np.zeros(len(alphas))
     for i, alpha in enumerate(alphas):
         if alpha_compatible_with_metallicity(alpha, feh):
             alpha_ind = alpha_bin(alpha)
             iso = DSEPInterpolator(age, feh, afe=alpha_ind)
-            kvals[i] = iso.teff_to_abs_mag(teff, band)
+            try:
+                kvals[i] = iso.teff_to_abs_mag(teff, band)
+            except ValueError:
+                print(alpha)
+                kvals[i] = np.nan
         else:
             print(alpha)
             kvals[i] = np.nan
 
-    finite_indices = np.isfinite(kvals)
-    polycoeff = np.polyfit(alphas[finite_indices], kvals[finite_indices], 2)
+    try:
+        polycoeff = fit_polynomial(alphas, kvals)
+    except ValueError:
+        K_expect = np.nan
+        print("Could not predict K")
+        polycoeff = fit_polynomial(alphas, kvals, bad_fit_error=False)
+    else:
+        if alpha_compatible_with_metallicity(obs_alpha, feh):
+            K_expect = convolve_quartic_gaussian(
+                polycoeff, obs_alpha, alpha_err)
+            print("Expected K at [a/Fe]={0:.1f}: {1:.3f}".format(
+                obs_alpha, K_expect))
+        else:
+            print("Expected [a/Fe] incompatible with given [Fe/H]")
     polynom = np.poly1d(polycoeff)
     interp_alphas = np.linspace(min(alphas), max(alphas), 100)
     interp_ys = polynom(interp_alphas)
-
-    K_expect = (polycoeff[0] * (alpha_err**2 + K_expect_point**2) + 
-                polycoeff[1] * K_expect_point + polycoeff[2])
-    print("Expected K at [a/Fe]={0:.1f}: {1:.3f}".format(
-        K_expect_point, K_expect))
 
     plt.plot(alphas, kvals, marker="o", ls="", color=bc.blue)
     plt.plot(interp_alphas, interp_ys, marker="", ls="-", color=bc.red)
@@ -470,6 +730,101 @@ def alpha_dependence(teff, age, feh, band="Ks", K_expect_point=0.0):
     plt.ylabel(band)
     plt.title("Alpha dependence (Age: {0:.2f}, Teff: {1:d}, "
               "[Fe/H]: {2:.2f})".format(age, teff, feh))
+
+
+def age_dependence(teff, feh, alpha, band="Ks", K_expect_point=5.5):
+    '''Calculate the alpha dependence of isochrones at fixed params.'''
+    ages = np.concatenate([
+        np.arange(1.0, 5.0, 0.25), np.arange(5, 14.5, 0.5)])
+    endpoints = (1, 10)
+    a, b = endpoints
+
+    kvals = np.zeros(len(ages))
+    for i, age in enumerate(ages):
+        if alpha_compatible_with_metallicity(alpha, feh):
+            alpha_ind = alpha_bin(alpha)
+            iso = DSEPInterpolator(age, feh, afe=alpha_ind)
+            try:
+                kvals[i] = iso.teff_to_abs_mag(teff, band)
+            except ValueError:
+                print(age)
+                kvals[i] = np.nan
+        else:
+            print(age)
+            kvals[i] = np.nan
+
+    finite_indices = np.isfinite(kvals)
+    polycoeff = np.polyfit(ages[finite_indices], kvals[finite_indices], 4)
+    polynom = np.poly1d(polycoeff)
+    interp_ages = np.linspace(min(ages), max(ages), 100)
+    interp_ys = polynom(interp_ages)
+
+    try:
+        K_expect = (
+            polycoeff[0] * (b**5 - a**5) / 5 +
+            polycoeff[1] * (b**4 - a**4) / 4 +
+            polycoeff[2] * (b**3 - a**3) / 3 +
+            polycoeff[3] * (b**2 - a**2) / 2 +
+            polycoeff[4] * (b**1 - a**1) / 1) / (b - a)
+    # Happens when b = a
+    except ZeroDivisionError:
+        K_expect = polycoeff[4]
+    print("Expected K at age={0:.1f}: {1:.3f}".format(
+        K_expect_point, K_expect))
+
+    plt.plot(ages, kvals, marker="o", ls="", color=bc.blue)
+    plt.plot(interp_ages, interp_ys, marker="", ls="-", color=bc.red)
+    plt.xlabel("Age")
+    plt.ylabel(band)
+    plt.title("Age dependence (Teff: {0:d}, "
+              "[Fe/H]: {1:.2f}, [a/Fe]: {2:.1f})".format(teff, feh, alpha))
+    hr.invert_y_axis()
+
+
+
+
+#######################
+# Polynomial Routines #
+#######################
+
+def fit_polynomial(xvals, kvals, bad_fit_error=True):
+    '''Return polynomial coefficients fitting xvals and kvals.
+
+    The polynomial will have a maximum degree of 4, with fewer degrees if the
+    number of points is lower.'''
+    MAX_DEGREE = 4
+    finite_indices = np.isfinite(kvals)
+    num_finite = np.count_nonzero(finite_indices)
+    degree = min(num_finite-1, MAX_DEGREE) 
+    if bad_fit_error and degree == 0:
+        raise ValueError("Cannot fit polynomial to degree")
+    polycoeff = np.polyfit(
+        xvals[finite_indices], kvals[finite_indices], degree)
+    fullcoeff = np.concatenate([
+        np.zeros((MAX_DEGREE+1)-len(polycoeff)), polycoeff])
+
+    return fullcoeff
+
+def convolve_quartic_gaussian(coeffs, mean, error):
+    '''Convolve a quartic polynomial with a Gaussian.
+
+    General-purpose function for integrating the product of a quartic
+    polynomial with a Gaussian.'''
+    K_expect = (
+        coeffs[0] * (3* error**4 + 6 * error**2 * mean**2 + mean**4) +
+        coeffs[1] * mean * (3 * error**2 + mean**2) +
+        coeffs[2] * (error**2 + mean**2) + 
+        coeffs[3] * mean + 
+        coeffs[4])
+    return K_expect
+
+def teff_error_product(teff, obs_teff, teff_err, teff_interper):
+    '''Return the product of K and the Teff uncertainty.'''
+    kmag = teff_interper(np.log10(teff))
+    product = (kmag / np.sqrt(2*np.pi*teff_err**2) * 
+               np.exp(-(teff-obs_teff)**2/(2*teff_err**2)))
+    return product
+
 
 ###############################################################################
 # Plot isochrones #
@@ -608,7 +963,7 @@ def ensure_array_increasing(xvals, yvals):
     sorted_xvals = newxvals[sorted_xvals_indices]
     sorted_yvals = newyvals[sorted_xvals_indices]
     xdiffs = np.diff(newxvals)
-    assert abs(min(xdiffs)) < 30*min(xdiffs[xdiffs > 0])
+    assert abs(min(xdiffs)) < 40*min(xdiffs[xdiffs > 0])
 
     return sorted_xvals, sorted_yvals
 
