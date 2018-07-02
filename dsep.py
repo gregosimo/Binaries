@@ -365,6 +365,161 @@ class DSEPInterpolator(object):
         return trimmed_table
 
 ###############################################################################
+# Tools needed to perform my own interpolation #
+###############################################################################
+
+class DSEPIsochrone(object):
+    '''This is a structure which holds the original non-interpolated isochrone.
+
+    One DSEPIsochrone corresponds to a full file with all ages for the given
+    isochrone. It also parses the header to manually read the iron and alpha
+    abundances.'''
+
+    def __init__(
+        self, feh, alpha, mixing_length, Y, Z, Zeff, phot_string, iso_dict):
+        '''Take in attributes needed to define a DSEP isochrone.'''
+        self.mixing_length = mixing_length
+        self.Y = Y
+        self.Z = Z
+        self.Zeff = Zeff
+        self.feh = feh
+        self.alpha = alpha
+        self.phot_string = phot_string
+        self.iso_dict = iso_dict
+
+    @classmethod
+    def isochrone_from_file(
+        cls, feh, afe=2, y=1, bands=1, dsep_root=paths.DSEP_ISOCHRONES):
+        filename = format_DSEP_isochrone_filename(feh, afe, y, bands)
+        # The suffix and parent directory are usually identical.
+        parentdir = filename.split(".")[1].replace("_2", "")
+        filepath = dsep_root / parentdir / filename
+
+        with filepath.open() as filehandle:
+            # Parse the header
+            topline = filehandle.readline()
+            splittuple = topline.split("=")
+            nages = int(splittuple[1][:splittuple[1].find(" ")])
+            nmags = int(splittuple[2][:-1])
+            filehandle.readline() # A ------- line
+            # A header containing the following information.
+            filehandle.readline() 
+            isoprops = filehandle.readline().split()
+            mixing_length = float(isoprops[1])
+            Y = float(isoprops[2])
+            Z = float(isoprops[3])
+            Zeff = float(isoprops[4])
+            feh = float(isoprops[5])
+            alpha = float(isoprops[6][:-1])
+            filehandle.readline() # A ------- line
+            phot_string = filehandle.readline().split(":")[1][:-1]
+            filehandle.readline() # A ------- line
+
+            # Now start reading in the isochrone tables
+            iso_dict = {}
+            # This will be a list of table lines.
+            # Once the function hits another AGE block, then the list of
+            # strings is passed to Table.read().
+            table_list = []
+            line = filehandle.readline()
+            splittuple = line.split("=")
+            age = float(splittuple[1][:splittuple[1].find(" ", 1)])
+            neeps = int(splittuple[2][:-1])
+            for line in filehandle:
+                print(line)
+                # We've reached a new block.
+                if line.startswith("#AGE="):
+                    iso_dict[age] = Table.read(
+                        table_list, format="ascii.commented_header")
+                    assert len(iso_dict[age]) == neeps
+                    assert len(iso_dict[age].colnames) == nmags+5
+                    table_list = []
+                    splittuple = line.split("=")
+                    age = float(splittuple[1][:splittuple[1].find(" ", 1)])
+                    neeps = int(splittuple[2][:-1])
+                else:
+                    table_list.append(line)
+            iso_dict[age] = Table.read(
+                table_list, format="ascii.commented_header")
+            assert len(iso_dict[age]) == neeps
+            assert len(iso_dict[age].colnames) == nmags+5
+            return cls(feh, alpha, mixing_length, Y, Z, Zeff, phot_string,
+                       iso_dict)
+
+def interpolate_DSEP_isochrone(newfeh, afe, y=1, bands=1):
+    '''In-house interpolation of DSEP isochrones.'''
+    input_fehs = np.array([-2.5, -2, -1.5, -1, -0.5, 0.0, 0.2, 0.3, 0.5])
+    
+    # Check input values
+    if newfeh < input_fehs[0] or newfeh > input_fehs[-1]:
+        raise ValueError("Cannot extrapolate beyond outside of "
+                         "{0:.1f}-{1:.1f}.".format(
+                             input_fehs[0], input_fehs[-1]))
+    if newfeh > 0 and afe > 3:
+        raise ValueError("Incompatible combination of [Fe/H] and [alpha/Fe].")
+
+    # Read in DSEP isochrones over all metallicities.
+    all_isos = {ifeh: DSEPIsochrone(ifeh, afe, y=y, bands=bands) for ifeh in
+                input_fehs}
+
+    # Get the actual iron abundances for the isochrones.
+    interp_fehs = np.array([all_isos[ifeh].feh for ifeh in input_fehs])
+
+    # Get the nearest metallicity as a starting point.
+    met_index = np.argmin(np.abs(newfeh-interp_fehs))
+
+    # Get the ages at the given metallicity.
+    ages = np.array(all_isos[input_fehs[met_index]].iso_dict.keys().sort())
+
+    # Get the interpolated data tables.
+    new_iso = {}
+    # Start interpolating age by age.
+    for age in ages:
+        # This will be the table of values interpolated over [Fe/H] at the
+        # given age.
+        age_table = []
+        dseptable = all_isos[fehs[met_index]].iso_dict[age]
+        # These are the columns to be interpolated over.
+        interp_cols = dseptable.colnames[1:]
+        for eep in dseptable["EEPS"]:
+            # Go down each row.
+            rowval = [eep]
+            for col in interp_cols:
+                # Interpolate each column.
+                yvals = np.zeros(len(interp_fehs))
+                for i, ifeh in enumerate(input_fehs):
+                    met_table = all_isos[ifeh].iso_dict[age]
+                    eep_row = np.where(dseptable["EEPS"] == eep)
+                    yvals[i] = met_table[col][eep_row]
+                spl = interp1d(interp_fehs, yvals, kind="cubic")
+                rowval.append(spl(newfeh))
+        new_age_table = Table(rows=age_table, names=dseptable.colnames)
+        new_iso[age] = new_age_table
+
+    # I have the data tables for the new structure. Now get the metadata.
+    yvals = np.zeros(len(interp_fehs))
+    zvals = np.zeros(len(interp_fehs))
+    for i, ifeh in enumerate(input_fehs):
+        yvals[i] = all_isos[ifeh].Y
+        zvals[i] = all_isos[ifeh].Z
+    yspl = interp1d(interp_fehs, yvals, kind="cubic")
+    zspl = interp1d(interp_fehs, zvals, kind="cubic")
+    newy = yspl(newfeh)
+    newz = yspl(newfeh)
+
+    # Adjust X and Z to calculate consistent [Fe/H] and [a/Fe].
+    newzeff = newz / (0.638 * np.exp(np.log(10)*alpha) + 0.362)
+    newxeff = 1.0 - newy - newzeff
+    newfeh0 = np.log10(newzeff / (newxeff*0.0229))
+    if abs(newfeh - newfeh0) / abs(newfeh) > 0.05:
+        raise ValueError("[Fe/H] (input) - [Fe/H] (interp) = {0:.3f}".format(
+            newfeh-newfeh0))
+    
+
+
+
+
+###############################################################################
 # External helper functions for the DSEP object #
 ###############################################################################
 
@@ -1211,7 +1366,7 @@ def format_DSEP_isochrone_filename(feh, afe, Y, bands):
     y_temp = "{y}"
     y_str = fill_y_filename_template(y_temp, Y)
 
-    feh_temp = "feh{feh_sign}{feh:03d}"
+    feh_temp = "feh{feh_sign}{feh:02d}"
     feh_str = fill_feh_filename_template(feh_temp, feh)
 
     band_temp = "{suf}"
