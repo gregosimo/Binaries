@@ -305,7 +305,7 @@ def plot_velocity_with_errorbars(vsini, lowdiff, medvels, highdiff):
     plt.xlabel("Predicted velocity")
     plt.ylabel("V sini")
 
-def rotation_radius(vsini, prot, vsini_mask=catalog.APOGEE_NULL):
+def rotation_radius(vsini, prot, vsini_mask=np.ma.masked):
     '''Calculate the maximum radius of a star with rotation period and vsini.
 
     This function will essentially calculate VSINI * Prot. It's assumed that
