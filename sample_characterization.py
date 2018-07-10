@@ -38,6 +38,7 @@ from astropy.modeling import models, fitting
 from astropy.modeling.polynomial import Polynomial1D
 import astropy_util as au
 import scipy
+from scipy.interpolate import interp1d
 
 import catalog
 import hrplots as hr
@@ -897,6 +898,24 @@ def calc_DSEP_model_mags(teffs, fehs, alpha_fe, mag, age=3):
                 assert teffpoint > 0
 
     return magarr
+
+def calc_solar_DSEP_model_mag(teffs, mag, age=5.5):
+    '''A predicted absolute magnitude given teff for a solar isochrone.'''
+    feh = 0.0
+    alpha = 0.0
+
+    iso = dsep.DSEPIsochrone.isochrone_from_file(feh, afe=dsep.alpha_bin(alpha))
+    met_table = iso.iso_dict[age]
+    restricted_table = dsep.interpolation_table_increasing_stretch(met_table)
+    rawteff = restricted_table["LogTeff"]
+    rawmag = restricted_table[mag]
+    orderedteff, orderedmag = dsep.ensure_array_increasing(rawteff, rawmag)
+    fixedteff, fixedmag = dsep.fix_duplicate_array_values(
+        orderedteff, orderedmag)
+
+    interp = interp1d(fixedteff, fixedmag, kind="linear")
+    return interp(np.log10(teffs))
+
 
 def calc_photometric_excess(teffs, fehs, alphas, mag, photvals, age=3):
     '''Calculate the photometric excess above a given isochrone.
