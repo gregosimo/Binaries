@@ -901,20 +901,58 @@ def calc_DSEP_model_mags(teffs, fehs, alpha_fe, mag, age=3):
 
 def calc_solar_DSEP_model_mag(teffs, mag, age=5.5):
     '''A predicted absolute magnitude given teff for a solar isochrone.'''
-    feh = 0.0
-    alpha = 0.0
+    return calc_DSEP_model_mag_fixed_age_feh_alpha(teffs, 0.0, mag, age=age)
 
+def calc_DSEP_model_mag_fixed_age_feh_alpha(teffs, feh, mag, alpha=0.0, age=5.5):
+    '''Predict absolute magnitude given teffs.
+
+    This function assumes that [Fe/H], [a/Fe], and age are on grid points in
+    the DSEP models. The only interpolation is done on the Teff axis. An array
+    of Teffs can also be passed to this function.'''
     iso = dsep.DSEPIsochrone.isochrone_from_file(feh, afe=dsep.alpha_bin(alpha))
-    met_table = iso.iso_dict[age]
-    restricted_table = dsep.interpolation_table_increasing_stretch(met_table)
-    rawteff = restricted_table["LogTeff"]
-    rawmag = restricted_table[mag]
-    orderedteff, orderedmag = dsep.ensure_array_increasing(rawteff, rawmag)
-    fixedteff, fixedmag = dsep.fix_duplicate_array_values(
-        orderedteff, orderedmag)
+    newks = dsep.interpolate_DSEP_isochrone_cols(
+        iso, age, np.log10(teffs), incol="LogTeff", outcol="Ks", 
+        interp_kind="linear")
 
-    interp = interp1d(fixedteff, fixedmag, kind="linear")
-    return interp(np.log10(teffs))
+    # Make sure teffs is not a masked array.
+    assert not np.any(np.ma.getmask(teffs))
+    return np.ma.masked_invalid(newks)
+
+def calc_DSEP_model_mag_fixed_age_alpha(teffs, fehs, mag, age=5.5, alpha=0.0):
+    '''A predicted absolute magnitude given teff and metallicity.
+    
+    This function assumes that [a/Fe] and age are on grid points in the DSEP
+    models. Interpolation is done on both the Teff and [Fe/H] axes. The Teff
+    and [Fe/H] arrays should be the same size.'''
+    alpha = 0.0
+    input_fehs = np.array([-2.5, -2, -1.5, -1, -0.5, 0.0, 0.2, 0.3, 0.5])
+    interp_fehs = np.zeros(len(input_fehs))
+
+    # k_array[i,:] is all temperatures at a given input [Fe/H]
+    # k_array[:,j] is all metallicities at a given Teff.
+    k_array = np.ma.zeros((len(interp_fehs), len(teffs)))
+    for i, ifeh in enumerate(input_fehs):
+        iso = dsep.DSEPIsochrone.isochrone_from_file(
+            ifeh, afe=dsep.alpha_bin(alpha))
+        interp_fehs[i] = iso.feh
+        k_array[i,:] = dsep.interpolate_DSEP_isochrone_cols(
+            iso, age, np.log10(teffs), incol="LogTeff", outcol="Ks",
+            interp_kind="linear")
+
+    
+    k_vals = np.zeros(k_array.shape[1])
+    for j, newfeh in enumerate(fehs):
+        feh_val = k_array[:,j]
+        # If the input teff is too high for the given age and metallicity, the
+        # output will be masked. Interpolation has a lot of issues if passed
+        # masked values, so I'm going to just ignore them.
+        invalid_mask = np.logical_not(np.ma.getmaskarray(feh_val))
+        feh_interp = interp1d(
+            np.ma.compressed(interp_fehs[invalid_mask]),
+            np.ma.compressed(feh_val[invalid_mask]), kind="cubic",
+            bounds_error=False, fill_value=np.nan)
+        k_vals[j] = feh_interp(newfeh)
+    return np.ma.masked_invalid(k_vals)
 
 
 def calc_photometric_excess(teffs, fehs, alphas, mag, photvals, age=3):
@@ -922,7 +960,7 @@ def calc_photometric_excess(teffs, fehs, alphas, mag, photvals, age=3):
 
     Calculate the magnitude difference between photvals and an isochrone
     solution for the given teff, [Fe/H] and age for the given mag.'''
-    DSEPmags = calc_DSEP_model_mags(teffs, fehs, alphas, mag, age=age)
+    DSEPmags = calc_solar_DSEP_model_mag(teffs, mag, age=age)
     magdiff = photvals - DSEPmags
 
     return magdiff
