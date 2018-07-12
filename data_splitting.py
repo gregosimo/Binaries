@@ -1276,7 +1276,7 @@ def initialize_full_APOGEE(aposplit):
 
     aposplit.split_Gaia()
 
-    aposplit.split_modified_Berger_EVstate()
+#    aposplit.split_modified_Berger_EVstate()
 
     aposplit.split_cool_dwarfs()
 
