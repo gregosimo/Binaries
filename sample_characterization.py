@@ -861,7 +861,7 @@ def calc_DSEP_model_mags(teffs, fehs, alpha_fe, mag, age=3):
     absolute magnitude in a given band for each of those temperatures. The age
     of the distribution can also be specified.'''
     alpha_ind = dsep.alpha_bin(alpha_fe)
-    dsep.alpha_compatible_with_metallicity(alpha_fe, fehs)
+    assert dsep.alpha_compatible_with_metallicity(alpha_fe, fehs)
     # If there is only one metallicity, then just make a single isochrone.
     if np.isscalar(fehs):
         dsep_interper = dsep.DSEPInterpolator(
