@@ -404,8 +404,9 @@ def test_teff_k_interpolation(age, feh, alpha, outcol, y=1, bands=1):
                                sharex=True)
     afe = alpha_bin(alpha)
     iso = DSEPIsochrone.isochrone_from_file(feh, afe, y=y, bands=bands)
-    met_table = iso.iso_dict[age]
-    restricted_table = interpolation_table_increasing_stretch(met_table)
+    met_table = iso.iso_table(age)
+    restricted_table = interpolation_table_increasing_stretch(
+        met_table, mono_col="LogTeff")
     teffvals, colvals = restricted_table["LogTeff"], restricted_table[outcol]
     teff_ordered, col_ordered = ensure_array_increasing(teffvals, colvals)
     teff_fixed, col_fixed = fix_duplicate_array_values(
@@ -522,8 +523,9 @@ def test_feh_interpolation(age, alpha, teffs, outcol, y=1, bands=1):
     hr.invert_y_axis(a0)
     a0.set_xlabel("")
     a0.set_ylabel("Ks")
-    a0.legend(loc="upper right")
-    a0.set_title("Age: {0:.2f} Gyr; Teff: {1:4d} K".format(age, teffs[teffindex]))
+    a0.legend(loc="upper left")
+    a0.set_title("DSEP Age: {0:.2f} Gyr; Teff: {1:4d} K".format(
+        age, teffs[teffindex]))
 
     # Plot the difference
     a1.semilogy(interp_fehs[1:-1], linear_offtable[:,teffindex], color=bc.red, ls="-",
@@ -557,6 +559,12 @@ class DSEPIsochrone(object):
         self.alpha = alpha
         self.phot_string = phot_string
         self.iso_dict = iso_dict
+
+    def iso_table(self, age):
+        '''Return a table at the specified age.
+        
+        This function returns a table that is at the specified grid point.'''
+        return self.iso_dict[age]
 
     @classmethod
     def isochrone_from_file(
@@ -678,7 +686,8 @@ def interpolate_DSEP_isochrone_cols(
     The kind of interpolation to be done should be given as interp_kind, which
     by default is linear because of the high density of points.'''
     met_table = iso.iso_dict[age]
-    restricted_table = interpolation_table_increasing_stretch(met_table)
+    restricted_table = interpolation_table_increasing_stretch(
+        met_table, mono_col=incol)
     invals, outvals = restricted_table[incol], restricted_table[outcol]
     in_ordered, out_ordered = ensure_array_increasing(invals, outvals)
     in_fixed, out_fixed = fix_duplicate_array_values(
