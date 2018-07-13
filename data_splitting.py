@@ -559,8 +559,8 @@ class KeplerSplitter(DataSplitter):
         self._setup_indices(splitnames, indexarr, orig_crit)
 
     def split_mag(
-            self, magcol, mags, splitnames=("Bright", "Faint"), mag_crit="mag", 
-            invert_inequality=False):
+            self, magcol, mags, splitnames=("Bright", "Faint", "No Mag"), 
+            mag_crit="mag", null_value=np.ma.masked, invert_inequality=False):
         '''Split based on a magnitude cut.
 
         The column which contains magnitudes should be given in magcol. The
@@ -571,8 +571,9 @@ class KeplerSplitter(DataSplitter):
 
         For more information on invert_inequality, see split_by_col.
         '''
-        self.split_by_col(magcol, mags, splitnames, mag_crit,
-                          invert_inequality=invert_inequality)
+        self.split_by_col(
+            magcol, mags, splitnames, mag_crit, null_value=null_value, 
+            invert_inequality=invert_inequality)
 
     def split_evstate(
             self, teff_col="teff", logg_col="LOGG_FIT", 
@@ -1241,7 +1242,8 @@ def initialize_full_APOGEE(aposplit):
     aposplit.split_by_ASPCAP_flags()
 
     aposplit.split_mag(
-        "H", [7, 11], ("H Bright", "H Jen", "H Faint"), mag_crit="H")
+        "H", [7, 11], ("H Bright", "H Jen", "H Faint", "No H"), mag_crit="H",
+        null_value=np.ma.masked)
     aposplit.split_teff(
         "SDSS-Teff", [5500], ("Jen Cool", "Jen Hot", "No SDSS Teff"), 
         teff_crit="SDSS Teff", null_value=np.ma.masked)
@@ -1381,7 +1383,7 @@ def initialize_mcquillan_sample(mcqsplit):
     mcqsplit.data["M_K_err2"] = mcqsplit.data["kmag_err"]**2 + (
         5 * (mcqsplit.data["disep"]) / mcqsplit.data["dis"] / np.log(10))**2
 
-    mcqsplit.split_Berger_EVstate()
+#    mcqsplit.split_Berger_EVstate()
 
 def initialize_asteroseismic_periods(aposplit):
     '''Initialize the asteroseismic sample with McQuillan periods.'''
