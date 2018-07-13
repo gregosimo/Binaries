@@ -519,11 +519,10 @@ def write_KIC_Vizier_upload_list(kics, outputfile, outputpath=paths.HEAD_DIR):
         kic_table, outputfile, 99999, "ascii.no_header", output_columns=["KIC"], 
         outputpath=outputpath)
 
-def write_Kepler_Gaia_Archive_upload_list(outputpath=paths.GAIA_KEPLER_INPUT):
-    '''Write a list of KIC identifiers for the full Kepler sample.'''
-    kictable = catin.read_KIC_DR25_catalog()
-    kicstr = kictable["kepid"].astype(np.str)
-    kic_column = npstr.add("KIC ", kicstr)
+def write_KIC_to_Gaia_Archive_upload_list(kics, outputpath):
+    '''Write a list of kics to be uploaded to the Gaia archive.'''
+    kicstr = kics.astype(np.str)
+    kic_column = npstr.add("KIC", kicstr)
     kic_table = Table([kic_column], names=["KIC"])
     kic_table.write(str(outputpath), format="ascii.no_header", overwrite=True, 
                     delimiter=",")

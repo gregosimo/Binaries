@@ -2,6 +2,7 @@ from pathlib import Path
 import subprocess
 import tempfile 
 import shutil
+import collections
 
 import numpy as np
 from scipy.interpolate import interp1d,InterpolatedUnivariateSpline
@@ -364,6 +365,178 @@ class DSEPInterpolator(object):
                 self.iso[band_num] = trimmed_table
         return trimmed_table
 
+###########################
+# DSEP Data interpolation #
+###########################
+
+    GRID_FEHS = np.array([-2.5, -2, -1.5, -1, -0.5, 0.0, 0.2, 0.3, 0.5])
+
+def k_grid_age_feh_alpha(teffs, age, feh, alpha, outcol="Ks", y=1, bands=1):
+    '''Interpolate Teff at a grid point in age, [Fe/H], and alpha.'''
+    afe = alpha_bin(alpha)
+    iso = DSEPIsochrone.isochrone_from_file(feh, afe, y=y, bands=bands)
+    met_table = iso.iso_dict[age]
+    restricted_table = interpolation_table_increasing_stretch(met_table)
+    teffvals, colvals = restricted_table["LogTeff"], restricted_table[outcol]
+    teff_ordered, col_ordered = ensure_array_increasing(teffvals, colvals)
+    teff_fixed, col_fixed = fix_duplicate_array_values(
+        teff_ordered, col_ordered)
+
+    kinterp_linear = interp1d(teff_fixed, col_fixed, kind="linear")
+    kinterp_cubic = interp1d(teff_fixed, col_fixed, kind="cubic")
+    
+    test_teffs = np.linspace(teff_fixed[0], teff_fixed[-1], 1000)
+    linear_ks = kinterp_linear(test_teffs)
+    cubic_ks = kinterp_cubic(test_teffs)
+#   hr.absmag_teff_plot(10**test_teffs, cubic_ks, color=bc.black, ls="-",
+#                       marker="")
+#   hr.absmag_teff_plot(10**teff_fixed, col_fixed, color=bc.red, ls="", marker="o")
+    plt.plot(10**test_teffs, np.log10(abs(cubic_ks-linear_ks)), 'k-')
+#    plt.plot(10**teff_fixed, 0, 'k-')
+    return kinterp_cubic(np.log10(teffs))
+
+def test_teff_k_interpolation(age, feh, alpha, outcol, y=1, bands=1):
+    '''Test temperature interpolation by removing and predicting single points.
+
+    Performs a rough test of interpolation by removing single points and
+    predicting what the value of those points ought to be.'''
+    f, (a0, a1) = plt.subplots(2, 1, gridspec_kw = {"height_ratios":[2, 1]},
+                               sharex=True)
+    afe = alpha_bin(alpha)
+    iso = DSEPIsochrone.isochrone_from_file(feh, afe, y=y, bands=bands)
+    met_table = iso.iso_table(age)
+    restricted_table = interpolation_table_increasing_stretch(
+        met_table, mono_col="LogTeff")
+    teffvals, colvals = restricted_table["LogTeff"], restricted_table[outcol]
+    teff_ordered, col_ordered = ensure_array_increasing(teffvals, colvals)
+    teff_fixed, col_fixed = fix_duplicate_array_values(
+        teff_ordered, col_ordered)
+
+    # These will hold the |predicted-actual| values for each point, except the
+    # first and last.
+    linear_offtable = np.zeros(len(teff_fixed)-2)
+    cubic_offtable = np.zeros(len(teff_fixed)-2)
+    
+    # Now make interpolators with missing pieces.
+    for i, (logT, outval) in enumerate(zip(teff_fixed[1:-1], col_fixed[1:-1])):
+        mask = np.ones(len(teff_fixed), dtype="bool")
+        mask[i+1] = 0
+        assert np.count_nonzero(mask) == len(mask)-1
+        assert logT == teff_fixed[~mask][0]
+        masked_teff = teff_fixed[mask]
+        masked_out = col_fixed[mask]
+
+        kinterp_linear = interp1d(masked_teff, masked_out, kind="linear")
+        kinterp_cubic = interp1d(masked_teff, masked_out, kind="cubic")
+
+        linear_offtable[i] = np.abs(kinterp_linear(logT) - outval)
+        cubic_offtable[i] = np.abs(kinterp_cubic(logT) - outval)
+
+    # Show the interpolation on a finer grid.
+    test_teffs = np.linspace(teff_fixed[0], teff_fixed[-1], 1000)
+    kinterp_linear = interp1d(teff_fixed, col_fixed, kind="linear")
+    kinterp_cubic = interp1d(teff_fixed, col_fixed, kind="cubic")
+    test_linear = kinterp_linear(test_teffs)
+    test_cubic = kinterp_cubic(test_teffs)
+
+    # Plot the interpolation
+    hr.absmag_teff_plot(10**test_teffs, test_linear, color=bc.red, ls="-",
+                        marker="", label="Linear", axis=a0)
+    hr.absmag_teff_plot(10**test_teffs, test_cubic, color=bc.black, ls="-",
+                        marker="", label="Cubic", axis=a0)
+    hr.absmag_teff_plot(
+        10**teff_fixed, col_fixed, color=bc.blue, ls="", marker="o", axis=a0)
+    a0.set_xlabel("")
+    a0.set_ylabel("Ks")
+    a0.legend(loc="upper right")
+    a0.set_title("Age: {0:.2f} Gyr; [Fe/H]: {1:.2f}".format(age, feh))
+
+    # Plot the difference
+    a1.semilogy(10**teff_fixed[1:-1], linear_offtable, color=bc.red, ls="-",
+                marker="")
+    a1.semilogy(10**teff_fixed[1:-1], cubic_offtable, color=bc.black, ls="-",
+                marker="")
+    a1.set_xlabel("Teff (K)")
+    a1.set_ylabel("Error (mag)")
+
+def test_feh_interpolation(age, alpha, teffs, outcol, y=1, bands=1):
+    '''Plot the interpolation over [Fe/H].'''
+    f, (a0, a1) = plt.subplots(2, 1, gridspec_kw = {"height_ratios":[2, 1]},
+                               sharex=True)
+    afe = alpha_bin(alpha)
+    # Now iterate through the [Fe/H] values.
+    input_fehs = np.array([-2.5, -2, -1.5, -1, -0.5, 0.0, 0.2, 0.3, 0.5])
+    interp_fehs = np.zeros(len(input_fehs))
+    k_array = np.ma.zeros((len(input_fehs), len(teffs)))
+    for i, ifeh in enumerate(input_fehs):
+        iso = DSEPIsochrone.isochrone_from_file(ifeh, afe, y=y, bands=bands)
+        interp_fehs[i] = iso.feh
+        k_array[i,:] = interpolate_DSEP_isochrone_cols(
+            iso, age, np.log10(teffs), incol="LogTeff", outcol="Ks",
+            interp_kind="linear")
+
+    # These will hold the |predicted-actual| values for each point, except the
+    # first and last.
+    linear_offtable = np.ma.zeros((len(interp_fehs)-2, len(teffs)))
+    cubic_offtable = np.ma.zeros((len(interp_fehs)-2, len(teffs)))
+    # Now step through [Fe/H].
+    for j, (intfeh, outval) in enumerate(
+            zip(interp_fehs[1:-1], k_array[1:-1,0])):
+        mask = np.ones(len(interp_fehs), dtype="bool")
+        mask[j+1] = 0
+        fullmask = np.logical_and(mask[:,np.newaxis], np.logical_not(k_array.mask))
+        for i in range(len(teffs)):
+            masked_feh = interp_fehs[fullmask[:,i]]
+            masked_out = k_array[:,i][fullmask[:,i]]
+
+            kinterp_linear = interp1d(
+                masked_feh, masked_out, kind="linear", bounds_error=False,
+            fill_value=np.nan)
+            kinterp_cubic = interp1d(
+                masked_feh, masked_out, kind="cubic", bounds_error=False,
+                fill_value=np.nan)
+
+            linear_offtable[j,i] = np.abs(np.ma.masked_invalid(
+                kinterp_linear(intfeh)) - outval)
+            cubic_offtable[j,i] = np.abs(np.ma.masked_invalid(
+                kinterp_cubic(intfeh)) - outval)
+
+    teffindex = 0
+    # Show the interpolation on a finer grid.
+    test_fehs = np.linspace(interp_fehs[0], interp_fehs[-1], 1000)
+    masked_feh = interp_fehs[~np.ma.getmask(k_array)[:,teffindex]]
+    masked_vals = np.ma.compressed(k_array[~np.ma.getmask(k_array)[:,teffindex]])
+    kinterp_linear = interp1d(masked_feh, masked_vals, kind="linear",
+                              bounds_error=False, fill_value=np.nan)
+    kinterp_cubic = interp1d(masked_feh, masked_vals, kind="cubic",
+                             bounds_error=False, fill_value=np.nan)
+    test_linear = kinterp_linear(test_fehs)
+    test_cubic = kinterp_cubic(test_fehs)
+
+    # Plot the interpolation
+    a0.plot(
+        test_fehs, test_linear, color=bc.red, ls="-", marker="", label="Linear")
+    a0.plot(
+        test_fehs, test_cubic, color=bc.black, ls="-", marker="", label="Cubic")
+    a0.plot(
+        interp_fehs, k_array[:,teffindex], color=bc.blue, ls="", marker="o")
+    hr.invert_y_axis(a0)
+    a0.set_xlabel("")
+    a0.set_ylabel("Ks")
+    a0.legend(loc="upper left")
+    a0.set_title("DSEP Age: {0:.2f} Gyr; Teff: {1:4d} K".format(
+        age, teffs[teffindex]))
+
+    # Plot the difference
+    a1.semilogy(interp_fehs[1:-1], linear_offtable[:,teffindex], color=bc.red, ls="-",
+                marker="")
+    a1.semilogy(interp_fehs[1:-1], cubic_offtable[:,teffindex], color=bc.black, ls="-",
+                marker="")
+    a1.set_xlabel("[Fe/H]")
+    a1.set_ylabel("Error (mag)")
+
+
+
 ###############################################################################
 # Tools needed to perform my own interpolation #
 ###############################################################################
@@ -387,9 +560,22 @@ class DSEPIsochrone(object):
         self.phot_string = phot_string
         self.iso_dict = iso_dict
 
+    def iso_table(self, age):
+        '''Return a table at the specified age.
+        
+        This function returns a table that is at the specified grid point.'''
+        return self.iso_dict[age]
+
     @classmethod
     def isochrone_from_file(
         cls, feh, afe=2, y=1, bands=1, dsep_root=paths.DSEP_ISOCHRONES):
+        '''Read in a DSEPIsochrone from a file.
+
+        This function automatically locates the files in the default DSEP
+        isochrones at dsep_root. The iron abundance has to be one of the
+        grid points; they are not interpolated. The flags for the alpha and
+        helium abundances also need to be passed. A DSEPIsochrone object will
+        then be returned.'''
         filename = format_DSEP_isochrone_filename(feh, afe, y, bands)
         # The suffix and parent directory are usually identical.
         parentdir = filename.split(".")[1].replace("_2", "")
@@ -426,7 +612,6 @@ class DSEPIsochrone(object):
             age = float(splittuple[1][:splittuple[1].find(" ", 1)])
             neeps = int(splittuple[2][:-1])
             for line in filehandle:
-                print(line)
                 # We've reached a new block.
                 if line.startswith("#AGE="):
                     iso_dict[age] = Table.read(
@@ -443,8 +628,85 @@ class DSEPIsochrone(object):
                 table_list, format="ascii.commented_header")
             assert len(iso_dict[age]) == neeps
             assert len(iso_dict[age].colnames) == nmags+5
-            return cls(feh, alpha, mixing_length, Y, Z, Zeff, phot_string,
-                       iso_dict)
+
+
+        return cls(feh, alpha, mixing_length, Y, Z, Zeff, phot_string,
+                   iso_dict)
+
+    def write_isochrone(self, filepath):
+        '''Write the isochrone back to a file.'''
+
+        with filepath.open("w") as filehandle:
+            division_line = (
+                "#----------------------------------------------------       \n")
+            line_one = "#NUMBER OF AGES={0:2d} MAGS={1:2d}\n".format(
+                len(self.iso_dict), len(self.iso_dict[1.0].colnames)-5)
+            filehandle.write(line_one)
+            filehandle.write(division_line)
+            prop_header = (
+                "#MIX-LEN  Y      Z          Zeff        [Fe/H] [a/Fe]\n")
+            props = "#{0:7.4f}  {1:6.4f} {2:6.4E} {3:6.4E}  {4:5.2f}  {5:5.2f}\n".format(
+                self.mixing_length, self.Y, self.Z, self.Zeff, self.feh,
+                self.alpha)
+            filehandle.write(prop_header)
+            filehandle.write(props)
+            filehandle.write(division_line)
+            photline = "#**PHOTOMETRIC SYSTEM**:{0}\n".format(self.phot_string)
+            filehandle.write(photline)
+            filehandle.write(division_line)
+            agetemplate = "#AGE={0:6.3f} EEPS={1:3d}\n"
+            header = (
+                "#EEP   M/Mo    LogTeff  LogG   LogL/Lo U       B       V       "
+                "R       I       J       H       Ks      Kp      D51     \n")
+            for age, iso_table in sorted(self.iso_dict.items()):
+                # Make sure the number of EEPs is equal to the length of the
+                # table
+                assert (iso_table["EEP"][-1] - iso_table["EEP"][0] + 1 ==
+                        len(iso_table))
+                filehandle.write(agetemplate.format(age, len(iso_table)))
+                filehandle.write(header)
+                formats = {col: "%6.04f" for col in iso_table.colnames}
+                formats["EEP"] = "%1d"
+                formats["M/Mo"] = "%7.06f"
+                iso_table.write(
+                    filehandle, format="ascii.fixed_width_no_header",
+                    formats=formats, delimiter="")
+                filehandle.write("\n\n")
+
+def interpolate_DSEP_isochrone_cols(
+        iso, age, interp_in, incol="LogTeff", outcol="Ks",
+        interp_kind="linear", mask_outside_bounds=True):
+    '''Interpolate between the columns of an isochrone object.
+    
+    The full DSEPIsochrone object should be passed as an argument, along with
+    an age, followed by the input
+    values which should be interpolated. The columns to interpolate between
+    should be given as incol and outcol.
+    
+    The kind of interpolation to be done should be given as interp_kind, which
+    by default is linear because of the high density of points.'''
+    met_table = iso.iso_dict[age]
+    restricted_table = interpolation_table_increasing_stretch(
+        met_table, mono_col=incol)
+    invals, outvals = restricted_table[incol], restricted_table[outcol]
+    in_ordered, out_ordered = ensure_array_increasing(invals, outvals)
+    in_fixed, out_fixed = fix_duplicate_array_values(
+        in_ordered, out_ordered)
+
+    nonmasked_in = np.ma.compressed(interp_in)
+    assert len(nonmasked_in) == len(interp_in)
+
+    if mask_outside_bounds:
+        kinterp = interp1d(
+            in_fixed, out_fixed, kind=interp_kind, fill_value=np.nan, 
+            bounds_error=False)
+        interp_out = np.ma.masked_invalid(kinterp(nonmasked_in))
+    else:
+        kinterp = interp1d(
+            in_fixed, out_fixed, kind=interp_kind, bounds_error=True)
+        interp_out = kinterp(nonmasked_in)
+
+    return interp_out
 
 def interpolate_DSEP_isochrone(newfeh, afe, y=1, bands=1):
     '''In-house interpolation of DSEP isochrones.'''
@@ -459,8 +721,9 @@ def interpolate_DSEP_isochrone(newfeh, afe, y=1, bands=1):
         raise ValueError("Incompatible combination of [Fe/H] and [alpha/Fe].")
 
     # Read in DSEP isochrones over all metallicities.
-    all_isos = {ifeh: DSEPIsochrone(ifeh, afe, y=y, bands=bands) for ifeh in
-                input_fehs}
+    all_isos = {ifeh: DSEPIsochrone.isochrone_from_file(
+        ifeh, afe, y=y, bands=bands) for ifeh in input_fehs}
+
 
     # Get the actual iron abundances for the isochrones.
     interp_fehs = np.array([all_isos[ifeh].feh for ifeh in input_fehs])
@@ -469,19 +732,36 @@ def interpolate_DSEP_isochrone(newfeh, afe, y=1, bands=1):
     met_index = np.argmin(np.abs(newfeh-interp_fehs))
 
     # Get the ages at the given metallicity.
-    ages = np.array(all_isos[input_fehs[met_index]].iso_dict.keys().sort())
+    ages = np.array(
+        sorted(list(all_isos[input_fehs[met_index]].iso_dict.keys())))
+
+    # Make sure all metallicities of a given age have the same number of EEPs.
+    min_eep_ages = np.zeros(len(ages))
+    max_eep_ages = np.zeros(len(ages))
+    for j, age in enumerate(ages):
+        min_eeps = np.zeros(len(input_fehs))
+        max_eeps = np.zeros(len(input_fehs))
+        mixlens = np.zeros(len(input_fehs))
+        for i, ifeh in enumerate(input_fehs):
+            min_eeps[i] = all_isos[ifeh].iso_dict[age]["EEP"][0]
+            max_eeps[i] = all_isos[ifeh].iso_dict[age]["EEP"][-1]
+            mixlens[i] = all_isos[ifeh].mixing_length
+            photstr = all_isos[ifeh].phot_string
+        assert np.allclose(mixlens, mixlens[0])
+        min_eep_ages[j] = max(min_eeps)
+        max_eep_ages[j] = min(max_eeps)
 
     # Get the interpolated data tables.
     new_iso = {}
     # Start interpolating age by age.
-    for age in ages:
+    for age, min_eep, max_eep in zip(ages, min_eep_ages, max_eep_ages):
         # This will be the table of values interpolated over [Fe/H] at the
         # given age.
         age_table = []
-        dseptable = all_isos[fehs[met_index]].iso_dict[age]
+        dseptable = all_isos[input_fehs[met_index]].iso_dict[age]
         # These are the columns to be interpolated over.
         interp_cols = dseptable.colnames[1:]
-        for eep in dseptable["EEPS"]:
+        for eep in np.arange(min_eep, max_eep+1):
             # Go down each row.
             rowval = [eep]
             for col in interp_cols:
@@ -489,10 +769,12 @@ def interpolate_DSEP_isochrone(newfeh, afe, y=1, bands=1):
                 yvals = np.zeros(len(interp_fehs))
                 for i, ifeh in enumerate(input_fehs):
                     met_table = all_isos[ifeh].iso_dict[age]
-                    eep_row = np.where(dseptable["EEPS"] == eep)
+                    eep_row = np.where(met_table["EEP"] == eep)[0][0]
                     yvals[i] = met_table[col][eep_row]
-                spl = interp1d(interp_fehs, yvals, kind="cubic")
+                spl = interp1d(interp_fehs, yvals, kind="cubic", copy=False,
+                               assume_sorted=True)
                 rowval.append(spl(newfeh))
+            age_table.append(rowval)
         new_age_table = Table(rows=age_table, names=dseptable.colnames)
         new_iso[age] = new_age_table
 
@@ -505,19 +787,145 @@ def interpolate_DSEP_isochrone(newfeh, afe, y=1, bands=1):
     yspl = interp1d(interp_fehs, yvals, kind="cubic")
     zspl = interp1d(interp_fehs, zvals, kind="cubic")
     newy = yspl(newfeh)
-    newz = yspl(newfeh)
+    newz = zspl(newfeh)
 
     # Adjust X and Z to calculate consistent [Fe/H] and [a/Fe].
+    # This is done in the original DSEP interpolation script, so if it's
+    # important enough for them, it's important enough for me.
+    alpha = alpha_values(afe)
     newzeff = newz / (0.638 * np.exp(np.log(10)*alpha) + 0.362)
     newxeff = 1.0 - newy - newzeff
     newfeh0 = np.log10(newzeff / (newxeff*0.0229))
     if abs(newfeh - newfeh0) / abs(newfeh) > 0.05:
-        raise ValueError("[Fe/H] (input) - [Fe/H] (interp) = {0:.3f}".format(
-            newfeh-newfeh0))
+        print("WARNING: Poor X,Z Interpolation! "
+        "[Fe/H] (input) - [Fe/H] (interp) = {0:.3f}".format( newfeh-newfeh0))
+
+    newiso = DSEPIsochrone(
+        newfeh, alpha, mixlens[0], newy, newz, newzeff, photstr, new_iso)
+
+    return newiso
     
+def plot_DSEP_isochrone_interpolation(newfeh, afe, y=1, bands=1):
+    '''Make a plot illustrating the interpolation'''
+    input_fehs = np.array([-2.5, -2, -1.5, -1, -0.5, 0.0, 0.2, 0.3, 0.5])
+    
+    # Check input values
+    if newfeh < input_fehs[0] or newfeh > input_fehs[-1]:
+        raise ValueError("Cannot extrapolate beyond outside of "
+                         "{0:.1f}-{1:.1f}.".format(
+                             input_fehs[0], input_fehs[-1]))
+    if newfeh > 0 and afe > 3:
+        raise ValueError("Incompatible combination of [Fe/H] and [alpha/Fe].")
+
+    # Read in DSEP isochrones over all metallicities.
+    all_isos = {ifeh: DSEPIsochrone.isochrone_from_file(
+        ifeh, afe, y=y, bands=bands) for ifeh in input_fehs}
 
 
+    # Get the actual iron abundances for the isochrones.
+    interp_fehs = np.array([all_isos[ifeh].feh for ifeh in input_fehs])
 
+    # Let's look at what's going on at 1 Gyr.
+    age = 1.0
+    # Get Teffs
+    logteffs = np.zeros(len(interp_fehs))
+    logteff_two = np.zeros(len(interp_fehs))
+    kmags = np.zeros(len(interp_fehs))
+    for i, ifeh in enumerate(input_fehs):
+        eep_ind = np.argmin(np.abs(
+            all_isos[input_fehs[np.where(input_fehs == 0)][0]].iso_dict[age]["LogTeff"] - 
+            np.log10(5500)))
+        logteffs[i] = all_isos[ifeh].iso_dict[age]["LogTeff"][eep_ind]
+        logteff_two[i] = all_isos[ifeh].iso_dict[age]["LogTeff"][eep_ind+1]
+        kmags[i] = all_isos[ifeh].iso_dict[age]["Ks"][eep_ind]
+        print(all_isos[ifeh].iso_dict[age]["EEP"][eep_ind])
+
+    teffspl = interp1d(interp_fehs, logteffs, kind="cubic", copy=False)
+    teffspl_two = interp1d(interp_fehs, logteff_two, kind="cubic", copy=False)
+    kspl = interp1d(interp_fehs, kmags, kind="cubic", copy=False)
+
+    test_fehs = np.linspace(interp_fehs[0], interp_fehs[-1], 1000)
+    test_teffs = teffspl(test_fehs)
+    test_teff_two = teffspl_two(test_fehs)
+    test_ks = kspl(test_fehs)
+
+    plt.plot(test_fehs, 10**test_teffs, 'k-')
+    plt.plot(test_fehs, 10**test_teff_two, 'k-')
+    plt.plot(interp_fehs, 10**logteffs, 'ro')
+    plt.plot(interp_fehs, 10**logteff_two, 'ro')
+
+def plot_DSEP_isochrone_interpolation(teff_eval, afe=2, y=1, bands=1):
+    '''Make a plot illustrating the interpolation'''
+    input_fehs = np.array([-2.5, -2, -1.5, -1, -0.5, 0.0, 0.2, 0.3, 0.5])
+    
+    a = '''
+    # Check input values
+    if newfeh < input_fehs[0] or newfeh > input_fehs[-1]:
+        raise ValueError("Cannot extrapolate beyond outside of "
+                         "{0:.1f}-{1:.1f}.".format(
+                             input_fehs[0], input_fehs[-1]))
+    if newfeh > 0 and afe > 3:
+        raise ValueError("Incompatible combination of [Fe/H] and [alpha/Fe].")
+    '''
+
+    # Read in DSEP isochrones over all metallicities.
+    all_isos = {ifeh: DSEPIsochrone.isochrone_from_file(
+        ifeh, afe, y=y, bands=bands) for ifeh in input_fehs}
+
+
+    # Get the actual iron abundances for the isochrones.
+    interp_fehs = np.array([all_isos[ifeh].feh for ifeh in input_fehs])
+    
+    age=1.0
+    kvals_feh = np.zeros(len(interp_fehs))
+    for i, ifeh in enumerate(input_fehs):
+        met_table = all_isos[ifeh].iso_dict[age]
+        restricted_table = restrict_interpolation_table(met_table, highT=7000)
+        teffs = restricted_table["LogTeff"]
+        ks = restricted_table["Ks"]
+        teff_k_spline = interp1d(teffs, ks, kind="cubic")
+        kvals_feh[i] = teff_k_spline(np.log10(teff_eval))
+    feh_k_spline = interp1d(interp_fehs, kvals_feh, kind="cubic")
+
+    test_fehs = np.linspace(fehs[0], fehs[-1], 1000)
+    test_ks = feh_k_spline(test_fehs)
+    k_points = feh_k_spline(interp_fehs)
+
+    plt.plot(10**test_fehs, test_ks, 'k-')
+    plt.plot(10**interp_fehs, k_points, 'ro')
+    plt.xlabel("[Fe/H]")
+    plt.ylabel("Ks")
+
+    a = '''
+    # Let's look at what's going on at 1 Gyr.
+    age = 1.0
+    # Get Teffs
+    logteffs = np.zeros(len(interp_fehs))
+    logteff_two = np.zeros(len(interp_fehs))
+    kmags = np.zeros(len(interp_fehs))
+    for i, ifeh in enumerate(input_fehs):
+        eep_ind = np.argmin(np.abs(
+            all_isos[input_fehs[np.where(input_fehs == 0)][0]].iso_dict[age]["LogTeff"] - 
+            np.log10(5500)))
+        logteffs[i] = all_isos[ifeh].iso_dict[age]["LogTeff"][eep_ind]
+        logteff_two[i] = all_isos[ifeh].iso_dict[age]["LogTeff"][eep_ind+1]
+        kmags[i] = all_isos[ifeh].iso_dict[age]["Ks"][eep_ind]
+        print(all_isos[ifeh].iso_dict[age]["EEP"][eep_ind])
+
+    teffspl = interp1d(interp_fehs, logteffs, kind="cubic", copy=False)
+    teffspl_two = interp1d(interp_fehs, logteff_two, kind="cubic", copy=False)
+    kspl = interp1d(interp_fehs, kmags, kind="cubic", copy=False)
+
+    test_fehs = np.linspace(interp_fehs[0], interp_fehs[-1], 1000)
+    test_teffs = teffspl(test_fehs)
+    test_teff_two = teffspl_two(test_fehs)
+    test_ks = kspl(test_fehs)
+
+    plt.plot(test_fehs, 10**test_teffs, 'k-')
+    plt.plot(test_fehs, 10**test_teff_two, 'k-')
+    plt.plot(interp_fehs, 10**logteffs, 'ro')
+    plt.plot(interp_fehs, 10**logteff_two, 'ro')
+    '''
 
 ###############################################################################
 # External helper functions for the DSEP object #
@@ -552,6 +960,13 @@ def alpha_bin(alphas):
     alpha_bins = np.digitize(alphas, alpha_binedges)+1
     return alpha_bins
 
+def alpha_values(afe):
+    '''Return the value of a given alpha bin.'''
+    if np.any(afe < 0) or np.any(afe > 6):
+        raise ValueError("Don't recognize alpha flag: {0:d}".format(afe))
+
+    return 0.2*(afe-2) 
+
 def alpha_compatible_with_metallicity(alphas, fehs):
     '''Validate whether the alpha values are compatible with the metallicities.
 
@@ -563,6 +978,7 @@ def alpha_compatible_with_metallicity(alphas, fehs):
     # available for low metallicity stars. I want to ensure that this will be
     # the case before running into weird DSEP bugs.
     return np.all(np.logical_or(alphas < 0.3, fehs <= 0.0))
+
 
 ###############################################################################
 # Flexible DSEP interpolator #
@@ -1118,7 +1534,7 @@ def ensure_array_increasing(xvals, yvals):
     sorted_xvals = newxvals[sorted_xvals_indices]
     sorted_yvals = newyvals[sorted_xvals_indices]
     xdiffs = np.diff(newxvals)
-    assert abs(min(xdiffs)) < 40*min(xdiffs[xdiffs > 0])
+    assert abs(min(xdiffs)) <= 1*min(xdiffs[xdiffs > 0])
 
     return sorted_xvals, sorted_yvals
 
@@ -1262,6 +1678,27 @@ def restrict_interpolation_table(
     loggcut = catalog.perform_logg_cut(tempcut, lowlogg=minlogG, loggcol="LogG")
     restricted_table = loggcut
     return restricted_table
+
+def interpolation_table_increasing_stretch(isochrone, mono_col="LogTeff"):
+    '''Cut off the low-mass portion of the table which is increasing.
+    
+    This function is an alternative to restrict_interpolation_table because it
+    ensures that a well-behaved part of the isochrone is used for
+    interpolation.'''
+    col = isochrone[mono_col]
+    # If the column is increasing, then these must be positive.
+    coldiff = np.diff(col)
+    # Get the first positive index.
+    first_index = np.where(coldiff >= 0)[0][0]
+    # Find where the index next dips below zero.
+    last_index = first_index+np.where(coldiff[first_index:] < 0)[0][0]
+    # Check for one-off blips and reinterpolate them.
+    while coldiff[last_index+1] > 0:
+        isochrone.remove_row(last_index)
+        coldiff = np.diff(isochrone[mono_col])
+        last_index = first_index+np.where(coldiff[first_index:] < 0)[0][0]
+
+    return isochrone[first_index:last_index]
 
 #######################
 # Filename Formatting #
