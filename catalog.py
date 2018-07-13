@@ -1841,7 +1841,7 @@ def generate_abs_mag_column(
     the desired band also needs to be passed.
     '''
     new_ext = v_to_ext(apotable[avcol])
-    apotable[abscol] = calc_abs_magnitude(
+    apotable[abscol] = sed.calc_abs_magnitude(
         apotable[appcol], apotable[distcol], new_ext)
 
 def generate_abs_mag_column_with_errors(
