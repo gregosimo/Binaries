@@ -48,6 +48,7 @@ import rotation_consistency as rot
 import observations as obs
 import read_catalog as catin
 import dsep
+import mist
 
 ################################################################################
 # Generate binned distributions #
@@ -922,9 +923,19 @@ def calc_DSEP_model_mag_fixed_age_alpha(teffs, fehs, mag, age=5.5, alpha=0.0):
     '''A predicted absolute magnitude given teff and metallicity.
     
     This function assumes that [a/Fe] and age are on grid points in the DSEP
-    models. Interpolation is done on both the Teff and [Fe/H] axes. The Teff
-    and [Fe/H] arrays should be the same size.'''
-    alpha = 0.0
+    models. If both teffs and fehs are multidimensional, then this returns a matrix
+    with the size len(fehs) x len(teffs). If either quantity only has one
+    value, then the returned array will only have one dimension, the length of
+    the given array.
+    
+    If the only quantity of interest is the one-by-one combination of
+    teffs-fehs, then those can be gotten by calling np.diag on the output.'''
+
+    input_fehs = np.array([
+#        -4.0, -3.5, -3.0, 
+        -2.5, -2.0, -1.75, -1.5, -1.25, -1.0, -0.75, -0.5,
+        -0.25, 0.0, 0.25, 0.5])
+    interp_fehs = np.zeros(len(input_fehs))
     input_fehs = np.array([-2.5, -2, -1.5, -1, -0.5, 0.0, 0.2, 0.3, 0.5])
     interp_fehs = np.zeros(len(input_fehs))
 
@@ -940,8 +951,8 @@ def calc_DSEP_model_mag_fixed_age_alpha(teffs, fehs, mag, age=5.5, alpha=0.0):
             interp_kind="linear")
 
     
-    k_vals = np.zeros(k_array.shape[1])
-    for j, newfeh in enumerate(fehs):
+    k_vals = np.zeros((len(fehs), len(teffs)))
+    for j, newteff in enumerate(teffs):
         feh_val = k_array[:,j]
         # If the input teff is too high for the given age and metallicity, the
         # output will be masked. Interpolation has a lot of issues if passed
@@ -951,9 +962,53 @@ def calc_DSEP_model_mag_fixed_age_alpha(teffs, fehs, mag, age=5.5, alpha=0.0):
             np.ma.compressed(interp_fehs[invalid_mask]),
             np.ma.compressed(feh_val[invalid_mask]), kind="cubic",
             bounds_error=False, fill_value=np.nan)
-        k_vals[j] = feh_interp(newfeh)
-    return np.ma.masked_invalid(k_vals)
+        if np.any(np.ma.getmask(fehs)):
+            raise ValueError("Can't interpolate over a masked array")
+        else:
+            fehs = np.ma.compressed(fehs)
+        k_vals[:,j] = feh_interp(fehs)
+    return np.ma.masked_invalid(np.squeeze(k_vals))
 
+def calc_MIST_model_mag_fixed_age_alpha(teffs, fehs, mag, age=5.5, alpha=0.0):
+    '''A predicted absolute magnitude given teff and metallicity.
+    
+    If both teffs and fehs are multidimensional, then this returns a matrix
+    with the size len(fehs) x len(teffs). If either quantity only has one
+    value, then the returned array will only have one dimension, the length of
+    the given array.
+    
+    If the only quantity of interest is the one-by-one combination of
+    teffs-fehs, then those can be gotten by calling np.diag on the output.'''
+
+    input_fehs = np.array([
+#        -4.0, -3.5, -3.0, 
+        -2.5, -2.0, -1.75, -1.5, -1.25, -1.0, -0.75, -0.5,
+        -0.25, 0.0, 0.25, 0.5])
+    interp_fehs = np.zeros(len(input_fehs))
+
+    # k_array[i,:] is all temperatures at a given input [Fe/H]
+    # k_array[:,j] is all metallicities at a given Teff.
+    k_array = np.ma.zeros((len(interp_fehs), len(teffs)))
+    for i, ifeh in enumerate(input_fehs):
+        iso = mist.MISTIsochrone.isochrone_from_file(ifeh, alpha=alpha)
+        interp_fehs[i] = iso.feh
+        k_array[i,:] = mist.interpolate_MIST_isochrone_cols(
+            iso, age, np.log10(teffs), incol="log_Teff", outcol="2MASS_Ks",
+            interp_kind="linear")
+
+    k_vals = np.zeros((len(fehs), len(teffs)))
+    for j, newteff in enumerate(teffs):
+        feh_val = k_array[:,j]
+        # If the input teff is too high for the given age and metallicity, the
+        # output will be masked. Interpolation has a lot of issues if passed
+        # masked values, so I'm going to just ignore them.
+        invalid_mask = np.logical_not(np.ma.getmaskarray(feh_val))
+        feh_interp = interp1d(
+            np.ma.compressed(interp_fehs[invalid_mask]),
+            np.ma.compressed(feh_val[invalid_mask]), kind="cubic",
+            bounds_error=False, fill_value=np.nan)
+        k_vals[:, j] = feh_interp(fehs)
+    return np.ma.masked_invalid(np.squeeze(k_vals))
 
 def calc_photometric_excess(teffs, fehs, alphas, mag, photvals, age=3):
     '''Calculate the photometric excess above a given isochrone.
