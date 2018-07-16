@@ -1355,6 +1355,7 @@ def good_aspcap_fits(apotable, aspcapcol="ASPCAPFLAG"):
 target_dict = {
     "APOGEE_KEPLER_COOLDWARF": ("APOGEE_TARGET2", 16), 
     "APOGEE2_APOKASC_DWARF": ("APOGEE2_TARGET1", 28),
+    "APOGEE2_APOKASC_GIANT": ("APOGEE2_TARGET1", 27),
     "APOGEE2_APOKASC": ("APOGEE2_TARGET1", 30),
     "APOGEE_KEPLER_SEISMO": ("APOGEE_TARGET1", 27)}
 
@@ -1840,7 +1841,7 @@ def generate_abs_mag_column(
     the desired band also needs to be passed.
     '''
     new_ext = v_to_ext(apotable[avcol])
-    apotable[abscol] = calc_abs_magnitude(
+    apotable[abscol] = sed.calc_abs_magnitude(
         apotable[appcol], apotable[distcol], new_ext)
 
 def generate_abs_mag_column_with_errors(
