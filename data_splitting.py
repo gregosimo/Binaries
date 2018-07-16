@@ -1271,6 +1271,9 @@ def initialize_full_APOGEE(aposplit):
         [0, 1], ("Single Visit", "RV Nonvariable", "RV Variable"), 
         invert_inequality=True)
 
+    aposplit.split_metallicity(
+        -0.5, ("Low Met", "High Met", "No Met"), null_value=np.ma.masked)
+
     aposplit.split_dlsb()
 
     aposplit.split_photometric_quality(
