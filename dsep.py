@@ -1691,12 +1691,17 @@ def interpolation_table_increasing_stretch(isochrone, mono_col="LogTeff"):
     # Get the first positive index.
     first_index = np.where(coldiff >= 0)[0][0]
     # Find where the index next dips below zero.
-    last_index = first_index+np.where(coldiff[first_index:] < 0)[0][0]
-    # Check for one-off blips and reinterpolate them.
-    while coldiff[last_index+1] > 0:
-        isochrone.remove_row(last_index)
-        coldiff = np.diff(isochrone[mono_col])
+    try:
         last_index = first_index+np.where(coldiff[first_index:] < 0)[0][0]
+    # There might be a more elegant way of doing this.
+    except IndexError:
+        last_index = len(coldiff)
+    else:
+        # Check for one-off blips and reinterpolate them.
+        while coldiff[last_index+1] > 0:
+            isochrone.remove_row(last_index)
+            coldiff = np.diff(isochrone[mono_col])
+            last_index = first_index+np.where(coldiff[first_index:] < 0)[0][0]
 
     return isochrone[first_index:last_index]
 
