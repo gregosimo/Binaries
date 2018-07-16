@@ -1015,7 +1015,7 @@ class APOGEESplitter(KeplerSplitter):
             self, splitnames=("Cool Sample", "Not Cool Sample"),
             cool_crit="Cool Dwarfs", apogee1_flag="APOGEE_KEPLER_COOLDWARF", 
             apogee2_flag="APOGEE2_APOKASC_DWARF", dwarf_flag="Jen Dwarf",
-            hlim_flag="H Jen", sdss_cool_flag="Jen Cool", 
+            hlim_flag="H APOGEE", sdss_cool_flag="Jen Cool", 
             no_sdss_flag="No SDSS Teff", kic_cool_flag="KIC Jen Cool"):
         '''Split off the cool dwarf sample from the rest of the apogee sample.
 
@@ -1238,11 +1238,12 @@ def initialize_full_APOGEE(aposplit):
     be a pretty rough cut.'''
     aposplit.split_targeting("APOGEE_KEPLER_COOLDWARF")
     aposplit.split_targeting("APOGEE2_APOKASC_DWARF")
+    aposplit.split_targeting("APOGEE2_APOKASC_GIANT")
     aposplit.split_targeting("APOGEE2_APOKASC")
     aposplit.split_by_ASPCAP_flags()
 
     aposplit.split_mag(
-        "H", [7, 11], ("H Bright", "H Jen", "H Faint", "No H"), mag_crit="H",
+        "H", [7, 11], ("H Bright", "H APOGEE", "H Faint", "No H"), mag_crit="H",
         null_value=np.ma.masked)
     aposplit.split_teff(
         "SDSS-Teff", [5500], ("Jen Cool", "Jen Hot", "No SDSS Teff"), 
@@ -1278,7 +1279,7 @@ def initialize_full_APOGEE(aposplit):
 
     aposplit.split_Gaia()
 
-#    aposplit.split_modified_Berger_EVstate()
+    aposplit.split_Berger_EVstate()
 
     aposplit.split_cool_dwarfs()
 
@@ -1331,19 +1332,22 @@ def initialize_asteroseismic_sample(aposplit):
 
     # Split between hot and cool
     aposplit.split_teff(
-        "TEFF_COR", 5500, ("Cool", "Hot"), teff_crit="APOGEE Teff")
+        "TEFF_COR", 5500, ("Cool", "Hot", "No APOGEE Teff"), 
+        teff_crit="APOGEE Teff", null_value=np.ma.masked)
 
     # Now split the spectroscopic targets
     aposplit.split_logg("LOGG_FIT", [3.5, 4.0], (
         "Spectroscopic dwarfs", "Spectroscopic subgiants", 
-        "Spectroscopic giants"), logg_crit="APOGEE logg")
+        "Spectroscopic giants", "No APOGEE logg"), logg_crit="APOGEE logg",
+                        null_value=np.ma.masked)
 
     # Split  by quality.
     aposplit.split_by_ASPCAP_flags()
 
     # Split by vsini
     aposplit.split_vsini(
-        [0, 7, 10], ["No Vsini", "Vsini nondet", "Vsini marginal", "Vsini det"])
+        [7], ["Vsini nondet", "Vsini det", "No vsini"],
+        null_value=np.ma.masked)
 
     # Split by DLSB presence.
     aposplit.split_dlsb(apid_col="2MASS_ID")
@@ -1352,7 +1356,8 @@ def initialize_asteroseismic_sample(aposplit):
     aposplit.split_McQuillan_periods(kiccol=aposplit.kic_col)
 
     aposplit.split_photometric_quality(
-        "K_MAG_ERR", splitnames=("Good K", "Blend"), crit="MK blend")
+        "K_MAG_2M", "K_MAG_ERR", splitnames=("Good K", "Blend", "Bad Phot"), 
+        crit="MK blend")
 
     # Absolute K-band magnitude
     aposplit.data["M_K"] = (
@@ -1360,13 +1365,13 @@ def initialize_asteroseismic_sample(aposplit):
     aposplit.data["M_K_err1"] = np.where(
         aposplit.data["K_MAG_ERR"] > 0, aposplit.data["K_MAG_ERR"]**2 + (
         5 * (aposplit.data["disem"]) / aposplit.data["dis"] / np.log(10))**2,
-        -9999.0)
+        np.ma.masked)
     aposplit.data["M_K_err2"] = np.where(
         aposplit.data["K_MAG_ERR"] > 0, aposplit.data["K_MAG_ERR"]**2 + (
         5 * (aposplit.data["disep"]) / aposplit.data["dis"] / np.log(10))**2,
-        -9999.0)
+        np.ma.masked)
 
-    aposplit.split_modified_Berger_EVstate(teff_col="TEFF_COR")
+    aposplit.split_Berger_EVstate()
 
 def initialize_mcquillan_sample(mcqsplit):
     '''Makes a series of cuts related to the rotation period of the targets.'''
