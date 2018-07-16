@@ -28,8 +28,15 @@ class MISTIsochrone(object):
     def iso_table(self, age):
         '''Return the table corresponding to the isochrone at the given age.
         The given age should be given in Gyr.'''
-        return self.fulltable[np.isclose(
+        fullagetable = self.fulltable[np.isclose(
             self.fulltable["log10_isochrone_age_yr"], np.log10(age)+9, atol=0.01)]
+        # Sometimes there are EEPS which have almost the same mass, but other
+        # values dominated by noise. So I am going to bin the whole table so
+        # that masses have only 3 decimal places.
+        fullagegroups = fullagetable.group_by(np.round(
+            fullagetable["initial_mass"], 3))
+        meanagetable = fullagegroups.groups.aggregate(np.mean)
+        return meanagetable
 
     @classmethod
     def isochrone_from_file(
