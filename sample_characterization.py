@@ -585,6 +585,13 @@ def AV_to_AK(av):
     ak = av / 3.1 * 0.355
     return ak
 
+def AV_to_AH(av):
+    '''Convert Av to Ak extinctions.
+
+    This uses the CCM (1989) relation.'''
+    ah = av * 0.190
+    return ah
+
 def AV_err_to_AK_err(av, av_err):
     '''Convert Av error to Ak error
         
