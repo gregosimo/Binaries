@@ -1231,48 +1231,24 @@ def create_combined_rotation_splitter(baseclass):
 # Initialize Splitters #
 ###############################################################################
 
-def initialize_full_APOGEE(aposplit):
+def initialize_clean_APOGEE(aposplit):
     '''Initialize a the full APOGEE Sample.
 
     Because very little will be done with the full APOGEE sample, this will
     be a pretty rough cut.'''
-    aposplit.split_targeting("APOGEE_KEPLER_COOLDWARF")
-    aposplit.split_targeting("APOGEE2_APOKASC_DWARF")
-    aposplit.split_targeting("APOGEE2_APOKASC_GIANT")
-    aposplit.split_targeting("APOGEE2_APOKASC")
     aposplit.split_by_ASPCAP_flags()
 
-    aposplit.split_mag(
-        "H", [7, 11], ("H Bright", "H APOGEE", "H Faint", "No H"), mag_crit="H",
-        null_value=np.ma.masked)
-    aposplit.split_teff(
-        "SDSS-Teff", [5500], ("Jen Cool", "Jen Hot", "No SDSS Teff"), 
-        teff_crit="SDSS Teff", null_value=np.ma.masked)
-    aposplit.split_teff(
-        "K-Teff", [5500], ("KIC Jen Cool", "KIC Jen Hot", "No KIC Teff"), 
-        teff_crit="KIC Teff", null_value=np.ma.masked)
     aposplit.split_teff(
         "TEFF", [5500], ("Cool", "Hot", "Bad APOGEE Teff"),
         teff_crit="APOGEE Teff", null_value=np.ma.masked)
-    aposplit.split_logg(
-        "KIC logg", [4.0], ("Jen Giant", "Jen Dwarf", "No KIC logg"), 
-        logg_crit="KIC logg", null_value=np.ma.masked)
-    aposplit.split_combined_targeting(
-        ["APOGEE_KEPLER_COOLDWARF", "APOGEE2_APOKASC"],
-        ("Targeted", "Not Targeted"), "Targeting")
-
-    aposplit.split_McQuillan_periods(kiccol=aposplit.kic_col)
 
     aposplit.split_vsini(
-        [7, 10], ("Vsini nondet", "Vsini marginal", "Vsini det", "No Vsini"),
+        [7], ("Vsini nondet", "Vsini det", "No Vsini"),
         null_value=np.ma.masked)
 
-    aposplit.split_vscatter(
-        [0, 1], ("Single Visit", "RV Nonvariable", "RV Variable"), 
-        invert_inequality=True)
-
     aposplit.split_metallicity(
-        -0.5, ("Low Met", "High Met", "No Met"), null_value=np.ma.masked)
+        -0.5, ("Low Met", "High Met", "No Met"), col="FE_H", 
+        null_value=np.ma.masked)
 
     aposplit.split_dlsb()
 
@@ -1284,7 +1260,19 @@ def initialize_full_APOGEE(aposplit):
 
     aposplit.split_Berger_EVstate()
 
-    aposplit.split_cool_dwarfs()
+def initialize_full_APOGEE(aposplit):
+    '''Get the underlying APOGEE sample we're interested in.'''
+    aposplit.split_targeting("APOGEE_KEPLER_COOLDWARF")
+    aposplit.split_targeting("APOGEE2_APOKASC_DWARF")
+    aposplit.split_targeting("APOGEE2_APOKASC_GIANT")
+    aposplit.split_targeting("APOGEE2_APOKASC")
+
+    aposplit.split_mag(
+        "H", [7, 11], ("H Bright", "H APOGEE", "H Faint", "No H"), mag_crit="H",
+        null_value=np.ma.masked)
+    aposplit.split_combined_targeting(
+        ["APOGEE_KEPLER_COOLDWARF", "APOGEE2_APOKASC"],
+        ("Targeted", "Not Targeted"), "Targeting")
 
 def general_to_hot_kic_sample(apogeesplitter):
     '''Get the subset of the hot sample that has KIC parameters.'''
