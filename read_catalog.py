@@ -544,14 +544,16 @@ def mcquillan_with_stelparms(
 
 @au.shortcut_file(paths.SHORTCUT_MCQUILLAN_NONDET_STELLPARM)
 def mcquillan_nondetections_with_stelparms(
-    mcq_path=paths.MCQUILLAN_NONDETECTIONS, kic_path=paths.KIC_CATALOG):
+    mcq_path=paths.MCQUILLAN_NONDETECTIONS, kic_path=paths.KIC_CATALOG,
+        gaia_path=paths.GAIA_DR2_KEPLER_OVERLAP):
     '''Read the McQuillan nondetections with full KIC stellar parameters.
 
     Read in the McQuillan nondetections along with the KIC DR25 stellar
     parameters.
     '''
     mcq = read_McQuillan_nondetections(mcq_path)
-    stellcat = read_KIC_DR25_catalog(kic_path)
+    stellcat = stelparms_with_Gaia(kic_path, gaia_path)
+    del(stellcat["KIC"])
     mcquillancat = au.join_by_id(
         mcq, stellcat, "KIC", "kepid", join_type="left")
     mcquillancat["teff"][mcquillancat["teff"].mask] = mcquillancat["Teff"][
