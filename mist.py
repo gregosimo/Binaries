@@ -1,40 +1,50 @@
 import numpy as np
 import matplotlib.pyplot as plt
 from scipy.interpolate import interp1d
-from astropy.table import Table
+from astropy.table import Table, vstack
+import bisect
 
 import path_config as paths
 import dsep
 import hrplots as hr
 import biovis_colors as bc
+import models
 
+band_translation = {"H": "2MASS_H", "K": "2MASS_Ks", "Ks": "2MASS_Ks"}
 
-class MISTIsochrone(object):
+class MISTIsochrone(models.StellarIsochrone):
     '''A class that encapsulates a MIST isochrone.'''
     def __init__(self, feh, fulltable, alpha=0, Yinit=0.2703, Zinit=1.42857e-2, 
                  vvcrit=0.00, AV=0.0, MIST_version=1.1, MESA_version=7503, 
-                 photsys= "UBV(RI)c, 2MASS, Kepler, Hipparcos, Gaia (Vega)"):
-        self.feh = feh
-        self.alpha=alpha
-        self.Yinit=Yinit
-        self.Zinit=Zinit
-        self.vvcrit=vvcrit
+                 bandstr="UBVRIplus"):
+        # Define colnames
+        self.age_col = "log10_isochrone_age_yr"
+        self.mass_col = "initial_mass"
+        self.logteff_col = "log_Teff"
+        self.Hcol = "2MASS_H"
+        self.Kcol = "2MASS_Ks"
+
+        # This should make a dictionary which has age as a key and that
+        # subtable as a value.
+        fullgroups = fulltable.group_by(self.age_col)
+        iso_dict = {
+            np.round(key[0], 2): val for key, val in zip(
+                fullgroups.groups.keys, fullgroups.groups)}
+        super().__init__(feh, alpha, 0, Yinit, Zinit, vvcrit, bandstr, iso_dict)
         self.AV=AV
         self.MIST_version=MIST_version
         self.MESA_version=MESA_version
-        self.photsys = photsys
-        self.fulltable = fulltable
 
     def iso_table(self, age):
         '''Return the table corresponding to the isochrone at the given age.
-        The given age should be given in Gyr.'''
-        fullagetable = self.fulltable[np.isclose(
-            self.fulltable["log10_isochrone_age_yr"], np.log10(age)+9, atol=0.01)]
+        The given age should be given in log10(yr).'''
+        self.replace_with_tracks(age)
+        fullagetable = self.iso_dict[age]
         # Sometimes there are EEPS which have almost the same mass, but other
         # values dominated by noise. So I am going to bin the whole table so
         # that masses have only 3 decimal places.
         fullagegroups = fullagetable.group_by(np.round(
-            fullagetable["initial_mass"], 3))
+            fullagetable[self.mass_col], 3))
         meanagetable = fullagegroups.groups.aggregate(np.mean)
         return meanagetable
 
@@ -45,12 +55,84 @@ class MISTIsochrone(object):
         '''Read in a MIST isochrone from a file.'''
         filename = build_MIST_filename(feh)
         MIST_table = Table.read(
-            str(MIST_PATH / filename), format="ascii.commented_header",
-            header_start=12,
-            guess=False, data_start=0, comment="\s*#")
-        mist = cls(feh, MIST_table, alpha=alpha, vvcrit=vvcrit,
-                   MIST_version=MIST_version)
+            str(MIST_PATH / filename), format="ascii.fast_commented_header",
+            header_start=12, guess=False, data_start=0)
+        mist = cls(
+            feh, MIST_table, alpha=alpha, vvcrit=vvcrit, 
+            MIST_version=MIST_version, bandstr=bandstr)
         return mist
+
+    def replace_with_tracks(self, age, transition_mass=1.0):
+        '''Replace the lower-mass portion of isochrones with tracks.
+
+        Because the isochrones sometimes have gaps in them for whatever
+        reason, this function will take the isochrone at the given age and
+        replace the portion with mass less than transition_mass with entries
+        calculated directly from evolutionary tracks.'''
+        met_table = self.iso_dict[age]
+        isochrone_min_mass_index = bisect.bisect_left(
+            met_table[self.mass_col], transition_mass)
+        isochrone_highmass_indices = slice(
+            isochrone_min_mass_index, len(met_table))
+        # I could hypothetically read this from the directory. But that's more
+        # effort than I'd like to spend.
+        masses = np.linspace(0.3, 1.3, 50+1, endpoint=True)
+        model_max_mass_index = bisect.bisect_left(masses, transition_mass)
+        masslist = []
+        for mass in masses[0:model_max_mass_index]:
+            mist_track = MISTEvolutionaryTrack.track_from_file(
+                mass, self.feh, vvcrit=self.vvcrit, bandstr=self.bandstr,
+                MIST_version=self.MIST_version)
+            # Age is stored as log10(age) in the isochrone, but is linear in
+            # the evolutionary track...
+            newiso = mist_track.interpolate_at_age(
+                10**age, interp_style="average")
+            newiso.remove_column(mist_track.age_col)
+            newiso["EEP"] = 0
+            newiso[self.age_col] = np.log10(age)
+            newiso[self.mass_col] = mass
+            newiso["star_mass"] = mass
+            newiso["[Fe/H]_init"] = mist_track.feh
+            newiso["[Fe/H]"] = mist_track.feh
+            del(newiso["Z_surf"])
+            masslist.append(newiso)
+        newtable = vstack(masslist)
+        combined_table = vstack([
+            newtable, met_table[isochrone_highmass_indices]])
+        self.iso_dict[age] = combined_table
+
+
+class MISTEvolutionaryTrack(models.StellarEvolutionaryTrack):
+    '''A model of the MIST Evolutionary Tracks.'''
+    @classmethod
+    def track_from_file(
+            cls, mass, feh, vvcrit=0.0, bandstr="UBVRIplus",
+            MIST_version=1.1, MIST_PATH=paths.MIST_PATH):
+        '''Read in the MIST tracks.'''
+        mist_folder = name_track_folder(MIST_version, vvcrit, bandstr, feh)
+        mist_file = name_track_file(mass)
+        MIST_table = Table.read(
+            str(MIST_PATH / mist_folder / mist_file),
+            format="ascii.commented_header", header_start=14, data_start=0)
+        cleaned_table = models.bin_nearby_table_values(
+            MIST_table, "star_age", 2)
+        mist = cls(cleaned_table, "star_age", mass, feh, 0.0)
+        mist.MIST_version = MIST_version
+        return mist
+
+def name_track_folder(MIST_version, vvcrit, bandstr, feh):
+    '''Name the folder that contains evolutionary tracks.'''
+    templatestr = "MIST_v{0:.1f}_vvcrit{1:.1f}_{2}_feh_{3}{4:4.2f}_tracks"
+    newstr = templatestr.format(
+        MIST_version, vvcrit, bandstr, dsep.assign_DSEP_sign(feh), abs(feh))
+    return newstr
+
+def name_track_file(mass):
+    '''Name a MIST track file. This specifies a mass within the track folder.'''
+    massformat = int(np.round(mass, 4) * 10000)
+    templatestr = "{0:07d}M.track.eep.cmd"
+    newstr = templatestr.format(massformat)
+    return newstr
 
 def interpolate_MIST_isochrone_cols(
         iso, age, interp_in, incol="log_Teff", outcol="2MASS_Ks",
@@ -119,11 +201,12 @@ def test_teff_k_interpolation(
                                sharex=True)
     iso = MISTIsochrone.isochrone_from_file(feh, alpha=alpha)
     met_table = iso.iso_table(age)
-    restricted_table = dsep.interpolation_table_increasing_stretch(
-        met_table, mono_col="log_Teff")
-    teffvals, colvals = restricted_table["log_Teff"], restricted_table[outcol]
-    teff_ordered, col_ordered = dsep.ensure_array_increasing(teffvals, colvals)
-    teff_fixed, col_fixed = dsep.fix_duplicate_array_values(
+    restricted_table = models.interpolation_table_increasing_stretch(
+        met_table, mono_col=iso.logteff_col)
+    teffvals, colvals = restricted_table[iso.logteff_col], restricted_table[outcol]
+    teff_ordered, col_ordered = models.ensure_array_increasing(
+        teffvals, colvals)
+    teff_fixed, col_fixed = models.fix_duplicate_array_values(
         teff_ordered, col_ordered)
 
     # These will hold the |predicted-actual| values for each point, except the
@@ -188,8 +271,8 @@ def test_feh_interpolation(
     for i, ifeh in enumerate(input_fehs):
         iso = MISTIsochrone.isochrone_from_file(ifeh, alpha=alpha)
         interp_fehs[i] = iso.feh
-        k_array[i,:] = interpolate_MIST_isochrone_cols(
-            iso, age, np.log10(teffs), incol="log_Teff", outcol=outcol,
+        k_array[i,:] = iso.interpolate_isochrone_cols(
+            age, np.log10(teffs), iso.logteff_col, outcol,
             interp_kind="linear")
 
     # These will hold the |predicted-actual| values for each point, except the
@@ -251,3 +334,25 @@ def test_feh_interpolation(
                 marker="")
     a1.set_xlabel("[Fe/H]")
     a1.set_ylabel("Error (mag)")
+
+def plot_age_differences(ages):
+    '''Make a plot showing the differences in raw model ages for MIST
+    isochrones.'''
+    iso = MISTIsochrone.isochrone_from_file(0.0)
+    iso.replace_with_tracks(1.0)
+    iso.replace_with_tracks(4.46)
+    iso.replace_with_tracks(9.0)
+    youngtable = iso.iso_table(1.0)
+    medtable = iso.iso_table(4.46)
+    oldtable = iso.iso_table(9.0)
+
+    youngtable = youngtable[youngtable["initial_mass"] < 1.3]
+    medtable = medtable[medtable["initial_mass"] < 1.3]
+    oldtable = oldtable[oldtable["initial_mass"] < 1.3]
+
+    hr.absmag_teff_plot(10**youngtable["log_Teff"], youngtable["2MASS_Ks"],
+                        color=bc.blue, marker="o", ls="-")
+    hr.absmag_teff_plot(10**medtable["log_Teff"], medtable["2MASS_Ks"],
+                        color=bc.orange, marker="o", ls="-")
+    hr.absmag_teff_plot(10**oldtable["log_Teff"], oldtable["2MASS_Ks"],
+                        color=bc.red, marker="o", ls="-")

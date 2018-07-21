@@ -911,20 +911,103 @@ def calc_solar_DSEP_model_mag(teffs, mag, age=5.5):
     '''A predicted absolute magnitude given teff for a solar isochrone.'''
     return calc_DSEP_model_mag_fixed_age_feh_alpha(teffs, 0.0, mag, age=age)
 
+def calc_model_mag_fixed_age_feh_alpha(
+        teffs, feh, mag, alpha=0.0, age=5.5, model="MIST"):
+    '''Predict absolute magnitude given teffs.
+
+    This function assumes that [Fe/H], [a/Fe], and age are on grid points in
+    the given model. The only interpolation is done on the Teff axis. An array
+    of Teffs can also be passed to this function.
+    
+    Note that there is a model-dependent requirement for the age. If the age is
+    given to a DSEP model, it should be given in the form of Gyr. If it is
+    given to a MIST model, it should be given in the form of log10(yr).'''
+    if model.upper() == "MIST":
+        iso = mist.MISTIsochrone.isochrone_from_file(feh, alpha=alpha)
+        bandcol = mist.band_translation[mag]
+    elif model.upper() == "DSEP":
+        iso = dsep.dsepIsochrone.isochrone_from_file(feh, alpha=alpha)
+        bandcol = dsep.band_translation[mag]
+
+    newks = iso.interpolate_isochrone_cols(
+        age, np.log10(teffs), iso.logteff_col, bandcol, interp_kind="linear")
+
+    assert not np.any(np.ma.getmask(teffs))
+    return np.ma.masked_invalid(newks)
+
+def calc_model_over_feh_fixed_age_alpha(
+        invals, incol, outcol, fehs, age, alpha=0.0, model="MIST"):
+    '''Interpolate from incol to outcol at a given metallicity.
+
+    This function requires age and alpha to be gridpoints in the DSEP function,
+    but fehs will be interpolated over. If both incol and fehs are
+    multidimensional, then the output array will be values of outcol
+    interpolated on a grid of size len(fehs) x len(invals).
+
+    If the only quantity of interest is individual combinations of invals and 
+    fehs, then simply call np.diag on the output quantity.'''
+    invals = np.atleast_1d(invals)
+    fehs = np.atleast_1d(fehs)
+
+    input_fehs = np.array([
+#        -4.0, -3.5, -3.0, 
+        -2.5, -2.0, -1.75, -1.5, -1.25, -1.0, -0.75, -0.5,
+        -0.25, 0.0, 0.25, 0.5])
+    interp_fehs = np.zeros(len(input_fehs))
+
+    # k_array[i,:] is all temperatures at a given input [Fe/H]
+    # k_array[:,j] is all metallicities at a given Teff.
+    k_array = np.ma.zeros((len(interp_fehs), len(invals)))
+    for i, ifeh in enumerate(input_fehs):
+        if model.upper() == "MIST":
+            iso = mist.MISTIsochrone.isochrone_from_file(
+                ifeh, alpha=alpha)
+        elif model.upper() == "DSEP":
+            iso = dsep.DSEPIsochrone.isochrone_from_file(
+                ifeh, afe=dsep.alpha_bin(alpha))
+
+        interp_fehs[i] = iso.feh
+        k_array[i,:] = iso.interpolate_isochrone_cols(
+            age, invals, incol, outcol, interp_kind="linear",
+            mask_outside_bounds=True)
+
+    
+    k_vals = np.zeros((len(fehs), len(invals)))
+    for j in range(len(invals)):
+        feh_val = k_array[:,j]
+        # If the input teff is too high for the given age and metallicity, the
+        # output will be masked. Interpolation has a lot of issues if passed
+        # masked values, so I'm going to just ignore them.
+        invalid_mask = np.logical_not(np.ma.getmaskarray(feh_val))
+        if np.any(np.ma.getmask(fehs)):
+            raise ValueError("Can't interpolate over a masked array")
+        try:
+            feh_interp = interp1d(
+                np.ma.compressed(interp_fehs[invalid_mask]),
+                np.ma.compressed(feh_val[invalid_mask]), kind="cubic",
+                bounds_error=False, fill_value=np.nan)
+        except ValueError:
+            try:
+                feh_interp = interp1d(
+                    np.ma.compressed(interp_fehs[invalid_mask]),
+                    np.ma.compressed(feh_val[invalid_mask]), kind="linear",
+                    bounds_error=False, fill_value=np.nan)
+            except ValueError:
+                k_vals[:,j] = np.nan
+                continue
+        else:
+            fehs = np.ma.compressed(fehs)
+        k_vals[:,j] = feh_interp(fehs)
+    return np.ma.masked_invalid(np.squeeze(k_vals))
+
 def calc_DSEP_model_mag_fixed_age_feh_alpha(teffs, feh, mag, alpha=0.0, age=5.5):
     '''Predict absolute magnitude given teffs.
 
     This function assumes that [Fe/H], [a/Fe], and age are on grid points in
     the DSEP models. The only interpolation is done on the Teff axis. An array
     of Teffs can also be passed to this function.'''
-    iso = dsep.DSEPIsochrone.isochrone_from_file(feh, afe=dsep.alpha_bin(alpha))
-    newks = dsep.interpolate_DSEP_isochrone_cols(
-        iso, age, np.log10(teffs), incol="LogTeff", outcol="Ks", 
-        interp_kind="linear")
-
-    # Make sure teffs is not a masked array.
-    assert not np.any(np.ma.getmask(teffs))
-    return np.ma.masked_invalid(newks)
+    return calc_model_mag_fixed_age_feh_alpha(
+        teffs, feh, mag, alpha=alpha, age=5.5, model="DSEP")
 
 def calc_DSEP_model_mag_fixed_age_alpha(teffs, fehs, mag, age=5.5, alpha=0.0):
     '''A predicted absolute magnitude given teff and metallicity.
@@ -937,44 +1020,21 @@ def calc_DSEP_model_mag_fixed_age_alpha(teffs, fehs, mag, age=5.5, alpha=0.0):
     
     If the only quantity of interest is the one-by-one combination of
     teffs-fehs, then those can be gotten by calling np.diag on the output.'''
+    kvals = calc_DSEP_over_feh_fixed_age_alpha(
+        np.log10(teffs), "LogTeff", mag, fehs, age=age, alpha=alpha)
+    return kvals
 
-    input_fehs = np.array([
-#        -4.0, -3.5, -3.0, 
-        -2.5, -2.0, -1.75, -1.5, -1.25, -1.0, -0.75, -0.5,
-        -0.25, 0.0, 0.25, 0.5])
-    interp_fehs = np.zeros(len(input_fehs))
-    input_fehs = np.array([-2.5, -2, -1.5, -1, -0.5, 0.0, 0.2, 0.3, 0.5])
-    interp_fehs = np.zeros(len(input_fehs))
+def calc_DSEP_over_feh_fixed_age_alpha(
+        invals, incol, outcol, fehs, age=5.5, alpha=0.0):
+    '''Interpolate from incol to outcol at a given metallicity.
 
-    # k_array[i,:] is all temperatures at a given input [Fe/H]
-    # k_array[:,j] is all metallicities at a given Teff.
-    k_array = np.ma.zeros((len(interp_fehs), len(teffs)))
-    for i, ifeh in enumerate(input_fehs):
-        iso = dsep.DSEPIsochrone.isochrone_from_file(
-            ifeh, afe=dsep.alpha_bin(alpha))
-        interp_fehs[i] = iso.feh
-        k_array[i,:] = dsep.interpolate_DSEP_isochrone_cols(
-            iso, age, np.log10(teffs), incol="LogTeff", outcol="Ks",
-            interp_kind="linear")
+    This function requires age and alpha to be gridpoints in the DSEP function,
+    but fehs will be interpolated over. If both incol and fehs are
+    multidimensional, then the output array will be values of outcol
+    interpolated on a grid of size len(fehs) x len(invals).
 
-    
-    k_vals = np.zeros((len(fehs), len(teffs)))
-    for j, newteff in enumerate(teffs):
-        feh_val = k_array[:,j]
-        # If the input teff is too high for the given age and metallicity, the
-        # output will be masked. Interpolation has a lot of issues if passed
-        # masked values, so I'm going to just ignore them.
-        invalid_mask = np.logical_not(np.ma.getmaskarray(feh_val))
-        feh_interp = interp1d(
-            np.ma.compressed(interp_fehs[invalid_mask]),
-            np.ma.compressed(feh_val[invalid_mask]), kind="cubic",
-            bounds_error=False, fill_value=np.nan)
-        if np.any(np.ma.getmask(fehs)):
-            raise ValueError("Can't interpolate over a masked array")
-        else:
-            fehs = np.ma.compressed(fehs)
-        k_vals[:,j] = feh_interp(fehs)
-    return np.ma.masked_invalid(np.squeeze(k_vals))
+    If the only quantity of interest is individual combinations of invals and 
+    fehs, then simply call np.diag on the output quantity.'''
 
 def calc_MIST_model_mag_fixed_age_alpha(teffs, fehs, mag, age=5.5, alpha=0.0):
     '''A predicted absolute magnitude given teff and metallicity.
@@ -986,6 +1046,8 @@ def calc_MIST_model_mag_fixed_age_alpha(teffs, fehs, mag, age=5.5, alpha=0.0):
     
     If the only quantity of interest is the one-by-one combination of
     teffs-fehs, then those can be gotten by calling np.diag on the output.'''
+    teffs = np.atleast_1d(teffs)
+    fehs = np.atleast_1d(fehs)
 
     input_fehs = np.array([
 #        -4.0, -3.5, -3.0, 
@@ -1017,6 +1079,42 @@ def calc_MIST_model_mag_fixed_age_alpha(teffs, fehs, mag, age=5.5, alpha=0.0):
         k_vals[:, j] = feh_interp(fehs)
     return np.ma.masked_invalid(np.squeeze(k_vals))
 
+###############################################################################
+# Uncertainties #
+###############################################################################
+
+def plot_isochrone_metallicity_deriv(age, alpha=0.0):
+    '''Plots the partial K-band derivative over metallicity from isochrones.
+
+    This plot will essentially be dKs/d[Fe/H] as a function of temperature. In
+    order to get the uncertainty in Ks, multiply by the uncertainty in [Fe/H].'''
+    teffgrid = np.linspace(3500, 7000, 100)
+    fehs = [-0.5, 0.5]
+    kvals = calc_DSEP_model_mag_fixed_age_alpha(
+        teffgrid, fehs, "Ks", age=age, alpha=alpha)
+    deriv = (kvals[1,:] - kvals[0,:])/(fehs[1]-fehs[0])
+
+    hr.absmag_teff_plot(teffgrid, deriv, marker="", ls="-", color=bc.black)
+    plt.xlabel("Teff (K)")
+    plt.ylabel("dKs/d[Fe/H]")
+
+def plot_isochrone_temperature_deriv(age, feh, alpha=0.0):
+    '''Plots the predicted K-band derivative over Teff from isochrones.
+
+    This plot will essentially be dKs/d[Fe/H] as a function of temperature. In
+    order to get the uncertainty in Ks, multiply by the uncertainty in Teff.'''
+    teffgrid, teffstep = np.linspace(
+        3500, 7000, 101, endpoint=True, retstep=True)
+    kvals = calc_DSEP_model_mag_fixed_age_alpha(
+        teffgrid, feh, "Ks", age=age, alpha=alpha)
+    deriv = np.diff(kvals)/teffstep
+    newteffgrid = (teffgrid[1:]+teffgrid[:-1])/2
+
+    hr.absmag_teff_plot(newteffgrid, deriv*100, marker="", ls="-", color=bc.black)
+    plt.xlabel("Teff (K)")
+    plt.ylabel("dKs/dTeff*100")
+    
+
 def calc_photometric_excess(teffs, fehs, alphas, mag, photvals, age=3):
     '''Calculate the photometric excess above a given isochrone.
 
@@ -1026,6 +1124,10 @@ def calc_photometric_excess(teffs, fehs, alphas, mag, photvals, age=3):
     magdiff = photvals - DSEPmags
 
     return magdiff
+
+###############################################################################
+# Binary Excess #
+###############################################################################
 
 def plot_photometric_binary_excess(teffs, fehs, mag, photvals, age=3):
     '''Plot the photometric excess for a sample of main-sequence targets.
