@@ -2,8 +2,12 @@
 Functions using the Kepler Eclipsing Binary population
 '''
 import astropy_util as au
+from astropy.table import Table
+import numpy as np
+from scipy.interpolate import interp1d
 
 import read_catalog as catin
+import path_config as paths
 
 ###############################################################################
 # EBs and Rafa #
@@ -139,7 +143,7 @@ def EB_indices(kiccol):
     
 
 def read_Kirk_geometric_correction_spline(
-    splinepath="/home/regulus/simonian/Binaries/Kirk_geometric_correction_spline.csv"):
+    splinepath=paths.HEAD_DIR / "Kirk_geometric_correction_spline.csv"):
     '''Read the spline that represents the geometric correction for EBs.
 
     The correction was taken from Fig. 11 in Kirk et al (2016).'''
