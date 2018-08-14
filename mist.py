@@ -14,21 +14,20 @@ band_translation = {"H": "2MASS_H", "K": "2MASS_Ks", "Ks": "2MASS_Ks"}
 
 class MISTIsochrone(models.StellarIsochrone):
     '''A class that encapsulates a MIST isochrone.'''
+    # These are characteristic of all MIST Isochrones
+    age_col = "isochrone_age_yr"
+    mass_col = "initial_mass"
+    logteff_col = "log_Teff"
     def __init__(self, feh, fulltable, alpha=0, Yinit=0.2703, Zinit=1.42857e-2, 
                  vvcrit=0.00, AV=0.0, MIST_version=1.1, MESA_version=7503, 
                  bandstr="UBVRIplus"):
-        # Define colnames
-        self.age_col = "log10_isochrone_age_yr"
-        self.mass_col = "initial_mass"
-        self.logteff_col = "log_Teff"
-        self.Hcol = "2MASS_H"
-        self.Kcol = "2MASS_Ks"
 
         # This should make a dictionary which has age as a key and that
         # subtable as a value.
         fullgroups = fulltable.group_by(self.age_col)
         iso_dict = {
-            np.round(key[0], 2): val for key, val in zip(
+            np.round(key[0] / 10**(np.floor(np.log10(key[0]))),
+                     2)*10**(np.floor(np.log10(key[0]))): val for key, val in zip(
                 fullgroups.groups.keys, fullgroups.groups)}
         super().__init__(feh, alpha, 0, Yinit, Zinit, vvcrit, bandstr, iso_dict)
         self.AV=AV
@@ -38,7 +37,7 @@ class MISTIsochrone(models.StellarIsochrone):
     def iso_table(self, age):
         '''Return the table corresponding to the isochrone at the given age.
         The given age should be given in log10(yr).'''
-        self.replace_with_tracks(age)
+        self.replace_with_tracks(age, transition_mass=0.88)
         fullagetable = self.iso_dict[age]
         # Sometimes there are EEPS which have almost the same mass, but other
         # values dominated by noise. So I am going to bin the whole table so
@@ -76,7 +75,7 @@ class MISTIsochrone(models.StellarIsochrone):
             isochrone_min_mass_index, len(met_table))
         # I could hypothetically read this from the directory. But that's more
         # effort than I'd like to spend.
-        masses = np.linspace(0.3, 1.3, 50+1, endpoint=True)
+        masses = np.linspace(0.1, 1.3, 60+1, endpoint=True)
         model_max_mass_index = bisect.bisect_left(masses, transition_mass)
         masslist = []
         for mass in masses[0:model_max_mass_index]:
@@ -85,11 +84,22 @@ class MISTIsochrone(models.StellarIsochrone):
                 MIST_version=self.MIST_version)
             # Age is stored as log10(age) in the isochrone, but is linear in
             # the evolutionary track...
-            newiso = mist_track.interpolate_at_age(
-                10**age, interp_style="average")
+            try:
+                if self.age_col.startswith("log"):
+                    newiso = mist_track.interpolate_at_age(
+                        10**age, interp_style="average")
+                else:
+                    newiso = mist_track.interpolate_at_age(
+                        age, interp_style="average")
+            except ValueError:
+                assert isochrone_min_mass_index == len(met_table)
+                break
             newiso.remove_column(mist_track.age_col)
             newiso["EEP"] = 0
-            newiso[self.age_col] = np.log10(age)
+            if self.age_col.startswith("log"):
+                newiso[self.age_col] = np.log10(age)
+            else:
+                newiso[self.age_col] = age
             newiso[self.mass_col] = mass
             newiso["star_mass"] = mass
             newiso["[Fe/H]_init"] = mist_track.feh
@@ -114,8 +124,11 @@ class MISTEvolutionaryTrack(models.StellarEvolutionaryTrack):
         MIST_table = Table.read(
             str(MIST_PATH / mist_folder / mist_file),
             format="ascii.commented_header", header_start=14, data_start=0)
-        cleaned_table = models.bin_nearby_table_values(
-            MIST_table, "star_age", 2)
+        # This is an intensive operation that may not be necessary given the
+        # crude interpolation I'm doing.
+#       cleaned_table = models.bin_nearby_table_values(
+#           MIST_table, "star_age", 2)
+        cleaned_table = MIST_table
         mist = cls(cleaned_table, "star_age", mass, feh, 0.0)
         mist.MIST_version = MIST_version
         return mist
