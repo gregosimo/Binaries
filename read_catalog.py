@@ -496,15 +496,19 @@ def combined_El_Badry_multiplicity(
         elb_single_path=paths.EL_BADRY_SINGLE, elb_sb1=paths.EL_BADRY_SB1,
         elb_sb2=paths.EL_BADRY_SB2,
         elb_hidden_trip=paths.EL_BADRY_HIDDEN_TRIPLE,
-         elb_sb3=paths.EL_BADRY_SB3):
+         elb_sb3=paths.EL_BADRY_SB3, binaritycol="Binarity"):
     '''Combine stellar parameters from all multiple El Badry papers.
 
     The new table will have revised APOGEE IDs, Teffs, log(g), and [Fe/H].'''
     wantedcols = ["APOGEE_ID", "T_eff [K]", "log g [dex]", "[Fe/H] [dex]"]
     sb1s = read_El_Badry_SB1()[wantedcols]
+    sb1s[binaritycol] = "SB1   "
     sb2s = read_El_Badry_SB2()[wantedcols]
+    sb2s[binaritycol] = "SB2   "
     hidden_triples = read_El_Badry_hidden_triples()[wantedcols]
+    hidden_triples[binaritycol] = "Triple"
     sb3s = read_El_Badry_SB3()[wantedcols]
+    sb3s[binaritycol] = "SB3   "
 
     combotable = vstack([sb1s, sb2s, hidden_triples, sb3s])
     return combotable
@@ -798,17 +802,18 @@ def stelparms_with_Gaia(
         parallax_err_col="parallax_error")
     return joinedcat
 
-def dr14_with_ElBadry():
+def dr14_with_ElBadry(binaritycol="Binarity"):
     '''Add in El Badry parameters to the DR14 allStar table.'''
     apogee = read_dr14_allStar()
     wantedcols = ["APOGEE_ID", "T_eff [K]", "log g [dex]", "[Fe/H] [dex]"]
-    elbadry = combined_El_Badry_multiplicity()
+    elbadry = combined_El_Badry_multiplicity(binaritycol=binaritycol)
     singles = read_El_Badry_Single_Stars()
     singles_apo = au.extract_subtable_from_column(
         apogee, "APOGEE_ID", singles["APOGEE_ID"])
     singles_params = Table(
         singles_apo[["APOGEE_ID", "TEFF", "LOGG_FIT", "FE_H"]],
                     names=wantedcols)
+    singles_params[binaritycol] = "Single"
     full_elbadry = vstack([singles_params, elbadry])
 
     combotab = catalog.join_by_2MASS_key(
