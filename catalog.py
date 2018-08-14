@@ -1919,7 +1919,7 @@ def generate_abs_mag_column_with_errors(
         apotable, appcol, apperrcol, abscol, absupcol, absdowncol, v_to_ext,
         v_err_to_ext_err, parallaxcol="", parallax_err_col="", distcol="", 
         dist_up_col="", dist_down_col="",  avcol="av", avupcol="av_err1", 
-        avdowncol="av_err2", null_value=np.nan):
+        avdowncol="av_err2"):
     '''Create absolute magnitude columns with Gaia info and photometry.
 
     This calculates the given K-band absolute magnitude using the usual
