@@ -16,6 +16,7 @@ import hrplots as hr
 import matplotlib.pyplot as plt
 import sed
 import biovis_colors as bc
+import models
 
 DESP_PATH = "/home/regulus/simonian/DSep/"
 
@@ -171,24 +172,21 @@ def test_feh_interpolation(age, alpha, teffs, outcol, y=1, bands=1):
 # Tools needed to perform my own interpolation #
 ###############################################################################
 
-class DSEPIsochrone(object):
+class DSEPIsochrone(models.StellarIsochrone):
     '''This is a structure which holds the original non-interpolated isochrone.
 
     One DSEPIsochrone corresponds to a full file with all ages for the given
     isochrone. It also parses the header to manually read the iron and alpha
     abundances.'''
+    mass_col = "M/Mo"
+    logteff_col = "LogTeff"
+    loglum_col = "LogL/Lo"
 
     def __init__(
         self, feh, alpha, mixing_length, Y, Z, Zeff, phot_string, iso_dict):
         '''Take in attributes needed to define a DSEP isochrone.'''
-        self.mixing_length = mixing_length
-        self.Y = Y
-        self.Z = Z
-        self.Zeff = Zeff
-        self.feh = feh
-        self.alpha = alpha
-        self.phot_string = phot_string
-        self.iso_dict = iso_dict
+        super().__init__(
+            feh, alpha, mixing_length, Y, Z, Zeff, phot_string, iso_dict)
 
     def iso_table(self, age):
         '''Return a table at the specified age.
@@ -302,6 +300,39 @@ class DSEPIsochrone(object):
                     filehandle, format="ascii.fixed_width_no_header",
                     formats=formats, delimiter="")
                 filehandle.write("\n\n")
+
+    def interpolate_to_radius(
+            self, age, invals, incol, interp_kind="linear",
+            mask_outside_bounds=True):
+        '''Interpolate from one quantity to radius for the DSEP isochrone.
+
+        This function has to be defined separately because radius isn't a
+        separate column. Instead, it has to be inferred from either L and T, or
+        from M and logG. This function uses L and T.'''
+        met_table = self.iso_table(age)
+        restricted_table = models.interpolation_table_increasing_stretch(
+            met_table, mono_col=incol)
+        xvals = restricted_table[incol]
+        yvals = (met_table[self.loglum_col] - 4 * (
+            met_table[self.logteff_col] - np.log10(5777)))/2
+        in_ordered, out_ordered = models.ensure_array_increasing(xvals, yvals)
+        in_fixed, out_fixed = models.fix_duplicate_array_values(
+            in_ordered, out_ordered)
+
+        nonmasked_in = np.ma.compressed(invals)
+        assert len(nonmasked_in) == len(invals)
+
+        if mask_outside_bounds:
+            kinterp = interp1d(
+                in_fixed, out_fixed, kind=interp_kind, fill_value=np.nan, 
+                bounds_error=False)
+            interp_out = np.ma.masked_invalid(kinterp(nonmasked_in))
+        else:
+            kinterp = interp1d(
+                in_fixed, out_fixed, kind=interp_kind, bounds_error=True)
+            interp_out = kinterp(nonmasked_in)
+
+        return 10**interp_out
 
 def interpolate_DSEP_isochrone_cols(
         iso, age, interp_in, incol="LogTeff", outcol="Ks",
