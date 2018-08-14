@@ -16,7 +16,10 @@ DSEP_INTERPOLATOR_EXECUTABLE = DSEP_PATH / "iso_interp_feh"
 DSEP_SPLITTER_EXECUTABLE = DSEP_PATH / "isolf_split"
 
 MIST_PATH = HEAD_DIR / "MIST"
-MIST_ISOCHRONES = MIST_PATH / "MIST_v1.1_vvcrit0.0_UBVRIplus"
+# Because I don't need the full grid of ages, the abridged directory just has
+# the ages for immediate use. Flip back to the old grid if interpolation over
+# age needs to be done.
+MIST_ISOCHRONES = MIST_PATH / "MIST_v1.1_abridged_vvcrit0.0_UBVRIplus"
 
 CLUSTER_PATH = HEAD_DIR / "Clusters"
 PLEIADES_PATH = CLUSTER_PATH / "Pleiades"
@@ -103,6 +106,7 @@ NODL_DB = HEAD_DIR / "noDL.txt"
 VIZIER_KEPLER_INPUT = HEAD_DIR / "Vizier_Kepler_Input.txt"
 GAIA_KEPLER_INPUT = HEAD_DIR / "Gaia_Kepler_Input.txt"
 GAIA_DR2_KEPLER_OVERLAP = HEAD_DIR / "Gaia_DR2_Kepler.csv"
+GAIA_BERGER_OVERLAP = HEAD_DIR / "gaia_berger.fits"
 UCAC_KEPLER_PATH = HEAD_DIR / "UCAC_Kepler.csv"
 
 # SHORTCUT PATHS
@@ -123,3 +127,4 @@ SHORTCUT_APOGEE_KIC = SHORTCUTS / "kic_dr14.fits"
 SHORTCUT_APOKASC_KIC = SHORTCUTS / "kic_apokasc.fits"
 SHORTCUT_MCQUILLAN_DR14_KIC = SHORTCUTS / "mcq_kic_dr14.fits"
 SHORTCUT_PLEIADES_APOGEE = SHORTCUTS / "pleiades_dr14.fits"
+SHORTCUT_GAIA_KEPLER = SHORTCUTS / "Gaia_Berger.fits"

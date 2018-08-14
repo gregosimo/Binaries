@@ -661,7 +661,7 @@ class KeplerSplitter(DataSplitter):
 
     def split_photometric_quality(
             self, phot_col, phot_err_col, splitnames=(
-                "Detection", "Blend" "Bad photometry"), crit="Photometry Cut",
+                "Detection", "Blend", "Bad photometry"), crit="Photometry Cut",
             null_value=np.ma.masked):
         '''Split sample according to photometry quality.
 
@@ -678,16 +678,30 @@ class KeplerSplitter(DataSplitter):
         indexarr = [det_indices, blend_indices, bad_indices]
         self._setup_indices(splitnames, indexarr, crit)
 
-    def split_Gaia(self, dist_col="dis", splitnames=("In Gaia", "Not in Gaia"),
-                   gaia_crit="Gaia present"):
+    def split_Gaia(self, parallax_col="parallax", 
+                   splitnames=("In Gaia", "Not in Gaia"), gaia_crit="Gaia present"):
         '''Split sample based on the presence of Gaia distances.
         
         Not all of the Kepler sample has Gaia distances. In order to deal with
         that, this function splits the sample into whether there are Gaia
         distances or not.'''
-        good_indices = ~self.data[dist_col].mask
+        good_indices = ~self.data[parallax_col].mask
         
         self._setup_complement_index(splitnames, good_indices, gaia_crit)
+
+    def split_provenance(
+            self, prov_col, prov_list, splitnames=None, 
+            prov_crit="Provenances"):
+        '''Split based on provenance for a given column.
+        
+        The column which holds the provenances should be given in prov_col. A
+        list of provenances should be given in prov_list.'''
+        if splitnames is None:
+            splitnames = prov_list
+        indexarr = []
+        for prov in prov_list:
+            indexarr.append(self.data[prov_col] == prov)
+        self._setup_indices(splitnames, indexarr, prov_crit)
 
 class McQuillanSplitter(KeplerSplitter):
     '''Keep an organized database of various cuts on McQuillan data.'''
@@ -1239,8 +1253,32 @@ def initialize_clean_APOGEE(aposplit):
     aposplit.split_by_ASPCAP_flags()
 
     aposplit.split_teff(
-        "TEFF", [5500], ("Cool", "Hot", "Bad APOGEE Teff"),
-        teff_crit="APOGEE Teff", null_value=np.ma.masked)
+        "TEFF", [5000], ("Cool Noev", "Hot HighEv", "Bad APOGEE Teff"),
+        teff_crit="Teff Evolution", null_value=np.ma.masked)
+
+    aposplit.split_teff(
+        "TEFF", [4000, 5000], (
+            "APOGEE MetCor Cool", "APOGEE MetCor Teff", "APOGEE MetCor Hot", 
+            "No APOGEE MetCor"), null_value=np.ma.masked,
+        teff_crit="APOGEE Metallicity Correction Region")
+
+    aposplit.split_teff(
+        "TEFF", [4000, 5250], (
+            "APOGEE Statistics Cool", "APOGEE Statistics Teff", 
+            "APOGEE Statistics Hot", "No APOGEE Statistics"), 
+        null_value=np.ma.masked, teff_crit="APOGEE Statistics Region")
+
+    aposplit.split_teff(
+        "teff", [4000, 5000], (
+            "Huber MetCor Cool", "Huber MetCor Teff", "Huber MetCor Hot", 
+            "No Huber MetCor"), null_value=np.ma.masked,
+        teff_crit="Huber Metallicity Correction Region")
+    aposplit.split_teff(
+        "SDSS-Teff", [4000, 5000], (
+            "Pinsonneault MetCor Cool", "Pinsonneault MetCor Teff", 
+            "Pinsonneault MetCor Hot", "No Pinsonneault MetCor"), 
+        null_value=np.ma.masked, 
+        teff_crit="Pinsonneault Metallicity Correction Region")
 
     aposplit.split_vsini(
         [7], ("Vsini nondet", "Vsini det", "No Vsini"),
@@ -1258,7 +1296,6 @@ def initialize_clean_APOGEE(aposplit):
 
     aposplit.split_Gaia()
 
-    aposplit.split_Berger_EVstate()
 
 def initialize_full_APOGEE(aposplit):
     '''Get the underlying APOGEE sample we're interested in.'''
@@ -1266,13 +1303,24 @@ def initialize_full_APOGEE(aposplit):
     aposplit.split_targeting("APOGEE2_APOKASC_DWARF")
     aposplit.split_targeting("APOGEE2_APOKASC_GIANT")
     aposplit.split_targeting("APOGEE2_APOKASC")
+    aposplit.split_targeting("APOGEE_KEPLER_EB")
+    aposplit.split_targeting("APOGEE2_KOI")
+    aposplit.split_targeting("APOGEE2_KOI_CONTROL")
+    aposplit.split_targeting("APOGEE_KEPLER_SEISMO")
+    aposplit.split_targeting("APOGEE_RV_MONITOR_KEPLER")
+    aposplit.split_targeting("APOGEE2_EB")
+    aposplit.split_targeting("APOGEE_KEPLER_HOST")
 
     aposplit.split_mag(
         "H", [7, 11], ("H Bright", "H APOGEE", "H Faint", "No H"), mag_crit="H",
         null_value=np.ma.masked)
     aposplit.split_combined_targeting(
-        ["APOGEE_KEPLER_COOLDWARF", "APOGEE2_APOKASC"],
+        ["APOGEE_KEPLER_COOLDWARF", "APOGEE2_APOKASC", "APOGEE_KEPLER_EB",
+         "APOGEE2_KOI", "APOGEE2_KOI_CONTROL", "APOGEE_KEPLER_SEISMO",
+         "APOGEE_RV_MONITOR_KEPLER", "APOGEE2_EB", "APOGEE_KEPLER_HOST"],
         ("Targeted", "Not Targeted"), "Targeting")
+
+    aposplit.split_McQuillan_periods(kiccol="kepid")
 
 def general_to_hot_kic_sample(apogeesplitter):
     '''Get the subset of the hot sample that has KIC parameters.'''
@@ -1362,30 +1410,37 @@ def initialize_asteroseismic_sample(aposplit):
         5 * (aposplit.data["disep"]) / aposplit.data["dis"] / np.log(10))**2,
         np.ma.masked)
 
-    aposplit.split_Berger_EVstate()
 
 def initialize_mcquillan_sample(mcqsplit):
     '''Makes a series of cuts related to the rotation period of the targets.'''
     mcqsplit.split_teff(
-        "teff", [3700, 5450], (
-            "Too Cool", "Right Teff", "Too Hot"),
-        teff_crit="Huber Teff")
+        "SDSS-Teff", [4000, 5000], (
+            "Too Cool MetCor", "Right MetCor Teff", "Too Hot MetCor", 
+            "No Pinsonneault Teff"),
+        teff_crit="Metallicity Correction", null_value=np.ma.masked)
+    mcqsplit.split_teff(
+        "SDSS-Teff", [4000, 5000], (
+            "Too Cool Statistics", "Right Statistics Teff", 
+            "Too Hot Statistics", "No Statistics Teff"), 
+        teff_crit="Statistics", null_value=np.ma.masked)
+    mcqsplit.split_teff(
+        "SDSS-Teff", 7000, splitnames=(
+            "Good Isochrone Teff", "Too Hot for Isochrone", 
+            "Bad Isochrone Teff"), teff_crit="Isochrone Temperature", 
+        null_value=np.ma.masked)
+    mcqsplit.split_photometric_quality(
+        "kmag", "kmag_err", splitnames=("K Detection", "Blend", "Bad K"), 
+        crit="MK blend")
+
+    mcqsplit.split_Gaia()
+
     
     mcqsplit.split_period([1, 3], ["Too rapid", "Rapid", "Slow"])
-    mcqsplit.data["M_K"] = (
-        mcqsplit.data["kmag"] - 5 * np.log10(mcqsplit.data["dis"]/10))
-    mcqsplit.data["M_K_err1"] = mcqsplit.data["kmag_err"]**2 + (
-        5 * (mcqsplit.data["disem"]) / mcqsplit.data["dis"] / np.log(10))**2
-    mcqsplit.data["M_K_err2"] = mcqsplit.data["kmag_err"]**2 + (
-        5 * (mcqsplit.data["disep"]) / mcqsplit.data["dis"] / np.log(10))**2
-
-#    mcqsplit.split_Berger_EVstate()
 
 def initialize_asteroseismic_periods(aposplit):
     '''Initialize the asteroseismic sample with McQuillan periods.'''
     initialize_asteroseismic_sample(aposplit)
     initialize_mcquillan_sample(aposplit)
-
 
 def HR_Param_Check():
     '''Check how logg and teff parameters match with each other.'''
