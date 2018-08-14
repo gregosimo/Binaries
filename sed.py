@@ -3007,15 +3007,29 @@ def compare_DSEP_Casagrande_colors(color, met):
 # Convert between absolute and apparent magnitudes #
 ###############################################################################
 
-def calc_abs_magnitude(appmag, dist, extinction):
-    '''Absolute magnitude given apparent magnitude, distance, and extinction.
+def calc_abs_magnitude(appmag, dm, extinction):
+    '''Absolute magnitude given apparent magnitude, distance modulus, and extinction.
 
-    Applies the usual relation M = m - 5 log10 (d/10) - A to calculate absolute
-    magnitude. Distance should be given in parsecs, and extinction should be in
-    units of total extinction.'''
+    Applies the usual relation M = m - DM - A to calculate absolute
+    magnitude. All quantities should be given in terms of magnitudes.'''
 
-    absmag = appmag - 5 * np.log10(dist / 10) - extinction
+    absmag = appmag - dm - extinction
     return absmag
+
+def calc_abs_magnitude_err(apperr_same, dm_err_opp, ext_err_opp):
+    '''Calculate the uncertainty in absolute magnitude.
+
+    This function calculates the absolute magnitude error from the composite
+    apparent magnitude error, distance modulus error, and extinction error.
+    Note that in the case of asymmetric errors, the apparent magnitude needs to
+    be in the same direction as the absolute magnitude; the distance modulus
+    should be in the opposite direction, and the extinction should be in the
+    opposite direction. An example is:
+
+    M_up = m_up, dm_down, ext_down'''
+
+    abserr = np.sqrt(apperr_same**2 + dm_err_opp**2 + ext_err_opp**2)
+    return abserr
 
 ###############################################################################
 # Miscellaneous Routines

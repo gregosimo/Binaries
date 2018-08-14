@@ -907,12 +907,12 @@ def calc_DSEP_model_mags(teffs, fehs, alpha_fe, mag, age=3):
 
     return magarr
 
-def calc_solar_DSEP_model_mag(teffs, mag, age=5.5):
+def calc_solar_DSEP_model_mag(teffs, mag, age=4.5e9):
     '''A predicted absolute magnitude given teff for a solar isochrone.'''
     return calc_DSEP_model_mag_fixed_age_feh_alpha(teffs, 0.0, mag, age=age)
 
 def calc_model_mag_fixed_age_feh_alpha(
-        teffs, feh, mag, alpha=0.0, age=5.5, model="MIST"):
+        teffs, feh, mag, alpha=0.0, age=4.5e9, model="MIST"):
     '''Predict absolute magnitude given teffs.
 
     This function assumes that [Fe/H], [a/Fe], and age are on grid points in
@@ -920,8 +920,8 @@ def calc_model_mag_fixed_age_feh_alpha(
     of Teffs can also be passed to this function.
     
     Note that there is a model-dependent requirement for the age. If the age is
-    given to a DSEP model, it should be given in the form of Gyr. If it is
-    given to a MIST model, it should be given in the form of log10(yr).'''
+    given to a DSEP model, it should be given in the units of Gyr. If it is
+    given to a MIST model, it should be given in the units of years.'''
     if model.upper() == "MIST":
         iso = mist.MISTIsochrone.isochrone_from_file(feh, alpha=alpha)
         bandcol = mist.band_translation[mag]
@@ -934,6 +934,54 @@ def calc_model_mag_fixed_age_feh_alpha(
 
     assert not np.any(np.ma.getmask(teffs))
     return np.ma.masked_invalid(newks)
+
+def calc_model_mag_err_fixed_age_feh_alpha(
+        teffs, feh, mag, teff_err=100, alpha=0.0, age=1e9, model="MIST"):
+    '''Predict the uncertainty in magnitude from temperature uncertainties.
+    
+    This function assumes that [Fe/H], [a/Fe], and age ore on grid points in
+    the given model. The only interpolation is done on the Teff axis. An array
+    of Teffs can also be passed to this function.
+    
+    Note that there is a model-dependent requirement for the age. If the age is
+    given to a DSEP model, it should be given in the units of Gyr. If it is
+    given to a MIST model, it should be given in the units of years.'''
+    if model.upper() == "MIST":
+        iso = mist.MISTIsochrone.isochrone_from_file(feh, alpha=alpha)
+        bandcol = mist.band_translation[mag]
+    elif model.upper() == "DSEP":
+        iso = dsep.dsepIsochrone.isochrone_from_file(feh, alpha=alpha)
+        bandcol = dsep.band_translation[mag]
+
+    dkdlogT = iso.isochrone_derivative(
+        age, np.log10(teffs), iso.logteff_col, bandcol, interp_kind="linear",
+        ef=1e-15)
+    print(dkdlogT)
+    dkdT = dkdlogT / teffs / np.log(10)
+    k_err = np.abs(dkdT * teff_err)
+
+    return k_err
+
+
+
+def calc_model_mag_fixed_age_alpha(
+        teffs, feh, mag, age=4.5e9, alpha=0.0, model="MIST"):
+    '''Predict absolute magnitude given Teffs and [Fe/H].
+
+    This function assumes that the age and alpha are on grid points in the
+    given model. Interpolation is done over the Teff and [Fe/H] axes. An array
+    of Teffs and [Fe/H] can be passed to this function. The output array will
+    have a size of len(fehs) x len(invals).'''
+    if model.upper() == "MIST":
+        logteffcol = mist.MISTIsochrone.logteff_col
+        bandcol = mist.band_translation[mag]
+    elif model.upper() == "DSEP":
+        logteffcol = dsep.DSEPIsochrone.logteff_col
+        bandcol = dsep.band_translation[mag]
+
+    return calc_model_over_feh_fixed_age_alpha(
+        np.log10(teffs), logteffcol, bandcol, feh, age, alpha=alpha, 
+        model=model)
 
 def calc_model_over_feh_fixed_age_alpha(
         invals, incol, outcol, fehs, age, alpha=0.0, model="MIST"):
@@ -951,8 +999,8 @@ def calc_model_over_feh_fixed_age_alpha(
 
     input_fehs = np.array([
 #        -4.0, -3.5, -3.0, 
-        -2.5, -2.0, -1.75, -1.5, -1.25, -1.0, -0.75, -0.5,
-        -0.25, 0.0, 0.25, 0.5])
+        -2.5, -2.0, -1.75, -1.5, -1.25, -1.0, -0.75, 
+        -0.5, -0.25, 0.0, 0.25, 0.5])
     interp_fehs = np.zeros(len(input_fehs))
 
     # k_array[i,:] is all temperatures at a given input [Fe/H]
@@ -998,6 +1046,7 @@ def calc_model_over_feh_fixed_age_alpha(
         else:
             fehs = np.ma.compressed(fehs)
         k_vals[:,j] = feh_interp(fehs)
+
     return np.ma.masked_invalid(np.squeeze(k_vals))
 
 def calc_DSEP_model_mag_fixed_age_feh_alpha(teffs, feh, mag, alpha=0.0, age=5.5):
@@ -1078,6 +1127,29 @@ def calc_MIST_model_mag_fixed_age_alpha(teffs, fehs, mag, age=5.5, alpha=0.0):
             bounds_error=False, fill_value=np.nan)
         k_vals[:, j] = feh_interp(fehs)
     return np.ma.masked_invalid(np.squeeze(k_vals))
+
+###############################################################################
+# Correct the MS #
+###############################################################################
+
+def flatten_MS_metallicity(excess, feh, deg=2):
+    '''Perform a linear fit in metallicity to remove metallicity trends.
+
+    The data for this function should be dwarfs in a cool, unevolved regime, 
+    such as between 4000K-5000K. Binaries will be cleaned in the function, so
+    no pre-processing has to be done.'''
+    metallicity_bin_edges = np.percentile(
+        feh, np.linspace(0, 100, 5+1, endpoint=True))
+    metallicity_bin_indices = np.digitize(feh, metallicity_bin_edges)
+    percentiles = np.zeros(len(metallicity_bin_edges)-1)
+    med_met = np.zeros(len(metallicity_bin_edges)-1)
+    for ind in range(1, len(metallicity_bin_edges)):
+        inds = metallicity_bin_indices == ind
+        percentiles[ind-1] = np.percentile(excess[inds], 100-25)
+        med_met[ind-1] = np.mean(feh[inds])
+
+    cor_coeff = np.polyfit(med_met, percentiles, deg)
+    return cor_coeff
 
 ###############################################################################
 # Uncertainties #
