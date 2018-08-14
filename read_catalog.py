@@ -794,8 +794,8 @@ def stelparms_with_Gaia(
     joinedcat = au.join_by_id(kiccat, gaiacat, "kepid", "kic", join_type="left")
     catalog.generate_abs_mag_column_with_errors(
         joinedcat, "kmag", "kmag_err", "M_K", "M_K_err1", "M_K_err2",
-        samp.AV_to_AK, samp.AV_err_to_AK_err,
-        null_value=np.nan)
+        samp.AV_to_AK, samp.AV_err_to_AK_err, parallaxcol="parallax",
+        parallax_err_col="parallax_error")
     return joinedcat
 
 def dr14_with_ElBadry():
@@ -812,7 +812,7 @@ def dr14_with_ElBadry():
     full_elbadry = vstack([singles_params, elbadry])
 
     combotab = catalog.join_by_2MASS_key(
-        apogee, fullelbadry, "APOGEE_ID", "APOGEE_ID", join_type="left")
+        apogee, full_elbadry, "APOGEE_ID", "APOGEE_ID", join_type="left")
 
     return combotab
 

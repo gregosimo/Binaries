@@ -1263,6 +1263,18 @@ def initialize_clean_APOGEE(aposplit):
         teff_crit="APOGEE Metallicity Correction Region")
 
     aposplit.split_teff(
+        "T_eff [K]", [4000, 5000], (
+            "ElBadry MetCor Cool", "ElBadry MetCor Teff", "ElBadry MetCor Hot", 
+            "No ElBadry MetCor"), null_value=np.ma.masked,
+        teff_crit="ElBadry Metallicity Correction Region")
+
+    aposplit.split_teff(
+        "T_eff [K]", [4000, 5250], (
+            "ElBadry Statistics Cool", "ElBadry Statistics Teff", 
+            "ElBadry Statistics Hot", "No ElBadry Statistics"), 
+        null_value=np.ma.masked, teff_crit="ElBadry Statistics Region")
+
+    aposplit.split_teff(
         "TEFF", [4000, 5250], (
             "APOGEE Statistics Cool", "APOGEE Statistics Teff", 
             "APOGEE Statistics Hot", "No APOGEE Statistics"), 
