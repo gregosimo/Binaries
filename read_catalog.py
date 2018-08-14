@@ -728,7 +728,7 @@ def dr14_with_KIC_stelparms(
     '''Read in Kepler DR14 targets with Huber stellar parameters.'''
     # Note that this table is fully cross-matched with Gaia!
     # There are no targets without matching Gaia detections.
-    apo = read_dr14_allStar(apopath, opt="kepler")
+    apo = dr14_with_ElBadry()
     kiccat = stelparms_triple_KIC(origpath, pinpath, kicpath)
     apokic = catalog.join_by_2MASS_key(
         apo, kiccat, "APOGEE_ID", "tm_designation", join_type="inner")
