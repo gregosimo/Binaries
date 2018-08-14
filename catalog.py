@@ -23,6 +23,7 @@ from astropy.convolution import convolve, Gaussian1DKernel
 from bs4 import BeautifulSoup
 import requests
 # from apogee.tools import bitmask
+import pyrallaxes
 
 
 import astropy_util as au
@@ -453,8 +454,9 @@ def write_columns_for_input(outputtable, filename, maxlen, table_format,
         startind = maxlen * i
         endind = min(maxlen * (i+1), len(outputtable))
         outputsegment = outputtable[startind:endind]
-        outputsegment.write(str(outputpath / outputfile), format=table_format,
-                            include_names=output_columns, comment=False)
+        outputsegment.write(
+            str(outputpath / outputfile), format=table_format, 
+            include_names=output_columns, comment=False, overwrite=True)
 
 def write_Kepler_field_Vizier_upload_list(
         outputfile=paths.VIZIER_KEPLER_INPUT):
@@ -491,6 +493,12 @@ def clean_cross_matched_table(tbl, uniq_col="ID", dist_col="angDist"):
         keep_indices[ident_match[minval]] = 1
 
     return tbl[keep_indices]
+
+def write_TAP_table(table, outputfile, outputpath=paths.HEAD_DIR):
+    '''Write the table such that it can be uploaded through the TAP.
+    
+    This basically ensures that the table is written in a votable format.'''
+    table.write(str(outputpath / outputfile), format="votable")
 
 def clean_XMatch_file(tablepath, uniq_col="ID", tableformat="ascii.csv"):
     '''Ensure XMatch file has only one target associated with each ID.
@@ -534,6 +542,26 @@ def write_SIMBAD_identifier_list(
     write_columns_for_input(
         ident_table, outputfile, 99999, "ascii.no_header",
         output_columns=["Ident"], outputpath=outputpath)
+
+def write_IPAC_identifier_list(identifiers, outputfile,
+                               outputpath=paths.HEAD_DIR):
+    '''Write a list to be uploaded to IPAC as a list of SIMBAD identifiers.'''
+    ident_table = Table([identifiers], names=["objstr"])
+    write_columns_for_input(
+        ident_table, outputfile, 99999, "ascii.ipac", output_columns=["objstr"],
+        outputpath=outputpath)
+
+def write_IPAC_coord_list(ras, decs, outputfile, outputpath=paths.HEAD_DIR):
+    '''Write a list to be uploaded to IPAC as a list of RA and DEC.
+    
+    This is preferred if RA and Dec are known because IRSA doesn't do this
+    automatically.'''
+    # There should be a way to validate that RA and DEC are in decimal degrees.
+    coord_table = Table([ras, decs], names=("ra", "dec"))
+    write_columns_for_input(
+        coord_table, outputfile, 99999, "ascii.ipac", output_columns=["ra",
+        "dec"], outputpath=outputpath)
+
 
 def write_MAST_files(outputtable, kiccol="KIC", outputpath=paths.HEAD_DIR,
                      output_filename="Kepler_MAST.txt"):
@@ -1357,7 +1385,16 @@ target_dict = {
     "APOGEE2_APOKASC_DWARF": ("APOGEE2_TARGET1", 28),
     "APOGEE2_APOKASC_GIANT": ("APOGEE2_TARGET1", 27),
     "APOGEE2_APOKASC": ("APOGEE2_TARGET1", 30),
-    "APOGEE_KEPLER_SEISMO": ("APOGEE_TARGET1", 27)}
+    "APOGEE_KEPLER_SEISMO": ("APOGEE_TARGET1", 27),
+    "APOGEE_KEPLER_EB": ("APOGEE_TARGET1", 23),
+    "APOGEE_KEPLER_HOST": ("APOGEE_TARGET1", 28),
+    "APOGEE_RV_MONITOR_KEPLER": ("APOGEE_TARGET2", 19),
+    "APOGEE2_KOI": ("APOGEE2_TARGET3", 0),
+    "APOGEE2_KOI_CONTROL": ("APOGEE2_TARGET3", 2),
+    "APOGEE2_EB": ("APOGEE2_TARGET3", 1),
+    "APOGEE_TELLURIC": ("APOGEE_TARGET2", 9),
+    "APOGEE2_TELLURIC": ("APOGEE2_TARGET2", 9)
+}
 
 def target_indices(fulltable, targetlabel):
     '''Select the objects in fulltable that are specified by targetlabel.
@@ -1830,43 +1867,137 @@ def generate_DSEP_radius_column_with_errors(
 # Absolute Magnitudes #
 #######################
 
+def parallax_to_distance_modulus(parallax):
+    '''Convert parallax to a distance modulus.
+    
+    The parallax should be given in units of milliarcseconds.'''
+    return -5*np.log10(parallax/100)
+
+def parallax_err_to_distance_modulus_err(parallax_err, parallax):
+    '''Convert an error in parallax to an error in distance modulus.'''
+    return 5 * parallax_err / parallax / np.log(10)
+
+def distance_to_distance_modulus(dist):
+    '''Convert distance to distance modulus.
+
+    The distance should be given in units of parsecs.'''
+    return 5 * np.log10(dist/10)
+
+def distance_err_to_distance_modulus_err(dist_err, dist):
+    '''Convert an error in distance to an error in distance modulus.'''
+    return 5 * dist_err / dist / np.log(10)
 
 def generate_abs_mag_column(
-        apotable, appcol, abscol, v_to_ext, avcol="Av",  distcol="dis"):
+        apotable, appcol, abscol, v_to_ext, avcol="Av", parallaxcol="", 
+        distcol=""):
     '''Create a extinction-corrected column of absolute magnitudes.
 
-    For the table in apotable, use the data in appcol, distcol, and avcol to
-    generate absolute magnitudes, which will be stored in abscol. A function
-    which converts Av to the extinction in a given band to the extinction in
-    the desired band also needs to be passed.
+    For the table in apotable, use the data in appcol, avcol and either
+    parallaxcol or distcol to generate absolute magnitudes, which will be stored 
+    in abscol. A function which converts Av to the extinction in a given band to 
+    the extinction in the desired band also needs to be passed.
+
+    Only one of parallaxcol or distcol should be specified; if they are both
+    specified, then an error will be output. Parallaxcol will be set to
+    "parallax" by default.
     '''
+    if parallaxcol != "" and distcol != "":
+        raise ValueError("Received conflicting parallax and distance columns.")
+    if parallaxcol == "" and distcol == "":
+        parallaxcol = "parallax"
+
+    if parallaxcol != "" and distcol == "":
+        distance_modulus = parallax_to_distance_modulus(apotable[parallaxcol])
+    elif parallaxcol == "" and distcol != "":
+        distance_modulus = distance_to_distance_modulus(apotable[distcol])
+
     new_ext = v_to_ext(apotable[avcol])
     apotable[abscol] = sed.calc_abs_magnitude(
-        apotable[appcol], apotable[distcol], new_ext)
+        apotable[appcol], distance_modulus, new_ext)
 
 def generate_abs_mag_column_with_errors(
         apotable, appcol, apperrcol, abscol, absupcol, absdowncol, v_to_ext,
-        v_err_to_ext_err, distcol="dis", distupcol="disep", 
-        distdowncol="disem", avcol="av", avupcol="av_err1", 
+        v_err_to_ext_err, parallaxcol="", parallax_err_col="", distcol="", 
+        dist_up_col="", dist_down_col="",  avcol="av", avupcol="av_err1", 
         avdowncol="av_err2", null_value=np.nan):
     '''Create absolute magnitude columns with Gaia info and photometry.
 
     This calculates the given K-band absolute magnitude using the usual
-    relation. It also approximates errors by adding the terms in quadrature.
+    relation. Either parallaxes or distance can be specified, but only one
+    should be given, with the rest being empty strings. By default it will
+    assume that the parallax column is "parallax" and the uncertainty column is
+    "parallax_error". It approximates errors by adding the terms in quadrature.
     For blended objects, the null value for the K-band magnitude is propagated.
     '''
-    generate_abs_mag_column(
-        apotable, appcol, abscol, v_to_ext, avcol, distcol)
-    # If the photometry is bad, label the absolute magnitude as bad as well.
-    apotable[absupcol] = np.where(
-        apotable[apperrcol] != null_value, 
-        np.sqrt(apotable[apperrcol]**2 + (
-            5 * (apotable[distdowncol]) / apotable[distcol] / np.log(10))**2 + 
-                v_err_to_ext_err(apotable[avcol], apotable[avupcol])**2), 
-        null_value)
-    apotable[absdowncol] = np.where(
-        apotable[apperrcol] != null_value, 
-        np.sqrt(apotable[apperrcol]**2 + (
-            5 * (apotable[distupcol]) / apotable[distcol] / np.log(10))**2 + 
-                v_err_to_ext_err(apotable[avcol], apotable[avdowncol])**2), 
-        null_value)
+    if parallaxcol != "" and distcol != "":
+        raise ValueError("Received conflicting parallax and distance columns.")
+    elif (parallaxcol != "" and parallax_err_col == ""):
+        raise ValueError("Parallax column given without error")
+    elif (parallaxcol == "" and parallax_err_col != ""):
+        raise ValueError("Parallax error given without parallax.")
+    elif (distcol != "" and (dist_up_col == "" or dist_down_col == "")):
+        raise ValueError("Distance column given without error")
+    elif (distcol == "" and (dist_up_col != "" or dist_down_col != "")):
+        raise ValueError("Distance error given without distance")
+    elif parallaxcol == "" and distcol == "":
+        parallaxcol = "parallax"
+
+    if parallaxcol != "" and distcol == "":
+        distance_modulus = parallax_to_distance_modulus(apotable[parallaxcol])
+        distance_modulus_up = parallax_err_to_distance_modulus_err(
+            apotable[parallax_err_col], apotable[parallaxcol])
+        distance_modulus_down = parallax_err_to_distance_modulus_err(
+            apotable[parallax_err_col], apotable[parallaxcol])
+    elif parallaxcol == "" and distcol != "":
+        distance_modulus = distance_to_distance_modulus(apotable[distcol])
+        distance_modulus_up = distance_err_to_distance_modulus_err(
+            apotable[dist_up_col], apotable[distcol])
+        distance_modulus_down = distance_err_to_distance_modulus_err(
+            apotable[dist_down_col], apotable[distcol])
+
+    new_ext = v_to_ext(apotable[avcol])
+    new_ext_up = v_err_to_ext_err(apotable[avcol], apotable[avupcol])
+    new_ext_down = v_err_to_ext_err(apotable[avcol], apotable[avdowncol])
+
+    apotable[abscol] = sed.calc_abs_magnitude(
+        apotable[appcol], distance_modulus, new_ext)
+    apotable[absupcol] = sed.calc_abs_magnitude_err(
+        apotable[apperrcol], distance_modulus_down, new_ext_down)
+    apotable[absdowncol] = sed.calc_abs_magnitude_err(
+        apotable[apperrcol], distance_modulus_up, new_ext_up)
+
+def parallax_to_distance_modulus_fulk(parallaxes, errors, L=1350):
+    '''Convert parallax to distance modulus.
+    
+    The parallax and error needs to be in arcseconds. The scale length of disk
+    needs to be in parsecs.'''
+    assert len(parallaxes) == len(errors)
+    dm = np.zeros(len(parallaxes))
+    dm_upper = np.zeros(len(parallaxes))
+    dm_lower = np.zeros(len(parallaxes))
+    for i, (parallax, error) in enumerate(zip(parallaxes, errors)):
+        # Calculate the location of the mode.
+        mode = pyrallaxes.dmod_mode_exp(parallax, error, L)
+        # Integrate from mode-10 to mode.
+        lower_mode_integral = pyrallaxes.percentiles(
+            pyrallaxes.dmpdfexp, mode-10, mode, parallax, error, L)
+        normalization_factor  = pyrallaxes.normalization(
+            pyrallaxes.dmpdfexp, L, parallax, error, lower_mode_integral, mode,
+            mode+10)
+        mode_percentile = pyrallaxes.normalized_percentile(
+            lower_mode_integral, normalization_factor)
+
+        median = pyrallaxes.dmod_median(
+            pyrallaxes.dmpdfexp, parallax, error, L, mode+10, mode,
+            mode_percentile, normalization_factor, -10)
+
+        lower_dmod = pyrallaxes.distances_from_percentiles_dmod(
+            pyrallaxes.dmpdfexp, normalization_factor, parallax, error, "inf",
+            .5-.67/2, .5+.67/2, 0.5, median, L, mode+10, -10)
+        upper_dmod = pyrallaxes.distances_from_percentiles_dmod(
+            pyrallaxes.dmpdfexp, normalization_factor, parallax, error, "sup",
+            .5-.67/2, .5+.67/2, 0.5, median, L, mode+10, -10)
+
+        dm[i] = mode
+        dm_upper[i] = upper_dmod
+        dm_lower[i] = lower_dmod
