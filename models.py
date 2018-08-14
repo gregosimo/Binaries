@@ -20,6 +20,7 @@ class StellarEvolutionaryTrack(object):
 
         self.tracktable = datatable
         self.age_col = age_col
+        self.mass = mass
         self.feh = feh
         self.alpha = alpha
 
@@ -28,6 +29,8 @@ class StellarEvolutionaryTrack(object):
         if interp_style is "lagrange":
             poly_size=4
             ind = bisect.bisect_right(self.tracktable[self.age_col], age)
+            if ind == len(self.tracktable):
+                raise ValueError("Track does not reach desired age.")
             cols = [
                 col for col in self.tracktable.colnames if col not in self.age_col]
             rowdict = {self.age_col: age}
@@ -41,6 +44,8 @@ class StellarEvolutionaryTrack(object):
             return newtab
         elif interp_style is "average":
             ind = bisect.bisect_left(self.tracktable[self.age_col], age)
+            if ind == len(self.tracktable):
+                raise ValueError("Track does not reach desired age.")
             tableslice = slice(ind-1, ind+1)
             ageslice = self.tracktable[self.age_col][tableslice]
             cols = [
@@ -109,7 +114,32 @@ class StellarIsochrone(object):
 
         return interp_out
 
-    
+    def isochrone_derivative(
+            self, age, xvals, xcol, ycol, interp_kind="linear",
+            mask_outside_bounds=True, ef=10**-2):
+        '''Return the derivatives of ycol with respect to xcol at xvals.
+        
+        Calculate the derivative of ycol with respect to xcol at the values of
+        xvals. This function uses the treatment in Numerical Recipes 5.7. It
+        assumes that the interpolation is good to a fractional value ef, which
+        is the scale on which the derivative will be evaluated.'''
+        # Want h to be on the scale of ef**(1/3) * x.
+        hsteps = ef**(1/3) * xvals
+        # Force hsteps to be exactly representable.
+        temp = xvals + hsteps
+        posh = temp - xvals
+        temp = xvals - hsteps
+        negh = -(temp - xvals)
+
+        posy = self.interpolate_isochrone_cols(
+        age, xvals+posh, xcol, ycol, interp_kind=interp_kind,
+            mask_outside_bounds=mask_outside_bounds)
+        negy = self.interpolate_isochrone_cols(
+        age, xvals-negh, xcol, ycol, interp_kind=interp_kind,
+            mask_outside_bounds=mask_outside_bounds)
+
+        deriv = (posy-negy)/(posh+negh)
+        return deriv
 
 def bin_nearby_table_values(table, bin_col, decimals):
     '''Bin the table according to values nearby in bin_col.
@@ -172,13 +202,26 @@ def interpolation_table_increasing_stretch(isochrone, mono_col="LogTeff"):
         last_index = first_index+np.where(coldiff[first_index:] < 0)[0][0]
     # There might be a more elegant way of doing this.
     except IndexError:
-        last_index = len(coldiff)
+        last_index = len(isochrone)
     else:
         # Check for one-off blips and reinterpolate them.
-        while coldiff[last_index] + coldiff[last_index+1] > 0:
-            isochrone.remove_row(last_index)
-            coldiff = np.diff(isochrone[mono_col])
-            last_index = first_index+np.where(coldiff[first_index:] < 0)[0][0]
+        # If there was a one-off blip, the next point should look perfectly
+        # normal. If it does, remove that problematic row.
+        try:
+            newdiff = coldiff[last_index] + coldiff[last_index+1]
+        except IndexError:
+            pass
+        else:
+            while newdiff > 0:
+                isochrone.remove_row(last_index+1)
+                coldiff = np.diff(isochrone[mono_col])
+                try:
+                    last_index = first_index+np.where(
+                        coldiff[first_index:] < 0)[0][0]
+                except IndexError:
+                    last_index = len(coldiff)
+                    break
+                newdiff = coldiff[last_index] + coldiff[last_index+1]
 
     return isochrone[first_index:last_index]
 
