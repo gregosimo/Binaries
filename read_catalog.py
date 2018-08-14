@@ -25,7 +25,7 @@ def read_APOKASC_catalog(
 
     The catalog should be located at filepath.
     '''
-    apocat = Table.read(filepath, format="fits")
+    apocat = Table.read(filepath, format="fits", character_as_bytes=False)
     return apocat
 
 def read_EHK_catalog(filepath=paths.EHK_PATH):
@@ -85,9 +85,11 @@ def read_KIC_DR25_catalog(kicpath=paths.KIC_CATALOG):
 def read_Pinsonneault_2012_catalog(pinpath=paths.PINSONNEAULT_CORRECTIONS):
     '''Read the corrected catalog from Pinsonneault et al (2012).'''
     desired_cols = [
-        "KIC", "SDSS-Teff", "e_SDSS-Teff", "E_SDSS-Teff", "K-Teff"]
-    pincat = Table.read(str(pinpath), format="ascii.cds",
-                        include_names=desired_cols)
+        "KIC", "SDSS-Teff", "e_SDSS-Teff", "E_SDSS-Teff", "K-Teff", "Flag"]
+    pincat = Table.read(
+        str(pinpath), format="ascii.cds", include_names=desired_cols,
+        fill_values=('-9999', '0'))
+    au.set_numeric_fill_values(pincat, -9999)
     return pincat
 
 def read_van_Saders_file(vspath=paths.VAN_SADERS_SDSS):
@@ -235,20 +237,13 @@ def read_TGAS_Kepler(tgas_kep_path=paths.TGAS_KEPLER_OVERLAP):
 
     return tgas
 
-def read_Gaia_DR2_Kepler(gaia_dr2_kep_path=paths.GAIA_DR2_KEPLER_OVERLAP):
+def read_Gaia_DR2_Kepler(gaia_dr2_kep_path=paths.GAIA_BERGER_OVERLAP):
     '''Read the Gaia DR2 table of stars overlapping with Kepler.
 
     If this file doesn't exist, use the astroquery package to get it from the
     Vizier xMatch service.'''
-    desired_cols = [
-        "ID", "angDist", "ra_epoch2000", "dec_epoch2000", "parallax", 
-        "parallax_error", "pmra", "pmra_error", "pmdec", "pmdec_error", 
-        "radial_velocity", "radial_velocity_error", "radius_val", "lum_val"]
-    dr2 = Table.read(gaia_dr2_kep_path, format="ascii.csv", 
-                     include_names=desired_cols)
-    dr2.rename_column("ID", "kepid")
+    dr2 = Table.read(gaia_dr2_kep_path, format="fits")
     au.set_numeric_fill_values(dr2, -9999)
-
     return dr2
 
 def read_Berger_DR2_Kepler(berger_dr2_kep=paths.BERGER_DR2_KEPLER):
@@ -365,12 +360,14 @@ def read_dr14_allStar(allstarpath=paths.DR14_ALLSTAR_PATH, opt="kepler"):
             # Convert from recarray to Table
             allstar = Table(allstar_kepler)
     else:
-        allstar = Table.read(str(allstarpath), format="fits")
+        allstar = Table.read(
+            str(allstarpath), format="fits", character_as_bytes=False)
 
     short_allstar = allstar[desired_cols]
     short_allstar["LOGG_FIT"] = allstar["FPARAM"][:,1]
 
     au.mask_numeric_fill_values(short_allstar, -9999)
+    au.mask_numeric_fill_values(short_allstar, -9999.99)
     return short_allstar
 
 def read_Rafa_rotation(rottable=paths.RAFA_SAVITA_PERIODS):
@@ -495,6 +492,23 @@ def read_El_Badry_SB3(elb_sb3=paths.EL_BADRY_SB3):
     sb3table = Table.read(elb_sb3, format="ascii.csv")
     return sb3table
 
+def combined_El_Badry_multiplicity(
+        elb_single_path=paths.EL_BADRY_SINGLE, elb_sb1=paths.EL_BADRY_SB1,
+        elb_sb2=paths.EL_BADRY_SB2,
+        elb_hidden_trip=paths.EL_BADRY_HIDDEN_TRIPLE,
+         elb_sb3=paths.EL_BADRY_SB3):
+    '''Combine stellar parameters from all multiple El Badry papers.
+
+    The new table will have revised APOGEE IDs, Teffs, log(g), and [Fe/H].'''
+    wantedcols = ["APOGEE_ID", "T_eff [K]", "log g [dex]", "[Fe/H] [dex]"]
+    sb1s = read_El_Badry_SB1()[wantedcols]
+    sb2s = read_El_Badry_SB2()[wantedcols]
+    hidden_triples = read_El_Badry_hidden_triples()[wantedcols]
+    sb3s = read_El_Badry_SB3()[wantedcols]
+
+    combotable = vstack([sb1s, sb2s, hidden_triples, sb3s])
+    return combotable
+
 def read_California_Kepler_Spectroscopy(
     cks=paths.CALIFORNIA_KEPLER_SPECTROSCOPY):
     '''Read in the data from the California Kepler Survey.
@@ -528,14 +542,17 @@ def read_Geller_M67(geller=paths.HEAD_DIR / "aj518354t2_mrt.txt"):
 @au.shortcut_file(paths.SHORTCUT_MCQUILLAN_STELLPARM)
 def mcquillan_with_stelparms(
     mcq_path=paths.MCQUILLAN_CATALOG, kic_path=paths.KIC_CATALOG,
-        gaia_path=paths.GAIA_DR2_KEPLER_OVERLAP):
+        gaia_path=paths.GAIA_DR2_KEPLER_OVERLAP,
+        origpath=paths.ORIG_KIC_ABRIDGED,
+        pinpath=paths.PINSONNEAULT_CORRECTIONS):
     '''Read McQuillan catalog with full KIC stellar parameters.
 
     Read in the McQuillan detections along with the KIC DR25 stellar
     parameters.
     '''
     mcq = read_McQuillan_catalog(mcq_path)
-    stellcat = stelparms_with_Gaia(kic_path, gaia_path)
+    stellcat = stelparms_triple_KIC(origpath, pinpath, kic_path)
+    del(stellcat["kic"])
     del(stellcat["KIC"])
     mcquillancat = au.join_by_id(
         mcq, stellcat, "KIC", "kepid", join_type="left")
@@ -552,7 +569,8 @@ def mcquillan_nondetections_with_stelparms(
     parameters.
     '''
     mcq = read_McQuillan_nondetections(mcq_path)
-    stellcat = stelparms_with_Gaia(kic_path, gaia_path)
+    stellcat = stelparms_triple_KIC()
+    del(stellcat["kic"])
     del(stellcat["KIC"])
     mcquillancat = au.join_by_id(
         mcq, stellcat, "KIC", "kepid", join_type="left")
@@ -713,7 +731,7 @@ def dr14_with_KIC_stelparms(
     apo = read_dr14_allStar(apopath, opt="kepler")
     kiccat = stelparms_triple_KIC(origpath, pinpath, kicpath)
     apokic = catalog.join_by_2MASS_key(
-        apo, kiccat, "APOGEE_ID", "tm_designation")
+        apo, kiccat, "APOGEE_ID", "tm_designation", join_type="inner")
     return apokic
 
 @au.shortcut_file(paths.SHORTCUT_APOKASC_KIC)
@@ -755,17 +773,52 @@ def stelparms_triple_KIC(
         hubercat, pinsonneaultcat, "kepid", "KIC", join_type="left")
     return joinedcat
 
+def ebs_with_stelparms(ebpath=paths.EB_PATH, kic_path=paths.KIC_CATALOG,
+                       gaia_path=paths.GAIA_DR2_KEPLER_OVERLAP):
+    '''Read in Eclipsing Binaries with full stellar parameters.'''
+    ebs = read_villanova_EBs(ebpath)
+    ebs.remove_columns(["kmag", "Teff"])
+    stellcat = stelparms_triple_KIC(kic_path)
+    del(stellcat["kic"])
+    del(stellcat["KIC"])
+    ebcat = au.join_by_id(
+        ebs, stellcat, "KIC", "kepid", join_type="left")
+    return ebcat
+
+@au.shortcut_file(paths.SHORTCUT_GAIA_KEPLER)
 def stelparms_with_Gaia(
         parmpath=paths.KIC_CATALOG, gaiapath=paths.GAIA_DR2_KEPLER_OVERLAP):
     kiccat = read_KIC_DR25_catalog(parmpath)
-    gaiacat = read_Berger_DR2_Kepler()
+    gaiacat = read_Gaia_DR2_Kepler()
 
-    joinedcat = au.join_by_id(kiccat, gaiacat, "kepid", "KIC", join_type="left")
+    joinedcat = au.join_by_id(kiccat, gaiacat, "kepid", "kic", join_type="left")
     catalog.generate_abs_mag_column_with_errors(
         joinedcat, "kmag", "kmag_err", "M_K", "M_K_err1", "M_K_err2",
         samp.AV_to_AK, samp.AV_err_to_AK_err,
         null_value=np.nan)
     return joinedcat
+
+def dr14_with_ElBadry():
+    '''Add in El Badry parameters to the DR14 allStar table.'''
+    apogee = read_dr14_allStar()
+    wantedcols = ["APOGEE_ID", "T_eff [K]", "log g [dex]", "[Fe/H] [dex]"]
+    elbadry = combined_El_Badry_multiplicity()
+    singles = read_El_Badry_Single_Stars()
+    singles_apo = au.extract_subtable_from_column(
+        apogee, "APOGEE_ID", singles["APOGEE_ID"])
+    singles_params = Table(
+        singles_apo[["APOGEE_ID", "TEFF", "LOGG_FIT", "FE_H"]],
+                    names=wantedcols)
+    full_elbadry = vstack([singles_params, elbadry])
+
+    combotab = catalog.join_by_2MASS_key(
+        apogee, fullelbadry, "APOGEE_ID", "APOGEE_ID", join_type="left")
+
+    return combotab
+
+    
+
+
 
 ###########
 # Helpers #
@@ -842,6 +895,7 @@ def read_villanova_EBs(EBpath=paths.EB_PATH):
     '''Reads in the Villanova Keler EB catalog.'''
     ebcat = Table.read(EBpath, format="ascii.commented_header",
                        header_start=-1)
+    ebcat.remove_column("col11")
     return ebcat
 
 def read_synchronized_EB_details(syncpath=paths.SYNC_EB_PATH):
