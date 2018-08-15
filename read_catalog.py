@@ -799,7 +799,7 @@ def stelparms_with_Gaia(
     catalog.generate_abs_mag_column_with_errors(
         joinedcat, "kmag", "kmag_err", "M_K", "M_K_err1", "M_K_err2",
         samp.AV_to_AK, samp.AV_err_to_AK_err, parallaxcol="parallax",
-        parallax_err_col="parallax_error")
+        parallax_err_col="parallax_error", parallax_offset=0.05)
     return joinedcat
 
 def dr14_with_ElBadry(binaritycol="Binarity"):
