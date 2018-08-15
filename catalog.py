@@ -1917,16 +1917,17 @@ def generate_abs_mag_column(
 
 def generate_abs_mag_column_with_errors(
         apotable, appcol, apperrcol, abscol, absupcol, absdowncol, v_to_ext,
-        v_err_to_ext_err, parallaxcol="", parallax_err_col="", distcol="", 
-        dist_up_col="", dist_down_col="",  avcol="av", avupcol="av_err1", 
-        avdowncol="av_err2"):
+        v_err_to_ext_err, parallaxcol="", parallax_err_col="",
+        parallax_offset=0.05, distcol="", dist_up_col="", dist_down_col="",  
+        avcol="av", avupcol="av_err1", avdowncol="av_err2"):
     '''Create absolute magnitude columns with Gaia info and photometry.
 
     This calculates the given K-band absolute magnitude using the usual
     relation. Either parallaxes or distance can be specified, but only one
     should be given, with the rest being empty strings. By default it will
     assume that the parallax column is "parallax" and the uncertainty column is
-    "parallax_error". It approximates errors by adding the terms in quadrature.
+    "parallax_error". A zero-point offset for the parallax should be given in
+    parallax_offset. It approximates errors by adding the terms in quadrature.
     For blended objects, the null value for the K-band magnitude is propagated.
     '''
     if parallaxcol != "" and distcol != "":
@@ -1943,7 +1944,8 @@ def generate_abs_mag_column_with_errors(
         parallaxcol = "parallax"
 
     if parallaxcol != "" and distcol == "":
-        distance_modulus = parallax_to_distance_modulus(apotable[parallaxcol])
+        distance_modulus = parallax_to_distance_modulus(
+            apotable[parallaxcol]+parallax_offset)
         distance_modulus_up = parallax_err_to_distance_modulus_err(
             apotable[parallax_err_col], apotable[parallaxcol])
         distance_modulus_down = parallax_err_to_distance_modulus_err(
