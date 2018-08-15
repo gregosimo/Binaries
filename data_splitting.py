@@ -1285,6 +1285,7 @@ def initialize_clean_APOGEE(aposplit):
             "Huber MetCor Cool", "Huber MetCor Teff", "Huber MetCor Hot", 
             "No Huber MetCor"), null_value=np.ma.masked,
         teff_crit="Huber Metallicity Correction Region")
+
     aposplit.split_teff(
         "SDSS-Teff", [4000, 5000], (
             "Pinsonneault MetCor Cool", "Pinsonneault MetCor Teff", 
@@ -1431,7 +1432,7 @@ def initialize_mcquillan_sample(mcqsplit):
             "No Pinsonneault Teff"),
         teff_crit="Metallicity Correction", null_value=np.ma.masked)
     mcqsplit.split_teff(
-        "SDSS-Teff", [4000, 5000], (
+        "SDSS-Teff", [4000, 5250], (
             "Too Cool Statistics", "Right Statistics Teff", 
             "Too Hot Statistics", "No Statistics Teff"), 
         teff_crit="Statistics", null_value=np.ma.masked)
