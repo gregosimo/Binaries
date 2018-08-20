@@ -1919,7 +1919,7 @@ def generate_abs_mag_column_with_errors(
         apotable, appcol, apperrcol, abscol, absupcol, absdowncol, v_to_ext,
         v_err_to_ext_err, parallaxcol="", parallax_err_col="",
         parallax_offset=0.05, distcol="", dist_up_col="", dist_down_col="",  
-        avcol="av", avupcol="av_err1", avdowncol="av_err2"):
+        avcol="av", avupcol="av_err1", avdowncol="av_err2", fullgaia=True):
     '''Create absolute magnitude columns with Gaia info and photometry.
 
     This calculates the given K-band absolute magnitude using the usual
@@ -1944,12 +1944,18 @@ def generate_abs_mag_column_with_errors(
         parallaxcol = "parallax"
 
     if parallaxcol != "" and distcol == "":
-        distance_modulus = parallax_to_distance_modulus(
-            apotable[parallaxcol]+parallax_offset)
-        distance_modulus_up = parallax_err_to_distance_modulus_err(
-            apotable[parallax_err_col], apotable[parallaxcol])
-        distance_modulus_down = parallax_err_to_distance_modulus_err(
-            apotable[parallax_err_col], apotable[parallaxcol])
+        if fullgaia:
+            dmo = parallax_to_distance_modulus(
+                apotable[parallaxcol]+parallax_offset,
+                apotable[parallax_err_col])
+            distance_modulus_down, distance_modulus, distance_modulus_up = dmo
+        else:
+            distance_modulus = parallax_to_distance_modulus(
+                apotable[parallaxcol]+parallax_offset)
+            distance_modulus_up = parallax_err_to_distance_modulus_err(
+                apotable[parallax_err_col], apotable[parallaxcol])
+            distance_modulus_down = parallax_err_to_distance_modulus_err(
+                apotable[parallax_err_col], apotable[parallaxcol])
     elif parallaxcol == "" and distcol != "":
         distance_modulus = distance_to_distance_modulus(apotable[distcol])
         distance_modulus_up = distance_err_to_distance_modulus_err(
@@ -1972,7 +1978,9 @@ def parallax_to_distance_modulus_fulk(parallaxes, errors, L=1350):
     '''Convert parallax to distance modulus.
     
     The parallax and error needs to be in arcseconds. The scale length of disk
-    needs to be in parsecs.'''
+    needs to be in parsecs. The function returns a 3-tuple containing the lower
+    bound of the distance modulus, the mode of the distance modulus, and the
+    upper bound of the distance modulus.'''
     assert len(parallaxes) == len(errors)
     dm = np.zeros(len(parallaxes))
     dm_upper = np.zeros(len(parallaxes))
@@ -2003,3 +2011,5 @@ def parallax_to_distance_modulus_fulk(parallaxes, errors, L=1350):
         dm[i] = mode
         dm_upper[i] = upper_dmod
         dm_lower[i] = lower_dmod
+
+    return dm_lower, dm, dm_upper
