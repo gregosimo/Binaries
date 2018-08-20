@@ -962,8 +962,6 @@ def calc_model_mag_err_fixed_age_feh_alpha(
 
     return k_err
 
-
-
 def calc_model_mag_fixed_age_alpha(
         teffs, feh, mag, age=4.5e9, alpha=0.0, model="MIST"):
     '''Predict absolute magnitude given Teffs and [Fe/H].
