@@ -10,7 +10,7 @@ import hrplots as hr
 import biovis_colors as bc
 import models
 
-band_translation = {"H": "2MASS_H", "K": "2MASS_Ks", "Ks": "2MASS_Ks"}
+band_translation = {"V": "Bessell_V", "H": "2MASS_H", "K": "2MASS_Ks", "Ks": "2MASS_Ks"}
 
 class MISTIsochrone(models.StellarIsochrone):
     '''A class that encapsulates a MIST isochrone.'''
