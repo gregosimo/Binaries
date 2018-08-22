@@ -1257,13 +1257,13 @@ def initialize_clean_APOGEE(aposplit):
         teff_crit="Teff Evolution", null_value=np.ma.masked)
 
     aposplit.split_teff(
-        "TEFF", [4000, 5000], (
+        "TEFF", [4000, 5250], (
             "APOGEE MetCor Cool", "APOGEE MetCor Teff", "APOGEE MetCor Hot", 
             "No APOGEE MetCor"), null_value=np.ma.masked,
         teff_crit="APOGEE Metallicity Correction Region")
 
     aposplit.split_teff(
-        "T_eff [K]", [4000, 5000], (
+        "T_eff [K]", [4000, 5250], (
             "ElBadry MetCor Cool", "ElBadry MetCor Teff", "ElBadry MetCor Hot", 
             "No ElBadry MetCor"), null_value=np.ma.masked,
         teff_crit="ElBadry Metallicity Correction Region")
@@ -1281,13 +1281,13 @@ def initialize_clean_APOGEE(aposplit):
         null_value=np.ma.masked, teff_crit="APOGEE Statistics Region")
 
     aposplit.split_teff(
-        "teff", [4000, 5000], (
+        "teff", [4000, 5250], (
             "Huber MetCor Cool", "Huber MetCor Teff", "Huber MetCor Hot", 
             "No Huber MetCor"), null_value=np.ma.masked,
         teff_crit="Huber Metallicity Correction Region")
 
     aposplit.split_teff(
-        "SDSS-Teff", [4000, 5000], (
+        "SDSS-Teff", [4000, 5250], (
             "Pinsonneault MetCor Cool", "Pinsonneault MetCor Teff", 
             "Pinsonneault MetCor Hot", "No Pinsonneault MetCor"), 
         null_value=np.ma.masked, 
@@ -1427,7 +1427,7 @@ def initialize_asteroseismic_sample(aposplit):
 def initialize_mcquillan_sample(mcqsplit):
     '''Makes a series of cuts related to the rotation period of the targets.'''
     mcqsplit.split_teff(
-        "SDSS-Teff", [4000, 5000], (
+        "SDSS-Teff", [4000, 5250], (
             "Too Cool MetCor", "Right MetCor Teff", "Too Hot MetCor", 
             "No Pinsonneault Teff"),
         teff_crit="Metallicity Correction", null_value=np.ma.masked)
