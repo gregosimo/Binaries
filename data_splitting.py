@@ -938,6 +938,19 @@ class APOGEESplitter(KeplerSplitter):
         indexarr = [mcq_period, mcq_noperiod, no_mcq]
         self._setup_indices(mcq_names, indexarr, mcq_crit)
 
+    def split_Kounkel_SB2(
+            self, sb2_names=("Kounkel SB2", "Not Kounkel SB2"), 
+            apid_col="APOGEE_ID", sb2_crit="Kounkel SB2"):
+        '''Split the sample using Kounkel SB2s.
+        
+        If a target was detected as an SB2 according to the cross-correlation
+        analysis of Kounkel, then label it as such.'''
+        sb2s = catin.read_Kounkel_spec_binary_catalog()
+        sb2_indices = au.mark_selections_in_columns(
+            self.data[apid_col], sb2s["APOGEE_ID"])
+        self._setup_complement_index(sb2_names, sb2_indices, sb2_crit)
+
+
     def split_by_ASPCAP_flags(
         self, qual_names=("Bad", "Warn", "vsini", "Good"),
         aspcapcol="ASPCAPFLAGS", aspcap_crit="ASPCAP"):
@@ -1252,63 +1265,19 @@ def initialize_clean_APOGEE(aposplit):
     be a pretty rough cut.'''
     aposplit.split_by_ASPCAP_flags()
 
-    aposplit.split_teff(
-        "TEFF", [5000], ("Cool Noev", "Hot HighEv", "Bad APOGEE Teff"),
-        teff_crit="Teff Evolution", null_value=np.ma.masked)
-
-    aposplit.split_teff(
-        "TEFF", [4000, 5250], (
-            "APOGEE MetCor Cool", "APOGEE MetCor Teff", "APOGEE MetCor Hot", 
-            "No APOGEE MetCor"), null_value=np.ma.masked,
-        teff_crit="APOGEE Metallicity Correction Region")
-
-    aposplit.split_teff(
-        "T_eff [K]", [4000, 5250], (
-            "ElBadry MetCor Cool", "ElBadry MetCor Teff", "ElBadry MetCor Hot", 
-            "No ElBadry MetCor"), null_value=np.ma.masked,
-        teff_crit="ElBadry Metallicity Correction Region")
-
-    aposplit.split_teff(
-        "T_eff [K]", [4000, 5250], (
-            "ElBadry Statistics Cool", "ElBadry Statistics Teff", 
-            "ElBadry Statistics Hot", "No ElBadry Statistics"), 
-        null_value=np.ma.masked, teff_crit="ElBadry Statistics Region")
-
-    aposplit.split_teff(
-        "TEFF", [4000, 5250], (
-            "APOGEE Statistics Cool", "APOGEE Statistics Teff", 
-            "APOGEE Statistics Hot", "No APOGEE Statistics"), 
-        null_value=np.ma.masked, teff_crit="APOGEE Statistics Region")
-
-    aposplit.split_teff(
-        "teff", [4000, 5250], (
-            "Huber MetCor Cool", "Huber MetCor Teff", "Huber MetCor Hot", 
-            "No Huber MetCor"), null_value=np.ma.masked,
-        teff_crit="Huber Metallicity Correction Region")
-
-    aposplit.split_teff(
-        "SDSS-Teff", [4000, 5250], (
-            "Pinsonneault MetCor Cool", "Pinsonneault MetCor Teff", 
-            "Pinsonneault MetCor Hot", "No Pinsonneault MetCor"), 
-        null_value=np.ma.masked, 
-        teff_crit="Pinsonneault Metallicity Correction Region")
-
-    aposplit.split_vsini(
-        [7], ("Vsini nondet", "Vsini det", "No Vsini"),
-        null_value=np.ma.masked)
-
-    aposplit.split_metallicity(
-        -0.5, ("Low Met", "High Met", "No Met"), col="FE_H", 
-        null_value=np.ma.masked)
-
-    aposplit.split_dlsb()
-
     aposplit.split_photometric_quality(
         "kmag", "kmag_err", splitnames=("K Detection", "Blend", "Bad K"), 
         crit="MK blend")
 
     aposplit.split_Gaia()
 
+def initialize_vsini(aposplit):
+    '''Initialize the vsini cuts for the APOGEE sample.'''
+    aposplit.split_vsini(
+        [7], ("Vsini nondet", "Vsini det", "No Vsini"),
+        null_value=np.ma.masked)
+
+    aposplit.split_dlsb()
 
 def initialize_full_APOGEE(aposplit):
     '''Get the underlying APOGEE sample we're interested in.'''
@@ -1382,17 +1351,6 @@ def initialize_asteroseismic_sample(aposplit):
     # First split the asteroseismic targets
     aposplit.split_asteroseismic_dwarfs()
 
-    # Split between hot and cool
-    aposplit.split_teff(
-        "TEFF_COR", 5500, ("Cool", "Hot", "No APOGEE Teff"), 
-        teff_crit="APOGEE Teff", null_value=np.ma.masked)
-
-    # Now split the spectroscopic targets
-    aposplit.split_logg("LOGG_FIT", [3.5, 4.0], (
-        "Spectroscopic dwarfs", "Spectroscopic subgiants", 
-        "Spectroscopic giants", "No APOGEE logg"), logg_crit="APOGEE logg",
-                        null_value=np.ma.masked)
-
     # Split  by quality.
     aposplit.split_by_ASPCAP_flags()
 
@@ -1410,18 +1368,6 @@ def initialize_asteroseismic_sample(aposplit):
     aposplit.split_photometric_quality(
         "K_MAG_2M", "K_MAG_ERR", splitnames=("Good K", "Blend", "Bad Phot"), 
         crit="MK blend")
-
-    # Absolute K-band magnitude
-    aposplit.data["M_K"] = (
-        aposplit.data["K_MAG_2M"] - 5 * np.log10(aposplit.data["dis"]/10))
-    aposplit.data["M_K_err1"] = np.where(
-        aposplit.data["K_MAG_ERR"] > 0, aposplit.data["K_MAG_ERR"]**2 + (
-        5 * (aposplit.data["disem"]) / aposplit.data["dis"] / np.log(10))**2,
-        np.ma.masked)
-    aposplit.data["M_K_err2"] = np.where(
-        aposplit.data["K_MAG_ERR"] > 0, aposplit.data["K_MAG_ERR"]**2 + (
-        5 * (aposplit.data["disep"]) / aposplit.data["dis"] / np.log(10))**2,
-        np.ma.masked)
 
 
 def initialize_mcquillan_sample(mcqsplit):
