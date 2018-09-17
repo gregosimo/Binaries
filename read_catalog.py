@@ -337,7 +337,8 @@ def read_dr14_allStar(allstarpath=paths.DR14_ALLSTAR_PATH, opt="kepler"):
         "APOGEE2_TARGET2", "APOGEE2_TARGET3", "SNREV", "MIN_H", "MAX_H",
         "MIN_JK", "MAX_JK", "TEFF", "TEFF_ERR", "LOGG", "LOGG_ERR",
         "VMICRO", "VMACRO", "VSINI", "M_H", "M_H_ERR", "ALPHA_M",
-        "ALPHA_M_ERR", "ASPCAPFLAG", "ASPCAPFLAGS", "FE_H", "PMRA", "PMDEC",
+        "ALPHA_M_ERR", "ASPCAPFLAG", "ASPCAPFLAGS", "ASPCAP_CHI2",
+        "STABLERV_RCHI2", "FE_H", "PMRA", "PMDEC",
         "PM_SRC", "ALL_VISITS", "VISITS"]
     if opt:
             allstar_hdus = fits.open(str(allstarpath), memmap=True)
@@ -534,6 +535,11 @@ def read_Geller_M67(geller=paths.HEAD_DIR / "aj518354t2_mrt.txt"):
     fulldata["RA"] = coords.ra
     fulldata["DEC"] = coords.dec
     return fulldata
+
+def read_Kounkel_spec_binary_catalog(sbpath=paths.KOUNKEL_SB2_PATH):
+    '''Read in the list of spectroscopic binaries found by Kounkel.'''
+    ids = Table.read(sbpath, format="ascii.no_header", names=["APOGEE_ID"])
+    return ids
 
 ###############################################################################
 # Joined catalogs #

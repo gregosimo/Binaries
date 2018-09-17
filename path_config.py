@@ -78,6 +78,7 @@ EL_BADRY_HIDDEN_TRIPLE = (
     HEAD_DIR / "Table_E4_all_SB2s_hidden_third_component_labels.csv")
 EL_BADRY_SB3 = HEAD_DIR / "Table_E5_all_SB3_labels.csv"
 CALIFORNIA_KEPLER_SPECTROSCOPY = HEAD_DIR / "ajaa80det5_mrt.txt"
+KOUNKEL_SB2_PATH = HEAD_DIR / "dr14_sb2.txt"
 
 CHAPLIN_DWARFS_BRUNTT = HEAD_DIR / "apjs487288t6_mrt.txt"
 CHAPLIN_DWARFS_IRFM = HEAD_DIR / "apjs487288t5_mrt.txt"
