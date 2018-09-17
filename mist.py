@@ -18,10 +18,17 @@ class MISTIsochrone(models.StellarIsochrone):
     age_col = "isochrone_age_yr"
     mass_col = "initial_mass"
     logteff_col = "log_Teff"
+    logL_col = "log_L"
+    # Note that the radius is inferred, not directly interpolated.
+    radius_col = "radius"
     def __init__(self, feh, fulltable, alpha=0, Yinit=0.2703, Zinit=1.42857e-2, 
                  vvcrit=0.00, AV=0.0, MIST_version=1.1, MESA_version=7503, 
-                 bandstr="UBVRIplus"):
+                 bandstr="UBVRIplus", make_rad_col=True):
 
+        if make_rad_col:
+            fulltable[self.radius_col] = 10**(0.5*(
+                fulltable[self.logL_col] - 4*(
+                    fulltable[self.logteff_col] - np.log10(5777))))
         # This should make a dictionary which has age as a key and that
         # subtable as a value.
         fullgroups = fulltable.group_by(self.age_col)
@@ -33,6 +40,10 @@ class MISTIsochrone(models.StellarIsochrone):
         self.AV=AV
         self.MIST_version=MIST_version
         self.MESA_version=MESA_version
+
+        self.increasing_colnames = set(band_translation.values())
+        self.decreasing_colnames = set([self.mass_col, self.logteff_col,
+                                        self.logL_col])
 
     def iso_table(self, age):
         '''Return the table corresponding to the isochrone at the given age.
@@ -107,10 +118,13 @@ class MISTIsochrone(models.StellarIsochrone):
             del(newiso["Z_surf"])
             masslist.append(newiso)
         newtable = vstack(masslist)
+        if self.radius_col in met_table.colnames:
+            newtable[self.radius_col] = 10**(0.5*(
+                newtable[self.logL_col] - 4*(
+                    newtable[self.logteff_col] - np.log10(5777))))
         combined_table = vstack([
             newtable, met_table[isochrone_highmass_indices]])
         self.iso_dict[age] = combined_table
-
 
 class MISTEvolutionaryTrack(models.StellarEvolutionaryTrack):
     '''A model of the MIST Evolutionary Tracks.'''

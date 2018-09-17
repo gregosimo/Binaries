@@ -3,6 +3,7 @@ import bisect
 from scipy.interpolate import lagrange, interp1d
 from astropy.table import Table
 import numpy as np
+import matplotlib.pyplot as plt
 
 class StellarEvolutionaryTrack(object):
     '''A generic class for a stellar evolutionary track.
@@ -82,7 +83,7 @@ class StellarIsochrone(object):
 
     def interpolate_isochrone_cols(
             self, age, invals, incol, outcol, interp_kind="linear", 
-                mask_outside_bounds=True):
+                mask_outside_bounds=True, increase=True):
         '''Interpolate between the columns of an isochrone object.
         
         Interpolate the values invals between the columns of the
@@ -92,8 +93,12 @@ class StellarIsochrone(object):
         The kind of interpolation to be done should be given as interp_kind, which
         by default is linear because of the high density of points.'''
         met_table = self.iso_table(age)
-        restricted_table = interpolation_table_increasing_stretch(
-            met_table, mono_col=incol)
+        if increase:
+            restricted_table = interpolation_table_increasing_stretch(
+                met_table, mono_col=incol)
+        else:
+            restricted_table = interpolation_table_decreasing_stretch(
+                met_table, mono_col=incol)
         xvals, yvals = restricted_table[incol], restricted_table[outcol]
         in_ordered, out_ordered = ensure_array_increasing(xvals, yvals)
         in_fixed, out_fixed = fix_duplicate_array_values(
@@ -140,6 +145,14 @@ class StellarIsochrone(object):
 
         deriv = (posy-negy)/(posh+negh)
         return deriv
+
+    def plot_columns(self, age, xcol, ycol):
+        '''Plot the internal columns between xcol and ycol'''
+        met_table = self.iso_table(age)
+        plt.plot(met_table[xcol], met_table[ycol], color='k', ls="--",
+                 marker="o")
+        plt.xlabel(xcol)
+        plt.ylabel(ycol)
 
 def bin_nearby_table_values(table, bin_col, decimals):
     '''Bin the table according to values nearby in bin_col.
@@ -224,6 +237,46 @@ def interpolation_table_increasing_stretch(isochrone, mono_col="LogTeff"):
                 newdiff = coldiff[last_index] + coldiff[last_index+1]
 
     return isochrone[first_index:last_index]
+
+def interpolation_table_decreasing_stretch(isochrone, mono_col="LogTeff"):
+    '''Cut off the low-mass portion of the table which is increasing.
+    
+    This function is an alternative to restrict_interpolation_table because it
+    ensures that a well-behaved part of the isochrone is used for
+    interpolation.'''
+    col = isochrone[mono_col]
+    # If the column is decreasing, then these must be negative.
+    coldiff = np.diff(col)
+    # Get the first positive index.
+    first_index = np.where(coldiff <= 0)[0][0]
+    # Find where the index next dips below zero.
+    try:
+        last_index = first_index+np.where(coldiff[first_index:] > 0)[0][0]
+    # There might be a more elegant way of doing this.
+    except IndexError:
+        last_index = len(isochrone)
+    else:
+        # Check for one-off blips and reinterpolate them.
+        # If there was a one-off blip, the next point should look perfectly
+        # normal. If it does, remove that problematic row.
+        try:
+            newdiff = coldiff[last_index] + coldiff[last_index+1]
+        except IndexError:
+            pass
+        else:
+            while newdiff < 0:
+                isochrone.remove_row(last_index+1)
+                coldiff = np.diff(isochrone[mono_col])
+                try:
+                    last_index = first_index+np.where(
+                        coldiff[first_index:] > 0)[0][0]
+                except IndexError:
+                    last_index = len(coldiff)
+                    break
+                newdiff = coldiff[last_index] + coldiff[last_index+1]
+
+    return isochrone[first_index:last_index]
+
 
 def ensure_array_increasing(xvals, yvals):
     '''Ensure the provided xvalues are increasing.

@@ -930,7 +930,8 @@ def calc_model_mag_fixed_age_feh_alpha(
         bandcol = dsep.band_translation[mag]
 
     newks = iso.interpolate_isochrone_cols(
-        age, np.log10(teffs), iso.logteff_col, bandcol, interp_kind="linear")
+        age, np.log10(teffs), iso.logteff_col, bandcol, interp_kind="linear",
+        increase=True)
 
     assert not np.any(np.ma.getmask(teffs))
     return np.ma.masked_invalid(newks)
@@ -1001,6 +1002,14 @@ def calc_model_over_feh_fixed_age_alpha(
         -0.5, -0.25, 0.0, 0.25, 0.5])
     interp_fehs = np.zeros(len(input_fehs))
 
+    # If the input column is a photometry magnitude, then the input column is
+    # decreasing. Otherwise it's increasing.
+    if model.upper() == "MIST":
+        mag_cols = mist.band_translation.values()
+    elif model.upper == "DSEP":
+        mag_cols = dsep.band_translation.values()
+    input_increasing = incol not in mag_cols
+
     # k_array[i,:] is all temperatures at a given input [Fe/H]
     # k_array[:,j] is all metallicities at a given Teff.
     k_array = np.ma.zeros((len(interp_fehs), len(invals)))
@@ -1015,7 +1024,7 @@ def calc_model_over_feh_fixed_age_alpha(
         interp_fehs[i] = iso.feh
         k_array[i,:] = iso.interpolate_isochrone_cols(
             age, invals, incol, outcol, interp_kind="linear",
-            mask_outside_bounds=True)
+            mask_outside_bounds=True, increase=input_increasing)
 
     
     k_vals = np.zeros((len(fehs), len(invals)))
