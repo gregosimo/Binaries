@@ -662,18 +662,25 @@ def compare_rotation_velocity_radius(
 
 def plot_vsini_velocity(
     vsini, period, radii, raderr_below, raderr_above, color='k', ax=None, 
-        vsini_fracerr=0.15, label="", xticks=10, yticks=10, sini_label=True,
+        vsini_fracerr=0.15, vsini_lim=7, label="", xticks=10, yticks=10, sini_label=True,
         marker="*"):
     '''Make a plot of vsini vs velocity.
 
     Vsini will be on the y-axis while velocity will be on the x-axis. The
     bottom right should be a region of allowed space while the top left is
-    disallowed.'''
+    disallowed. Objects which have both a vsini and a predicted v less than the
+    detection limit will be omitted.'''
     if not ax:
         ax = plt.subplots(111, figsize=(5,5))
 
     downvel, infvel, upvel = period_to_velocities_uncertainties(
         period, radii, raderr_below, raderr_above)
+
+    highv_indices = np.logical_or(vsini > vsini_lim, infvel > vsini_lim)
+    vsini = vsini[highv_indices]
+    downvel = downvel[highv_indices]
+    infvel = infvel[highv_indices]
+    upvel = upvel[highv_indices]
 
     ax.errorbar(
         infvel, vsini, xerr=[-downvel, upvel], yerr=vsini_fracerr*vsini/2, 
@@ -713,6 +720,9 @@ def plot_vsini_velocity(
 
     ax.annotate(label, xy=(0.55, 0.05), xycoords="axes fraction",
                  fontsize=14, color="white")
+
+    # Show the detection thresholds.
+    ax.plot([0, vsini_lim, vsini_lim], [vsini_lim, vsini_lim, 0], 'r--')
 
     ax.set_xlim(min_x, max_x)
     ax.set_ylim(min_y, max_y)
