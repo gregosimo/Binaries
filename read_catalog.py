@@ -335,7 +335,7 @@ def read_dr14_allStar(allstarpath=paths.DR14_ALLSTAR_PATH, opt="kepler"):
         "TARGFLAGS", "NVISITS", "STARFLAG", "STARFLAGS", "ANDFLAG", "ANDFLAGS",
         "VHELIO_AVG", "VSCATTER", "VERR", "VERR_MED", "APOGEE2_TARGET1",
         "APOGEE2_TARGET2", "APOGEE2_TARGET3", "SNREV", "MIN_H", "MAX_H",
-        "MIN_JK", "MAX_JK", "TEFF", "TEFF_ERR", "LOGG", "LOGG_ERR",
+        "MIN_JK", "MAX_JK", "FPARAM", "FPARAM_COV", "TEFF", "TEFF_ERR", "LOGG", "LOGG_ERR",
         "VMICRO", "VMACRO", "VSINI", "M_H", "M_H_ERR", "ALPHA_M",
         "ALPHA_M_ERR", "ASPCAPFLAG", "ASPCAPFLAGS", "ASPCAP_CHI2",
         "STABLERV_RCHI2", "FE_H", "PMRA", "PMDEC",
