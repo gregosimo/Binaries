@@ -541,6 +541,17 @@ def read_Kounkel_spec_binary_catalog(sbpath=paths.KOUNKEL_SB2_PATH):
     ids = Table.read(sbpath, format="ascii.no_header", names=["APOGEE_ID"])
     return ids
 
+def read_Rebull_Pleiades_Periods(filepath=paths.REBULL_PLEIADES_PERIOD_PATH):
+    '''Read in the Table of periods reported by Rebull et al.'''
+    tab = Table.read(str(filepath), format="ascii.cds")
+    return tab
+
+def read_Rebull_EPIC_table(filepath=paths.REBULL_EPIC_PATH):
+    '''Read in the EPIC entries for the full Rebull et al (2016) sample.'''
+    tab = Table.read(str(filepath), format="ascii.basic", delimiter="|")
+    return tab
+
+
 ###############################################################################
 # Joined catalogs #
 ##############################################################################
