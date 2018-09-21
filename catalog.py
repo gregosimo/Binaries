@@ -66,6 +66,7 @@ def join_by_2MASS_key(tbl1, tbl2, tm1, tm2, join_type="inner",
     '''
     kic_prefix = "2MASS J"
     apogee_prefix = "2M"
+    epic_prefix = ""
 
     try:
         tbl1 = tbl1[~tbl1[tm1].mask]
@@ -78,20 +79,26 @@ def join_by_2MASS_key(tbl1, tbl2, tm1, tm2, join_type="inner",
         pass
 
     if np.any(npstr.startswith(tbl1[tm1], kic_prefix)):
-        tbl1_type = "KIC"
+        tbl1_prefix = kic_prefix
     elif np.any(npstr.startswith(tbl1[tm1], apogee_prefix)):
-        tbl1_type = "APOGEE"
+        tbl1_prefix = apogee_prefix
+    elif np.any(npstr.startswith(tbl1[tm1], epic_prefix)):
+        tbl1_prefix = epic_prefix
+    # Given the EPIC key, I think this is redundant. But if I decide to
+    # implement this differently, it may still be important.
     else:
         raise ValueError("Don't recognize 2MASS key: " + tbl1[tm1][0])
 
     if np.any(npstr.startswith(tbl2[tm2], kic_prefix)):
-        tbl2_type = "KIC"
+        tbl2_prefix = kic_prefix
     elif np.any(npstr.startswith(tbl2[tm2], apogee_prefix)):
-        tbl2_type = "APOGEE"
+        tbl2_prefix = apogee_prefix
+    elif np.any(npstr.startswith(tbl2[tm2], epic_prefix)):
+        tbl2_prefix = epic_prefix
     else:
         raise ValueError("Don't recognize 2MASS key: " + tbl2[tm2][0])
 
-    if tbl1_type == tbl2_type:
+    if tbl1_prefix == tbl2_prefix:
         new_table = au.join_by_id(
             tbl1, tbl2, tm1, tm2, join_type=join_type, idproc=npstr.strip, 
             conflict_suffixes=conflict_suffixes)
@@ -99,10 +106,12 @@ def join_by_2MASS_key(tbl1, tbl2, tm1, tm2, join_type="inner",
     else:
         print("Types different")
         def transform(oldcol):
-            if tbl1_type == "KIC" and tbl2_type == "APOGEE":
-                newcol = npstr.replace(oldcol, apogee_prefix, kic_prefix)
-            elif tbl1_type == "APOGEE" and tbl2_type == "KIC":
-                newcol = npstr.replace(oldcol, kic_prefix, apogee_prefix)
+            # The epic prefix is special because I can't search and replace an
+            # empty string.
+            if tbl2_prefix == epic_prefix:
+                newcol = npstr.add(tbl1_prefix, oldcol)
+            else:
+                newcol = npstr.replace(oldcol, tbl2_prefix, tbl1_prefix)
             return newcol
         tbl2_oldcol = tbl2[tm2]
         random_colname = au.generate_random_string(12)
