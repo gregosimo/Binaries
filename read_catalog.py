@@ -548,7 +548,8 @@ def read_Rebull_Pleiades_Periods(filepath=paths.REBULL_PLEIADES_PERIOD_PATH):
 
 def read_Rebull_EPIC_table(filepath=paths.REBULL_EPIC_PATH):
     '''Read in the EPIC entries for the full Rebull et al (2016) sample.'''
-    tab = Table.read(str(filepath), format="ascii.basic", delimiter="|")
+    tab = Table.read(str(filepath), format="ascii.basic", delimiter="|",
+                     data_start=2)
     return tab
 
 
@@ -838,7 +839,18 @@ def dr14_with_ElBadry(binaritycol="Binarity"):
 
     return combotab
 
-    
+def Rebull_Pleiades_Periods(
+        rebull_path=paths.REBULL_PLEIADES_PERIOD_PATH,
+        epic_path=paths.REBULL_EPIC_PATH, dr14path=paths.DR14_ALLSTAR_PATH):
+    '''A combined table with the Rebull periods and EPIC parameters.'''
+    period_table = read_Rebull_Pleiades_Periods(rebull_path)
+    epic_table = read_Rebull_EPIC_table(epic_path)
+    period_combo = au.join_by_id(period_table, epic_table, "EPIC", "EPIC")
+    dr14 = read_dr14_allStar(opt="Pleiades")
+    apo_combo = catalog.join_by_2MASS_key(
+        dr14, period_combo, "APOGEE_ID", "2MASS")
+
+    return apo_combo
 
 
 
