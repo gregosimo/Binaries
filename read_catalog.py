@@ -546,10 +546,30 @@ def read_Rebull_Pleiades_Periods(filepath=paths.REBULL_PLEIADES_PERIOD_PATH):
     tab = Table.read(str(filepath), format="ascii.cds")
     return tab
 
+def read_Rebull_Praesepe_Periods(filepath=paths.REBULL_PRAESEPE_PERIOD_PATH):
+    '''Read in the Table of periods reported by Rebull et al. for M37'''
+    tab = Table.read(str(filepath), format="ascii.cds")
+    return tab
+
 def read_Rebull_EPIC_table(filepath=paths.REBULL_EPIC_PATH):
     '''Read in the EPIC entries for the full Rebull et al (2016) sample.'''
     tab = Table.read(str(filepath), format="ascii.basic", delimiter="|",
                      data_start=2)
+    return tab
+
+def read_Radick_87_Periods(filepath=paths.RADICK_HYADES_PATH):
+    '''Read in the Hyades periods from Radick et al (1987).'''
+    tab = Table.read(str(filepath), format="ascii.fixed_width", delimiter=" ")
+    return tab
+
+def read_Meibom_M34_periods(filepath=paths.MEIBOM_M34_PERIODS):
+    '''Read in the periods for M34 from Meibom et al (2011)'''
+    tab = Table.read(str(filepath), format="ascii.cds")
+    return tab
+
+def read_Lurie_periods(filepath=paths.LURIE_PERIOD_PATH):
+    '''Read in the periods from Kepler Eclipsing Binaries.'''
+    tab = Table.read(str(filepath), format="ascii.cds")
     return tab
 
 
@@ -841,16 +861,39 @@ def dr14_with_ElBadry(binaritycol="Binarity"):
 
 def Rebull_Pleiades_Periods(
         rebull_path=paths.REBULL_PLEIADES_PERIOD_PATH,
-        epic_path=paths.REBULL_EPIC_PATH, dr14path=paths.DR14_ALLSTAR_PATH):
+        cross_path=paths.REBULL_CROSSID_PATH, dr14path=paths.DR14_ALLSTAR_PATH,
+        stauffer_path=paths.STAUFFER_PLEIADES_MASSES):
     '''A combined table with the Rebull periods and EPIC parameters.'''
     period_table = read_Rebull_Pleiades_Periods(rebull_path)
-    epic_table = read_Rebull_EPIC_table(epic_path)
-    period_combo = au.join_by_id(period_table, epic_table, "EPIC", "EPIC")
+    stauffer_table = read_Stauffer_Pleiades_Properties(stauffer_path)
+    stauffer_combo = au.join_by_id(
+        period_table, stauffer_table, "EPIC", "EPIC", conflict_suffixes=(
+            "_RE", "_ST"))
+    cross_table = read_Rebull_cross_ids(cross_path)
+    period_combo = au.join_by_id(
+        stauffer_combo, cross_table, "EPIC", "EPIC", conflict_suffixes=(
+        "_REST", "_CROS"))
     dr14 = read_dr14_allStar(opt="Pleiades")
     apo_combo = catalog.join_by_2MASS_key(
-        dr14, period_combo, "APOGEE_ID", "2MASS")
+        dr14, period_combo, "APOGEE_ID", "2MASS", conflict_suffixes=(
+        "_APO", "_REB"))
 
     return apo_combo
+
+def read_Stauffer_Pleiades_Properties(
+        stauffer_path=paths.STAUFFER_PLEIADES_MASSES):
+    fill_values = [
+        ("-9.99", "0", "Mass", "Delmag"), ("-9.00", "0", "MBol", "Radius"), 
+        ("-9", "0", "Teff")]
+    stauffer_table = Table.read(
+        stauffer_path, format="ascii.cds", fill_values=fill_values)
+    return stauffer_table
+
+def read_Rebull_cross_ids(
+        rebull_path=paths.REBULL_CROSSID_PATH):
+    '''Read the Cross-ID Table for Pleiades Targets'''
+    rebull_table = Table.read(rebull_path, format="ascii.cds")
+    return rebull_table
 
 
 
@@ -1018,6 +1061,18 @@ def read_Stauffer_1982_photometry(photfile=paths.STAUFFER_1982_TABLE1_PATH):
         staufftable[stauffcol].mask = tbl[initcol].mask
 
     return staufftable
+
+def read_Stauffer_Pleiades_photometry(photfile=paths.STAUFFER_PHOT_FILE):
+    '''Read the photometry table for Pleiades members.
+
+    This table was not published, but is a table maintained by John Stauffer
+    with photometry.'''
+    tbl = Table.read(
+        str(photfile), format="ascii.fixed_width", 
+        col_starts=(0, 10, 20, 28, 36, 44, 52, 60, 68),
+        col_ends=(9, 19, 27, 35, 43, 51, 59, 67, 79), 
+        names=("ra", "dec", "V", "B-V", "V-Ic", "J", "H", "K", "name"))
+    return tbl
 
 #################
 # Service Files #
