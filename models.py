@@ -69,6 +69,9 @@ class StellarIsochrone(object):
     
     NOTE That a StellarIsochrone object holds a SET of isochrones, not a single
     one.'''
+    # I may want to look into using the ABC framework for defining the methods
+    # and attributes that need to be defined in subclasses. These include all
+    # of the physical column names, maybe the band_translation table, 
     def __init__(
         self, feh, alpha, mixing_length, Y, Z, vvcrit, bandstr, iso_dict):
         '''Take in attributes needed to define a DSEP isochrone.'''
