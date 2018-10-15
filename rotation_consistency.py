@@ -27,8 +27,11 @@ plot_APOGEE_KIC_teff_DSEP_KIC_radius:
 '''
 import numpy as np
 import matplotlib.pyplot as plt
+from matplotlib.ticker import AutoMinorLocator
 from scipy.stats import uniform
 from scipy.special import erf
+from scipy.integrate import quad
+from scipy.special import gammaincc
 import astropy_util as au
 
 import eclipsing_binaries as ebs
@@ -458,6 +461,13 @@ def period_to_velocities(period, radii):
 
     return velocity
 
+def logperiod_and_logradius_to_logvelocity_err(logradius_err, logperiod_err):
+    '''Convert uncertainties in period and radius to velocity.
+
+    This function assumes the errors are lognormal.'''
+    sig_logv = np.sqrt(logradius_err**2 + logperiod_err**2)
+    return sig_logv
+
 def period_to_velocities_uncertainties(period, radii, radius_up, radius_down):
     '''Convert periods to predicted velocities with uncertainties.
 
@@ -661,9 +671,9 @@ def compare_rotation_velocity_radius(
     ax3.set_ylabel("Inferred P / sin(i) (day)")
 
 def plot_vsini_velocity(
-    vsini, period, radii, raderr_below, raderr_above, color='k', ax=None, 
-        vsini_fracerr=0.15, vsini_lim=7, label="", xticks=10, yticks=10, sini_label=True,
-        marker="*"):
+    vsini, period, perioderr, radii, raderr, color='k', ax=None, 
+        vsini_fracerr=0.15, vsini_lim=7, label="", xticks=10, yticks=10, 
+        sini_label=True, marker="*"):
     '''Make a plot of vsini vs velocity.
 
     Vsini will be on the y-axis while velocity will be on the x-axis. The
@@ -671,55 +681,85 @@ def plot_vsini_velocity(
     disallowed. Objects which have both a vsini and a predicted v less than the
     detection limit will be omitted.'''
     if not ax:
-        ax = plt.subplots(111, figsize=(5,5))
+        f, ax = plt.subplots(1, 1, figsize=(5,5))
 
-    downvel, infvel, upvel = period_to_velocities_uncertainties(
-        period, radii, raderr_below, raderr_above)
+    infvel = period_to_velocities(period, radii)
+    dlogrerr = raderr / radii / np.log(10)
+    dlogperr = perioderr / period / np.log(10)
+    dlogverr = logperiod_and_logradius_to_logvelocity_err(dlogrerr, dlogperr)
 
     highv_indices = np.logical_or(vsini > vsini_lim, infvel > vsini_lim)
     vsini = vsini[highv_indices]
-    downvel = downvel[highv_indices]
     infvel = infvel[highv_indices]
-    upvel = upvel[highv_indices]
+    dlogverr = dlogverr[highv_indices]
+    downvel = infvel * (1-10**-dlogverr)
+    upvel = infvel * (10**dlogverr-1)
+    vsinierr = vsini_fracerr / np.log(10)
+    downvsini = vsini * (1-10**-vsinierr)
+    upvsini = vsini * (10**vsinierr-1)
 
     ax.errorbar(
-        infvel, vsini, xerr=[-downvel, upvel], yerr=vsini_fracerr*vsini/2, 
-        color=color, ls="None", marker=marker)
-    au.adjust_axes(ax, 0, infvel+upvel, 0, vsini*(1+vsini_fracerr/2),
-                   xticks, yticks)
+        infvel, vsini, xerr=[downvel, upvel], yerr=[downvsini, upvsini],
+        color=color, ls="None", marker=marker, label=label)
+    ax.set_xscale("log")
+    ax.set_yscale("log")
+#   au.adjust_axes(
+#       ax, infvel-downvel, infvel+upvel, vsini-downvsini, vsini+upvsini, 
+#       xticks, yticks)
+    ax.set_xlim(1, 100)
+    ax.set_ylim(1, 100)
     min_x, max_x = ax.get_xlim()
     min_y, max_y = ax.get_ylim()
     # Show sini = 1 and sini = 1/2.
-    med_x = min_x + 0.8*(max_x - min_x)
-    med_y = min_y + 0.8*(max_y - min_y)
+    log_med_x = np.log10(min_x) + 0.6*(np.log10(max_x) - np.log10(min_x))
+    log_med_y = np.log10(min_y) + 0.6*(np.log10(max_y) - np.log10(min_y))
     if max_y > max_x:
-        bound_point = max_x, max_x
+        top_bound_point = max_x, max_x
     else:
-        bound_point = max_y, max_y
-    ax.plot([0, bound_point[0]], [0, bound_point[1]], 'k-', lw=3)
-    ax.fill_between([0, bound_point[0]], [max_y, max_y], 
-                    [0, bound_point[1]], hatch="\\", facecolor="white",
-                    edgecolor="gray")
+        top_bound_point = max_y, max_y
+    if min_y < min_x:
+        bottom_bound_point = min_x, min_x
+    else:
+        bottom_bound_point = min_y, min_y
+
+    ax.plot(
+        [bottom_bound_point[0], top_bound_point[0]], 
+        [bottom_bound_point[1], top_bound_point[1]], 'k-', lw=3)
+    ax.fill_between(
+        [bottom_bound_point[0], top_bound_point[0]], [max_y, max_y], 
+        [bottom_bound_point[1], top_bound_point[1]], hatch="\\", 
+        facecolor="white", edgecolor="gray")
 
     if max_y/2 > max_x:
-        half_bound = max_x, max_x/2
+        top_half_bound = max_x, max_x/2
     else:
-        half_bound = 2*max_y, max_y
-    ax.plot([0, half_bound[0]], [0, half_bound[1]], 'k--')
+        top_half_bound = 2*max_y, max_y
+    if min_y/2 < min_x:
+        bottom_half_bound = min_x, min_x/2
+    else:
+        bottom_half_bound = 2*min_y, min_y
+    ax.plot(
+        [bottom_half_bound[0], top_half_bound[0]], 
+        [bottom_half_bound[1], top_half_bound[1]], 'k--')
 
     if sini_label:
         rotangle = np.arctan(
-            (bound_point[1] - min_y) / (max_y-min_y) * (max_x - min_x) /
-            (bound_point[0] - min_x))/np.pi*180
+            (np.log10(top_bound_point[1]) - np.log10(bottom_bound_point[1])) / 
+            (np.log10(max_y)-np.log10(min_y)) * (
+                np.log10(max_x) - np.log10(min_x)) /
+            (np.log10(top_bound_point[0]) - np.log10(bottom_bound_point[0])))/np.pi*180
         half_rotangle = np.arctan(
-            (half_bound[1] - min_y) / (max_y-min_y) * (max_x - min_x) /
-            (half_bound[0] - min_x))/np.pi*180
-        med = min(med_x, med_y)
-        ax.text(med, med, r"$\sin i = 1$", rotation=rotangle)
-        ax.text(med, med/2, r"$\sin i = 0.5$", rotation=half_rotangle)
+            (np.log10(top_half_bound[1]) - np.log10(bottom_half_bound[1])) / 
+             (np.log10(max_y)-np.log10(min_y)) * 
+             (np.log10(max_x) - np.log10(min_x)) / (
+                 np.log10(top_half_bound[0]) - np.log10(bottom_half_bound[0])))/np.pi*180
+        print(rotangle)
+        print(half_rotangle)
+        med = 10**min(log_med_x, log_med_y)
+        ax.text(med/1.2, med, r"$\sin i = 1$", rotation=rotangle)
+        ax.text(med/1.2, med/2, r"$\sin i = 0.5$", rotation=half_rotangle)
+        print(med)
 
-    ax.annotate(label, xy=(0.55, 0.05), xycoords="axes fraction",
-                 fontsize=14, color="white")
 
     # Show the detection thresholds.
     ax.plot([0, vsini_lim, vsini_lim], [vsini_lim, vsini_lim, 0], 'r--')
@@ -1172,6 +1212,76 @@ def compare_sini_distribution(velocities, vsinis, vsini_cutoff=7, nbins=20,
     plt.xlim((1.1, 0.0))
     plt.xlabel("sin(i)")
     plt.ylabel("N(sini)")
+
+def compare_vsini_distributions_logerr(
+        velocities, vsinis, vsini_percent=0.1, vsini_cutoff=5, nbins=100,
+        maxv=100):
+    '''Compare the observed vsini distribution to that inferred from vrot.
+
+    This will reconstruct a vsin(i) distribution using the provided velocity
+    distribution. It will perform the operations in a logarithmic space
+    assuming that errors are lognormal. The reconstruction involves convolving
+    with a fractional vsini uncertainty and then convolving with a population
+    of random inclinations.'''
+    log_velocities = np.log10(velocities)
+    log_vsinis = np.log10(vsinis)
+    logv_err = vsini_percent / np.log(10)
+    logv_bins = np.linspace(0, np.log10(maxv), nbins+1, endpoint=True)
+    vel_hist, bins = np.histogram(log_velocities, bins=logv_bins)
+    dlogv = logv_bins[2]-logv_bins[1]
+    log_binvalues = (logv_bins[1:] + logv_bins[:-1])/2
+
+    # fractional uncertainty should be constant in log space
+    dispersions = logv_err
+    # This should be len(log_velocities) x len(log_binvalues) 
+    dists = 1/np.sqrt(2*np.pi*dispersions**2) * np.exp(
+        -(log_binvalues - log_velocities[:,np.newaxis])**2/2/dispersions**2)*dlogv
+    # Convolve each velocity by sin(i)
+    fullhist = vsini_convolution_table_test(10**logv_bins, 10**log_binvalues)
+
+    # Make a cube for all the data points
+    # Size len(log_velocities) x len(log_binvalues) x len(log_binvalues)
+    convolutions = dists[:,:,np.newaxis] * (fullhist)
+
+    # Now add up all of the entries
+    # Size len(log_velocities) x len(log_binvalues)
+    data_dist = np.sum(convolutions, axis=1)
+
+    # And now all of the data points
+    # Size len(log_binvalues)
+    vsini_dist = np.sum(data_dist, axis=0)
+
+    # Pick out the upper limits.
+    upper_index = np.argmin(log_binvalues<np.log10(vsini_cutoff))
+    num_upper = np.sum(vsini_dist[:upper_index])
+    vsini_dist[:upper_index] = 0
+    # I want to display the raw numbers in text.
+    
+    # Done modeling. Now do vsinis.
+    vsini_hist, bins = np.histogram(logvsinis, bins=logv_bins)
+    num_upper_vsinis = np.sum(vsini_hist[:upper_index])
+    vsini_hist[:upper_index] = 0
+
+    fig, (ax1, ax2) = plt.subplots(2, 1, sharex=True)
+    # Plot the pdf
+    modelcolor = "#000000"
+    rotcolor = "#377eb8"
+    aspcapcolor = "#e41a1c"
+    ax1.step(logv_bins[:-1], vsini_hist, where="post", lw=3, 
+             label="ASPCAP vsini", c=aspcapcolor)
+    ax1.step(logv_bins[:-1], vsini_dist, where="post", lw=4, label="Model vsini", 
+             c=modelcolor)
+    ax1.step(logv_bins[:-1], vel_hist, where="post", lw=1, label="Vrot", 
+             c=rotcolor)
+    ax1.set_xlim(0, logv_bins[-1])
+    ax1.set_ylabel("N (vsini)")
+    ax1.legend(loc="upper right")
+    ax1.text(0.3, 0.8, "{0:d} Total".format(len(velocities)),
+             transform=ax1.transAxes, color=modelcolor)
+    ax1.text(0.3, 0.7, "{0:d} Nondetections".format(int(num_upper_vsinis)),
+             transform=ax1.transAxes, color=aspcapcolor)
+    ax1.text(0.3, 0.6, "{0:d} Nondetections".format(int(num_upper)),
+             transform=ax1.transAxes, color=modelcolor)
     
 def compare_vsini_distribution(velocities, vsinis, vsini_percent=0.1,
                                vsini_cutoff=5, nbins=70, maxv=70):
@@ -1409,6 +1519,16 @@ def temperature_diff_vsini_comparison(
     print("Calculated Chi-squared with {1:d} dof: {0:f}".format(cool_lucy_Ysq,
                                                                 cool_dof))
     print("Probability of data is {0:.4f}".format(cool_prob))
+
+def observed_vsini_from_veq_probability(vsini_obs, veq, sigv):
+    '''Probability that an observed vsini is drawn from a given veq.'''
+    normalization = 1/np.sqrt(2*np.pi*sigv**2)
+    center = vsini_obs / veq
+    norm_var = sigv / veq
+    def I(x, mean, var):
+        return np.exp(-(x-mean)**2/2/var**2)*x/np.sqrt(1-x**2)
+    integral = quad(I, 0, 1, args=(center, norm_var))[0]
+    return normalization * integral
 
 ###############################################################################
 # Comparing to Eclipsing Binaries #
