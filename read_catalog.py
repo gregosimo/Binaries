@@ -278,6 +278,17 @@ def read_TGAS_McQuillan_APOGEE_overlap_tidsync(
     tgas_table = Table.read(str(path), format="fits")
     return tgas_table
 
+def read_Mermilliod_Open_Cluster_Table_11(
+        path=paths.MERMILLIOD_CLUSTER_TABLE_11):
+    '''Read the Mermilliod RV and rotation data.'''
+    mermilliod_table = Table.read(str(path), format="fits")
+    return mermilliod_table
+
+def read_Cummings_Table_6(path=paths.CUMMINGS_HYADES_TABLE):
+    '''Read in the Cummings Hyades table.'''
+    cummings_table = Table.read(str(path), format="fits")
+    return cummings_table
+
 def read_dr14_allVisit(allvisitpath=paths.DR14_ALLVISIT_PATH, opt="kepler"):
     '''Read the DR14 allVisit file.
 
@@ -352,6 +363,9 @@ def read_dr14_allStar(allstarpath=paths.DR14_ALLSTAR_PATH, opt="kepler"):
             elif opt.lower() == "m67":
                 index_start = allstar_indices.data[131]
                 index_end = allstar_indices.data[134]
+            elif opt.lower() == "hyades":
+                index_start = allstar_indices.data[48]
+                index_end = allstar_indices.data[77]
             else:
                 raise ValueError(
                     "Don't understand optmization: {0}".format(opt))
@@ -366,6 +380,8 @@ def read_dr14_allStar(allstarpath=paths.DR14_ALLSTAR_PATH, opt="kepler"):
 
     short_allstar = allstar[desired_cols]
     short_allstar["LOGG_FIT"] = allstar["FPARAM"][:,1]
+    short_allstar["VSINI_ERR"] = (
+        np.sqrt(allstar["FPARAM_COV"][:, 7, 7]) * allstar["VSINI"] * np.log(10))
 
     au.mask_numeric_fill_values(short_allstar, -9999)
     au.mask_numeric_fill_values(short_allstar, -9999.99)
@@ -524,6 +540,14 @@ def read_California_Kepler_Spectroscopy(
     ckstable = Table.read(cks, format="ascii.cds")
     return ckstable
 
+def read_Kepler_names(names=paths.KEPLER_NAMES):
+    '''Read in a file of Kepler names.
+
+    This file cross-matches between KOI numbers and Kepler Input Catalog
+    IDs.'''
+    nametable = Table.read(names, format="ascii.csv", comment="#")
+    return nametable
+
 def read_Geller_M67(geller=paths.HEAD_DIR / "aj518354t2_mrt.txt"):
     '''Read in the M67 WOCS data.'''
     fulldata = Table.read(geller, format="ascii.cds")
@@ -543,6 +567,12 @@ def read_Kounkel_spec_binary_catalog(sbpath=paths.KOUNKEL_SB2_PATH):
 
 def read_Rebull_Pleiades_Periods(filepath=paths.REBULL_PLEIADES_PERIOD_PATH):
     '''Read in the Table of periods reported by Rebull et al.'''
+    tab = Table.read(str(filepath), format="ascii.cds")
+    return tab
+
+def read_Rebull_Pleiades_Multiperiods(
+        filepath=paths.REBULL_PLEIADES_MULTIPERIOD_PATH):
+    '''Read in the table flagging stars with light curve morphologies.'''
     tab = Table.read(str(filepath), format="ascii.cds")
     return tab
 
@@ -569,6 +599,16 @@ def read_Meibom_M34_periods(filepath=paths.MEIBOM_M34_PERIODS):
 
 def read_Lurie_periods(filepath=paths.LURIE_PERIOD_PATH):
     '''Read in the periods from Kepler Eclipsing Binaries.'''
+    tab = Table.read(str(filepath), format="ascii.cds")
+    return tab
+
+def read_Raghavan_primaries(filepath=paths.RAGHAVAN_TABLE_17):
+    '''Read in primary star info from Raghavan et al (2010).'''
+    tab = Table.read(str(filepath), format="ascii.cds")
+    return tab
+
+def read_Raghavan_companions(filepath=paths.RAGHAVAN_TABLE_18):
+    '''Read in Companion info from Raghavan et al (2010).'''
     tab = Table.read(str(filepath), format="ascii.cds")
     return tab
 
@@ -862,23 +902,49 @@ def dr14_with_ElBadry(binaritycol="Binarity"):
 def Rebull_Pleiades_Periods(
         rebull_path=paths.REBULL_PLEIADES_PERIOD_PATH,
         cross_path=paths.REBULL_CROSSID_PATH, dr14path=paths.DR14_ALLSTAR_PATH,
-        stauffer_path=paths.STAUFFER_PLEIADES_MASSES):
+        stauffer_path=paths.STAUFFER_PLEIADES_MASSES,
+        multipath=paths.REBULL_PLEIADES_MULTIPERIOD_PATH):
     '''A combined table with the Rebull periods and EPIC parameters.'''
     period_table = read_Rebull_Pleiades_Periods(rebull_path)
+    multi_table = read_Rebull_Pleiades_Multiperiods(multipath)
+    multi_combo = au.join_by_id(
+        period_table, multi_table, "EPIC", "EPIC", conflict_suffixes=(
+            "_RE", "_MU"), join_type="left")
+
     stauffer_table = read_Stauffer_Pleiades_Properties(stauffer_path)
     stauffer_combo = au.join_by_id(
-        period_table, stauffer_table, "EPIC", "EPIC", conflict_suffixes=(
-            "_RE", "_ST"))
+        multi_combo, stauffer_table, "EPIC", "EPIC", conflict_suffixes=(
+            "_RE", "_ST"), join_type="left")
+
     cross_table = read_Rebull_cross_ids(cross_path)
     period_combo = au.join_by_id(
         stauffer_combo, cross_table, "EPIC", "EPIC", conflict_suffixes=(
-        "_REST", "_CROS"))
+        "_REST", "_CROS"), join_type="left")
     dr14 = read_dr14_allStar(opt="Pleiades")
     apo_combo = catalog.join_by_2MASS_key(
         dr14, period_combo, "APOGEE_ID", "2MASS", conflict_suffixes=(
-        "_APO", "_REB"))
+        "_APO", "_REB"), join_type="inner")
 
     return apo_combo
+
+def Hyades_DR14(
+        hyades_path=paths.MERMILLIOD_CLUSTER_TABLE_11,
+        dr14path=paths.DR14_ALLSTAR_PATH):
+    '''A combined table with the Hyades spectroscopic targets and APOGEE DR14.'''
+    mermilliod = read_Mermilliod_Open_Cluster_Table_11()
+    hyades_m = mermilliod[mermilliod["Cluster"] == "Hyades   "]
+
+    cummings = read_Cummings_Table_6()
+    hyades_cm = au.join_by_ra_dec(
+        cummings, hyades_m, "_RA", "_DE", "RAJ2000", "DEJ2000",
+        join_type="outer", conflict_suffixes=("_CUMMINGS", "_MERMILLIOD"))
+
+    dr14 = read_dr14_allStar(opt="Hyades")
+    dr14_hyades = au.join_by_ra_dec(
+        hyades_cm, dr14, "_RAJ2000", "_DEJ2000", "RA", "DEC", join_type="inner")
+
+    return dr14_hyades
+    
 
 def read_Stauffer_Pleiades_Properties(
         stauffer_path=paths.STAUFFER_PLEIADES_MASSES):
@@ -1040,6 +1106,86 @@ def read_Stauffer_Pleiades(vsini_file=paths.STAUFFER_VSINI_PATH):
     separate_limit(tbl, ["vsini"], eqdelim="")
     return tbl
 
+# Stauffer et al (1984)
+
+def read_Stauffer_84(vsini_file=paths.STAUFFER_1984_VSINI):
+    '''Read the vsinis from Table 2 of Stauffer et al (1984).'''
+
+    tbl = Table.read(
+        str(vsini_file), format="ascii.fixed_width", col_starts=[0, 8],
+        col_ends=[7, 13], fill_values=[("--", "0"), ("", "0")])
+    separate_limit(tbl, limcols=["vsini"], eqdelim="")
+    return tbl
+
+# Terndrup et al (2000)
+
+def read_Terndrup_Pleiades_KPNO(vsini_file=paths.TERNDRUP_VSINI_KPNO_PATH):
+    '''Read in Table 1 of Terndrup et al (2000)'''
+    tbl = Table.read(
+        str(vsini_file), format="ascii.no_header", guess=False,
+        fill_values=[(r'\ldots', "0"), ('', '0')], delimiter="\t",
+        names=(
+            "HCG", "V-IC", "vsini", "vr", "W(Ha)", "T", "SK", "HHJ", "Other"))
+    separate_limit(tbl, limcols=["vsini"], eqdelim="")
+    return tbl
+
+def read_Terndrup_Pleiades_Keck(vsini_file=paths.TERNDRUP_VSINI_KECK_PATH):
+    '''Read in Table 2 of Terndrup et al (2000)'''
+    tbl = Table.read(
+        str(vsini_file), format="ascii.no_header", guess=False,
+        fill_values=[(r'\ldots', "0"), ('', '0')], delimiter="\t",
+        names=(
+            "HHJ", "V-IC", "vsini", "vr", "W(Ha)", "Other", "Note"))
+    separate_limit(tbl, limcols=["vsini"], eqdelim="")
+    return tbl
+
+# Queloz et al (1998)
+
+def read_Queloz_Pleiades(vsini_file=paths.QUELOZ_PLEIADES_PATH):
+    '''Read in the main Pleiades targets from Queloz (1998).'''
+    tbl = Table.read(str(vsini_file), format="fits")
+    return tbl
+
+def read_Queloz_Corona(vsini_file=paths.QUELOZ_CORONA_PATH):
+    '''Read in the observations of Pleiades corona targets'''
+    tbl = Table.read(str(vsini_file), format="fits", character_as_bytes=False)
+    return tbl
+
+# Soderblom et al (1993b)
+def read_Soderblom_1993b_vsini(vsini_file=paths.SODERBLOM_LICK_TABLE_1):
+    '''Read in HII and vsini for objects in Soderblom et al (1993).
+    
+    Because the data was not accessible in an electronic format, I manually
+    typed out just the HII and vsini for these objects.'''
+    tbl = Table.read(
+        str(vsini_file), format="ascii.fixed_width", col_starts=[0, 8],
+        col_ends=[7, 13], fill_values=[("--", "0"), ("", "0")])
+    separate_limit(tbl, limcols=["vsini"], eqdelim="")
+    return tbl
+
+def read_Soderblom_1993b_additional_vsini(
+        vsini_file=paths.SODERBLOM_ADDITIONAL_TABLE_6):
+    '''Read in HII and vsini for partial objects in Soderblom et al (1993).
+
+    Because the data was not accessible in an electronic format, I manually
+    typed out just the HII and vsini for these objects. Since I'm frustrated, I
+    stopped at the point where I knew I included a point I was missing.'''
+    tbl = Table.read(
+        str(vsini_file), format="ascii.fixed_width", col_starts=[0, 8],
+        col_ends=[7, 13], fill_values=[("--", "0"), ("", "0")])
+    separate_limit(tbl, limcols=["vsini"], eqdelim="")
+    return tbl
+
+# Jackson et al (2017)
+
+def read_Jackson_2017_vsini_Table(
+        vsini_file=paths.JACKSON_PLEIADES_PATH):
+    '''Read in the list of targets observed by Jackson et al (2017) for vsini.'''
+    tbl = Table.read(str(vsini_file), format="ascii.commented_header",
+                     delimiter=",", fill_values=[("", "0"), ("---", "0")])
+    separate_limit(tbl, limcols=["VSINI", "Rsini"], eqdelim="")
+    return tbl
+
 # Stauffer (1982)
 
 def read_Stauffer_1982_photometry(photfile=paths.STAUFFER_1982_TABLE1_PATH):
@@ -1061,6 +1207,7 @@ def read_Stauffer_1982_photometry(photfile=paths.STAUFFER_1982_TABLE1_PATH):
         staufftable[stauffcol].mask = tbl[initcol].mask
 
     return staufftable
+
 
 def read_Stauffer_Pleiades_photometry(photfile=paths.STAUFFER_PHOT_FILE):
     '''Read the photometry table for Pleiades members.
@@ -1162,7 +1309,7 @@ def split_limit_col(initcol, updelim="<", lowdelim=">", eqdelim="=",
     one with a limit representation, another with the numerical values.
     '''
     # If the column was not read as a string, then just return it.
-    oldmask = initcol.mask
+    oldmask = np.ma.getmask(initcol)
     limcol = stat.generate_limit(None, len(initcol))
     try:
         upperindices = np.where(npstr.startswith(initcol, updelim))

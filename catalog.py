@@ -66,6 +66,7 @@ def join_by_2MASS_key(tbl1, tbl2, tm1, tm2, join_type="inner",
     '''
     kic_prefix = "2MASS J"
     apogee_prefix = "2M"
+    jackson_prefix = "J"
     epic_prefix = ""
 
     try:
@@ -82,6 +83,8 @@ def join_by_2MASS_key(tbl1, tbl2, tm1, tm2, join_type="inner",
         tbl1_prefix = kic_prefix
     elif np.any(npstr.startswith(tbl1[tm1], apogee_prefix)):
         tbl1_prefix = apogee_prefix
+    elif np.any(npstr.startswith(tbl1[tm1], jackson_prefix)):
+        tbl1_prefix = jackson_prefix
     elif np.any(npstr.startswith(tbl1[tm1], epic_prefix)):
         tbl1_prefix = epic_prefix
     # Given the EPIC key, I think this is redundant. But if I decide to
@@ -93,6 +96,8 @@ def join_by_2MASS_key(tbl1, tbl2, tm1, tm2, join_type="inner",
         tbl2_prefix = kic_prefix
     elif np.any(npstr.startswith(tbl2[tm2], apogee_prefix)):
         tbl2_prefix = apogee_prefix
+    elif np.any(npstr.startswith(tbl2[tm2], jackson_prefix)):
+        tbl2_prefix = jackson_prefix
     elif np.any(npstr.startswith(tbl2[tm2], epic_prefix)):
         tbl2_prefix = epic_prefix
     else:
@@ -1402,7 +1407,9 @@ target_dict = {
     "APOGEE2_KOI_CONTROL": ("APOGEE2_TARGET3", 2),
     "APOGEE2_EB": ("APOGEE2_TARGET3", 1),
     "APOGEE_TELLURIC": ("APOGEE_TARGET2", 9),
-    "APOGEE2_TELLURIC": ("APOGEE2_TARGET2", 9)
+    "APOGEE2_TELLURIC": ("APOGEE2_TARGET2", 9),
+    "APOGEE_CALIB_CLUSTER": ("APOGEE_TARGET2", 10),
+    "APOGEE2_YOUNG_CLUSTER": ("APOGEE2_TARGET3", 5)
 }
 
 def target_indices(fulltable, targetlabel):

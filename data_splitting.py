@@ -977,6 +977,30 @@ class APOGEESplitter(KeplerSplitter):
         indexarr = [bad_indices, warn_indices, vsini_indices, good_indices]
         self._setup_indices(qual_names, indexarr, aspcap_crit)
 
+    def split_El_Badry_targets(
+            self, splitnames=(
+                "El-Badry Single", "El-Badry SB1", "El-Badry SB2", 
+                "El-Badry Hidden Triple", "El-Badry SB3", 
+                "No El-Badry Binarity"), binarity_crit="El-Badry Binarity", 
+            apid_col="APOGEE_ID"):
+        '''Split targets based on their presence in El-Badry.
+
+        This function will split targets based on whether they are single, SB1,
+        SB2, SB2 with a hidden triple, SB3, or if they haven't been analyzed in
+        the original El-Badry work.'''
+
+        elb_class = catalog.APOGEE_Binary_Classification(self.data[apid_col])
+
+        singles = elb_class == "Single"
+        sb1s = elb_class == "SB1"
+        sb2s = elb_class == "SB2"
+        hidden_triples = elb_class == "Triple"
+        sb3s = elb_class == "SB3"
+        not_obs = elb_class == "N/A"
+
+        indexarr = [singles, sb1s, sb2s, hidden_triples, sb3s, not_obs]
+        self._setup_indices(splitnames, indexarr, binarity_crit)
+
     def split_targeting(
         self, target_label, splitnames=None, target_crit=None):
         '''Select the objects which fall under the targeting flag.
@@ -1077,6 +1101,49 @@ class APOGEESplitter(KeplerSplitter):
             orig_targets, apogee2_sdss, apogee2_nosdss)
 
         self._setup_complement_index(splitnames, full_sample, cool_crit)
+
+    def split_APOGEE_evstates(
+            self, splitnames=(
+                "Cool Dwarfs", "Giants", "Hot Dwarfs", "Subgiants", 
+                "Luminous Subgiants", "No Class"), evcrit="EV Bins",
+            teff_col="TEFF", kcol="K Excess"):
+        '''Split the sample into multiple binned regions in HR space.
+        
+        The current iteration is to split between hot and cool. The cool stars
+        will be split into cool dwarfs and giants. The hot stars will be split
+        between dwarfs, subgiants, and luminous subgiants. For targets either
+        without K Excesses or Teffs, they will be categorized as not having a
+        class.'''
+        noclass = np.logical_or(self.data[teff_col].mask, self.data[kcol].mask)
+
+        cool = np.logical_and(
+            self.data[teff_col] <= 5250, np.logical_not(noclass))
+        hot = np.logical_and(
+            self.data[teff_col] > 5250, np.logical_not(noclass))
+
+        dwarf = np.logical_and(
+            self.data[kcol] >= -1.3, np.logical_not(noclass))
+        subgiant = np.logical_and(
+            np.logical_and(self.data[kcol] < -1.3, self.data[kcol] >= -2.2), 
+            np.logical_not(noclass))
+        lum_sub = np.logical_and(
+            np.logical_and(self.data[kcol] < -2.2, self.data[kcol] >= -4.75), 
+            np.logical_not(noclass))
+
+        cool_dwarfs = np.logical_and(cool, dwarf)
+        hot_dwarfs = np.logical_and(hot, dwarf)
+        hot_subgiants = np.logical_and(hot, subgiant)
+        luminous_subgiants = np.logical_and(hot, lum_sub)
+
+        giants = au.multi_logical_and(
+            np.logical_not(cool_dwarfs), np.logical_not(hot_dwarfs),
+            np.logical_not(hot_subgiants), np.logical_not(luminous_subgiants),
+            np.logical_not(noclass))
+
+        indexarr = [cool_dwarfs, giants, hot_dwarfs, hot_subgiants,
+                    luminous_subgiants, noclass]
+
+        self._setup_indices(splitnames, indexarr, evcrit)
 
     def split_modified_Berger_EVstate(
             self, teff_col="TEFF", feh_col="FE_H", alpha_col="ALPHA_FE", 
@@ -1274,7 +1341,7 @@ def initialize_clean_APOGEE(aposplit):
 def initialize_vsini(aposplit):
     '''Initialize the vsini cuts for the APOGEE sample.'''
     aposplit.split_vsini(
-        [7], ("Vsini nondet", "Vsini det", "No Vsini"),
+        [7, 10], ("Vsini nondet", "Vsini marginal", "Vsini det", "No Vsini"),
         null_value=np.ma.masked)
 
     aposplit.split_dlsb()
@@ -1294,7 +1361,7 @@ def initialize_full_APOGEE(aposplit):
     aposplit.split_targeting("APOGEE_KEPLER_HOST")
 
     aposplit.split_mag(
-        "H", [7, 11], ("H Bright", "H APOGEE", "H Faint", "No H"), mag_crit="H",
+        "H", [7, 12.3], ("H Bright", "H APOGEE", "H Faint", "No H"), mag_crit="H",
         null_value=np.ma.masked)
     aposplit.split_combined_targeting(
         ["APOGEE_KEPLER_COOLDWARF", "APOGEE2_APOKASC", "APOGEE_KEPLER_EB",
@@ -1303,6 +1370,8 @@ def initialize_full_APOGEE(aposplit):
         ("Targeted", "Not Targeted"), "Targeting")
 
     aposplit.split_McQuillan_periods(kiccol="kepid")
+
+    aposplit.split_El_Badry_targets()
 
 def general_to_hot_kic_sample(apogeesplitter):
     '''Get the subset of the hot sample that has KIC parameters.'''

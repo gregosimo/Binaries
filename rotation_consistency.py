@@ -38,6 +38,8 @@ import eclipsing_binaries as ebs
 import catalog
 import hrplots as hr
 import biovis_colors as bc
+import read_catalog as catin
+import statop as stat
 
 def apogee_vsini_distribution(period, radius, vsini, vsini_floor=5):
     '''Plot the distribution of vsinis for an APOGEE sample.
@@ -220,7 +222,7 @@ def plot_Stauffer_APOGEE_vsini_comparison():
 
     The vsini values are from select targets from the Pleiades.'''
     targets = catin.Stauffer_APOGEE_overlap()
-    good_targets = good_aspcap_fits(targets)
+    good_targets = catalog.good_aspcap_fits(targets)
     nondetections = np.logical_and(
         good_targets["vsini lim"] == stat.LOWER, good_targets["VSINI"] < 7)
     detected_targets = good_targets[~nondetections]
