@@ -1,8 +1,17 @@
+import bisect
+import urllib
+import posixpath
+import io
+import zipfile
+import shutil
+import math
+
 import numpy as np
 import matplotlib.pyplot as plt
 from scipy.interpolate import interp1d
 from astropy.table import Table, vstack
-import bisect
+import requests
+from bs4 import BeautifulSoup
 
 import path_config as paths
 import dsep
@@ -10,18 +19,35 @@ import hrplots as hr
 import biovis_colors as bc
 import models
 
-band_translation = {"H": "2MASS_H", "K": "2MASS_Ks", "Ks": "2MASS_Ks"}
+band_translation = {
+    "B": "Bessell_B", "V": "Bessell_V", "R": "Bessell_R", "J": "2MASS_J", 
+    "H": "2MASS_H", "K": "2MASS_Ks", "Ks": "2MASS_Ks", "g": "SDSS_g", "r":
+    "SDSS_r", "i": "SDSS_i"}
+
+LATEST_MIST_VERSION = 1.2
 
 class MISTIsochrone(models.StellarIsochrone):
     '''A class that encapsulates a MIST isochrone.'''
     # These are characteristic of all MIST Isochrones
+    # I can move these to the StellarIsochrone class using @property and
+    # NotImplementedError.
     age_col = "isochrone_age_yr"
     mass_col = "initial_mass"
     logteff_col = "log_Teff"
+    logL_col = "log_L"
+    # Note that the radius is inferred, not directly interpolated.
+    radius_col = "radius"
     def __init__(self, feh, fulltable, alpha=0, Yinit=0.2703, Zinit=1.42857e-2, 
-                 vvcrit=0.00, AV=0.0, MIST_version=1.1, MESA_version=7503, 
-                 bandstr="UBVRIplus"):
+                 vvcrit=0.00, AV=0.0, MIST_version=LATEST_MIST_VERSION, 
+                 MESA_version=7503, bandstr="UBVRIplus", make_rad_col=True, 
+                 bol_bands=[]):
 
+        if make_rad_col:
+            self._add_radius_column(fulltable, logg=False)
+        for bol in bol_bands:
+            colname = "BC {0}".format(bol)
+            self._add_bolometric_correction(
+                fulltable, band_translation[bol], colname)
         # This should make a dictionary which has age as a key and that
         # subtable as a value.
         fullgroups = fulltable.group_by(self.age_col)
@@ -33,6 +59,10 @@ class MISTIsochrone(models.StellarIsochrone):
         self.AV=AV
         self.MIST_version=MIST_version
         self.MESA_version=MESA_version
+
+        self.increasing_colnames = set(band_translation.values())
+        self.decreasing_colnames = set([self.mass_col, self.logteff_col,
+                                        self.logL_col])
 
     def iso_table(self, age):
         '''Return the table corresponding to the isochrone at the given age.
@@ -49,16 +79,21 @@ class MISTIsochrone(models.StellarIsochrone):
 
     @classmethod
     def isochrone_from_file(
-        cls, feh, alpha=0.0, vvcrit=0.0, bandstr="UBVRIplus", MIST_version=1.1,
-            MIST_PATH=paths.MIST_ISOCHRONES):
+        cls, feh, alpha=0.0, vvcrit=0.0, bandstr="UBVRIplus", 
+            bol_bands=["V", "K"], MIST_version=LATEST_MIST_VERSION, 
+            MIST_PATH=paths.MIST_PATH):
         '''Read in a MIST isochrone from a file.'''
-        filename = build_MIST_filename(feh)
+        iso_folder = isochrone_folder(MIST_version, vvcrit, bandstr)
+        filename = build_MIST_filename(
+            feh, vvcrit=vvcrit, alpha=alpha, bandstr=bandstr,
+            MIST_version=MIST_version)
         MIST_table = Table.read(
-            str(MIST_PATH / filename), format="ascii.fast_commented_header",
-            header_start=12, guess=False, data_start=0)
+            str(MIST_PATH / iso_folder / filename), 
+            format="ascii.fast_commented_header", header_start=12, guess=False, 
+            data_start=0)
         mist = cls(
             feh, MIST_table, alpha=alpha, vvcrit=vvcrit, 
-            MIST_version=MIST_version, bandstr=bandstr)
+            MIST_version=MIST_version, bandstr=bandstr, bol_bands=bol_bands)
         return mist
 
     def replace_with_tracks(self, age, transition_mass=1.0):
@@ -73,9 +108,17 @@ class MISTIsochrone(models.StellarIsochrone):
             met_table[self.mass_col], transition_mass)
         isochrone_highmass_indices = slice(
             isochrone_min_mass_index, len(met_table))
-        # I could hypothetically read this from the directory. But that's more
-        # effort than I'd like to spend.
+        # It may be possible to just get this from the directory.
         masses = np.linspace(0.1, 1.3, 60+1, endpoint=True)
+        # A bug in version 1.2 of the MIST isochrones is that some grid points
+        # are truncated at 1.8e8. Aaron says this should be fixed in MIST 2.0.
+        # But for now, I'm going to just try working around it.
+        if self.MIST_version == 1.2:
+            if self.feh == 0.0:
+                masses = np.delete(masses, np.where(np.isclose(masses, 0.36)), 0)
+            elif self.feh == 0.25:
+                masses = np.delete(masses, np.where(np.isclose(masses, 0.32)), 0)
+                masses = np.delete(masses, np.where(np.isclose(masses, 0.34)), 0)
         model_max_mass_index = bisect.bisect_left(masses, transition_mass)
         masslist = []
         for mass in masses[0:model_max_mass_index]:
@@ -107,17 +150,56 @@ class MISTIsochrone(models.StellarIsochrone):
             del(newiso["Z_surf"])
             masslist.append(newiso)
         newtable = vstack(masslist)
+        if self.radius_col in met_table.colnames:
+            newtable[self.radius_col] = 10**(0.5*(
+                newtable[self.logL_col] - 4*(
+                    newtable[self.logteff_col] - np.log10(5777))))
+        # Find a better way of doing this. Maybe this will require rethinking
+        # how the radius is added to the table. Perhaps calculate radius and
+        # bolometric corrections in the iso_table routine.
+        if self.bandstr == "UBVRIplus":
+            newtable["BC V"] = (
+                -2.5 * newtable[self.logL_col] + 4.75 -
+                newtable[band_translation["V"]])
+            newtable["BC K"] = (
+                -2.5 * newtable[self.logL_col] + 4.75 -
+                newtable[band_translation["K"]])
         combined_table = vstack([
             newtable, met_table[isochrone_highmass_indices]])
         self.iso_dict[age] = combined_table
 
+    def _add_radius_column(self, fulltable, radcol=radius_col, logg=False):
+        '''Add a radius column to this Isochrone's table.
+
+        The column will be defined by the keywrod argument radcol. If the logg
+        keyword is true, the radius will be defined using Mass and log(g). If
+        the keyword is false, then the radius will be defined using Lbol and
+        Teff.'''
+        if logg:
+            fulltable[radcol] = np.sqrt(
+                fulltable[self.mass_col] / 10**(fulltable[self.logg_col] - 4.44))
+        else:
+            fulltable[radcol] = 10**(0.5*(
+                fulltable[self.logL_col] - 4*(
+                    fulltable[self.logteff_col] - np.log10(5777))))
+
+    def _add_bolometric_correction(self, fulltable, band, bccol):
+        '''Add a bolometric correction column.
+        
+        This method basically calculates a model Mbol - MK value for each EEP.'''
+        mbol = -2.5 * fulltable[self.logL_col] + 4.75
+        fulltable[bccol] = mbol - fulltable[band]
 
 class MISTEvolutionaryTrack(models.StellarEvolutionaryTrack):
     '''A model of the MIST Evolutionary Tracks.'''
+    age_col = "star_age"
+    logteff_col = "log_Teff"
+    logg_col = "log_g"
+
     @classmethod
     def track_from_file(
             cls, mass, feh, vvcrit=0.0, bandstr="UBVRIplus",
-            MIST_version=1.1, MIST_PATH=paths.MIST_PATH):
+            MIST_version=LATEST_MIST_VERSION, MIST_PATH=paths.MIST_PATH):
         '''Read in the MIST tracks.'''
         mist_folder = name_track_folder(MIST_version, vvcrit, bandstr, feh)
         mist_file = name_track_file(mass)
@@ -133,6 +215,187 @@ class MISTEvolutionaryTrack(models.StellarEvolutionaryTrack):
         mist.MIST_version = MIST_version
         return mist
 
+    def restrict_phase(self, phasenums):
+        '''Restrict the evolutionary track to a given phase.
+        
+        The phases are listed in the detailed information about MIST columns
+        here: http://waps.cfa.harvard.edu/MIST/README_tables.pdf. In summary,
+        they are:
+        -1: PMS
+        0: MS
+        2: RGB 
+        3: CHeB
+        4: EAGB
+        5: TPAGB
+        6: postAGB
+        9: WR
+        For very massive stars, be careful about overlap between MS and WR.'''
+        tables = []
+        for phase in phasenums:
+            if phase not in [-1, 0, 2, 3, 4, 5, 6, 6, 9]:
+                raise ValueError("Don't recognize phase number {0:d}".format(
+                    phase))
+            tables.append(self.tracktable[
+                self.tracktable["phase"] == phase])
+        self.tracktable = vstack(tables)
+        self.tracktable.sort(self.age_col)
+
+
+def download_MIST_isochrone(
+        MIST_version, vvcrit, age_scale, age_list, feh, bandstr,
+        folder=paths.MIST_PATH):
+    '''Download the MIST isochrone for a specific [Fe/H].'''
+    if MIST_version != 1.2:
+        raise ValueError("Only MIST version {0:.1f} is available.".format(
+            MIST_version))
+    if vvcrit not in [0.0, 0.4]: 
+        raise ValueError(
+            "Only values of vvcrit are {0:.1f} and {1:1.f}".format(0.0, 0.4))
+    if age_scale not in ["linear", "log10"]:
+        raise ValueError(
+            'Only age scales are "{0}" and "{1}"'.format("linear", "log10"))
+    if bandstr not in ["UBVRIplus", "SDSSugriz"]:
+        raise ValueError(
+            "Do not support synthetic isochrones other than {0} yet".format(
+                "UBVRIplus"))
+
+    MIST_payload = {
+        "version": "{0:.1f}".format(MIST_version), 
+        "v_div_vcrit": "vvcrit{0:.1f}".format(vvcrit), 
+        "age_scale": age_scale,
+        "age_type": "list",
+        "age_list": " ".join(format(x, ".2g") for x in age_list),
+        "FeH_value": feh, 
+        "output_option": "photometry",
+        "output": bandstr,
+        "Av_value": 0.0}
+
+    ISO_URL = "http://waps.cfa.harvard.edu/MIST/iso_form.php"
+
+    r_form = requests.post(ISO_URL, data=MIST_payload)
+    # If something went wrong, throw an exception.
+    r_form.raise_for_status()
+
+    mist_soup = BeautifulSoup(r_form.text, "html.parser")
+
+    links = mist_soup.find_all("a")
+
+    if len(links) == 0:
+        raise ValueError("No links on downloaded page.")
+    elif len(links) > 1:
+        raise ValueError("Multiple links on downloaded page.")
+
+    url = list(urllib.parse.urlparse(r_form.url))
+    iso_path = links[0].get("href")
+    new_path = posixpath.join(posixpath.dirname(url[2]), iso_path)
+    url[2] = new_path
+    newurl = urllib.parse.urlunparse(url)
+
+    r_file = requests.get(newurl)
+    # If something went wrong, throw an exception.
+    r_file.raise_for_status()
+
+    file_stream = io.BytesIO(r_file.content)
+
+    input_folder = folder / isochrone_folder(MIST_version, vvcrit, bandstr)
+    input_folder.mkdir(exist_ok=True)
+    # Zipfile only takes path-like objects in versions greater than 3.6.2
+    with zipfile.ZipFile(file_stream, 'r') as mist_zip:
+        dest_path = input_folder / build_MIST_filename(
+            feh, vvcrit=vvcrit, bandstr=bandstr, MIST_version=MIST_version)
+        names = mist_zip.namelist()
+        if len(names) == 0:
+            raise ValueError("Isochrone Zip file has no contents.")
+        elif len(names) > 1:
+            raise ValueError("Too many isochrones in zip file")
+        source = mist_zip.open(names[0], 'r')
+        destination = dest_path.open("wb")
+        shutil.copyfileobj(source, destination)
+
+def download_MIST_evolutionary_track(
+        MIST_version, vvcrit, feh, bandstr, Mmin=0.1, Mmax=1.3, dM=0.02,
+        folder=paths.MIST_PATH):
+    '''Download the MIST isochrone for a specific [Fe/H].'''
+    if MIST_version != 1.2:
+        raise ValueError("Only MIST version {0:.1f} is available.".format(1.2))
+    if vvcrit not in [0.0, 0.4]: 
+        raise ValueError(
+            "Only values of vvcrit are {0:.1f} and {1:1.f}".format(0.0, 0.4))
+    if bandstr not in ["UBVRIplus", "SDSSugriz"]:
+        raise ValueError(
+            "Do not support synthetic isochrones other than {0} yet".format(
+                "UBVRIplus"))
+    MIST_payload = {
+        "version": "{0:.1f}".format(MIST_version), 
+        "v_div_vcrit": "vvcrit{0:.1f}".format(vvcrit), 
+        "mass_type": "range",
+        "mass_range_low": Mmin,
+        "mass_range_high": Mmax,
+        "mass_range_delta": dM,
+        "new_met_value": feh, 
+        "output_option": "photometry",
+        "output": bandstr,
+        "Av_value": 0.0}
+
+    ISO_URL = "http://waps.cfa.harvard.edu/MIST/track_form.php"
+
+    r_form = requests.post(ISO_URL, data=MIST_payload)
+    # If something went wrong, throw an exception.
+    r_form.raise_for_status()
+
+    mist_soup = BeautifulSoup(r_form.text, "html.parser")
+
+    links = mist_soup.find_all("a")
+
+    if len(links) == 0:
+        raise ValueError("No links on downloaded page.")
+    elif len(links) > 1:
+        raise ValueError("Multiple links on downloaded page.")
+
+    url = list(urllib.parse.urlparse(r_form.url))
+    iso_path = links[0].get("href")
+    new_path = posixpath.join(posixpath.dirname(url[2]), iso_path)
+    url[2] = new_path
+    newurl = urllib.parse.urlunparse(url)
+
+    r_file = requests.get(newurl)
+    # If something went wrong, throw an exception.
+    r_file.raise_for_status()
+
+    file_stream = io.BytesIO(r_file.content)
+
+    input_folder = folder / name_track_folder(MIST_version, vvcrit, bandstr, feh)
+    input_folder.mkdir(exist_ok=True)
+    # Zipfile only takes path-like objects in Python versions greater than 3.6.2
+    with zipfile.ZipFile(file_stream, 'r') as mist_zip:
+        mist_zip.extractall(path=str(input_folder))
+
+def download_MIST_isochrones(
+        MIST_version=1.2, vvcrit=0.0, bandstr="UBVRIplus", 
+        folder=paths.MIST_PATH):
+    '''Download all of the MIST isochrones needed for interpolating.'''
+    age_list = [1.25e8, 1e9, 4.5e9, 9e9]
+    metallicity = np.concatenate(
+        [np.arange(-4, -2, 0.5), np.arange(-2, 0.75, 0.25)])
+    for feh in metallicity:
+        print("Downloading [Fe/H]={0:.2f}".format(feh))
+        download_MIST_isochrone(
+            MIST_version, vvcrit, "linear", age_list, feh, bandstr,
+            folder=folder)
+
+def download_MIST_tracks(
+        MIST_version=1.2, vvcrit=0.0, bandstr="UBVRIplus",
+        folder=paths.MIST_PATH):
+    '''Download all of the MIST Evolutionary Tracks needed.'''
+    metallicity = np.concatenate(
+        [np.arange(-4, -2, 0.5), np.arange(-2, 0.75, 0.25)])
+    for feh in metallicity:
+        print("Downloading [Fe/H]={0:.2f}".format(feh))
+        download_MIST_evolutionary_track(
+            MIST_version, vvcrit, feh, bandstr, Mmin=0.1, Mmax=1.3, dM=0.02,
+            folder=folder)
+        
+
 def name_track_folder(MIST_version, vvcrit, bandstr, feh):
     '''Name the folder that contains evolutionary tracks.'''
     templatestr = "MIST_v{0:.1f}_vvcrit{1:.1f}_{2}_feh_{3}{4:4.2f}_tracks"
@@ -145,6 +408,15 @@ def name_track_file(mass):
     massformat = int(np.round(mass, 4) * 10000)
     templatestr = "{0:07d}M.track.eep.cmd"
     newstr = templatestr.format(massformat)
+    return newstr
+
+def isochrone_folder(MIST_version, vvcrit, bandstr):
+    '''Name of the folder that contains the isochrones.
+
+    This is a custom folder which only holds the isochrones for desired
+    ages.'''
+    templatestr = "MIST_v{0:.1f}_abridged_vvcrit{1:.1f}_{2}"
+    newstr = templatestr.format(MIST_version, vvcrit, bandstr)
     return newstr
 
 def interpolate_MIST_isochrone_cols(
@@ -193,13 +465,13 @@ def read_MIST_isochrone(feh, MIST_PATH=paths.MIST_ISOCHRONES):
     return MIST_table
 
 def build_MIST_filename(feh, alpha=0.0, vvcrit=0.0, bandstr="UBVRIplus",
-                        MISTversion=1.1):
+                        MIST_version=1.2):
     '''Create a string that specifies the mist isochrone with the given params.'''
 
     mist_template =("MIST_v{0:3.1f}_feh_{1}{2:4.2f}_afe_{3}{4:3.1f}_"
                     "vvcrit{5:3.1f}_{6}.iso.cmd")
     filestr = mist_template.format(
-        MISTversion, dsep.assign_DSEP_sign(feh), abs(feh), 
+        MIST_version, dsep.assign_DSEP_sign(feh), abs(feh), 
         dsep.assign_DSEP_sign(alpha), abs(alpha), vvcrit, bandstr)
 
     return filestr
@@ -369,3 +641,13 @@ def plot_age_differences(ages):
                         color=bc.orange, marker="o", ls="-")
     hr.absmag_teff_plot(10**oldtable["log_Teff"], oldtable["2MASS_Ks"],
                         color=bc.red, marker="o", ls="-")
+
+def plot_evtrack():
+    '''Plot subgiant evolutionary tracks.'''
+    masses = np.arange(0.86, 1.18, 0.08)
+    for m in masses:
+        track = MISTEvolutionaryTrack.track_from_file(m, 0.0)
+        ms_isochrone = track.tracktable[track.tracktable["phase"] == 2.0]
+        hr.absmag_teff_plot(
+            10**ms_isochrone["log_Teff"], ms_isochrone["2MASS_Ks"], marker=".",
+            ls="-")

@@ -155,6 +155,17 @@ def read_Kirk_geometric_correction_spline(
     correction_interpolator = interp1d(periods, corrections)
     return correction_interpolator
 
+def eclipse_probability(period, radius, mass):
+    '''Calculate the eclipse probability given periods, radii, and masses.
+
+    This function essentially uses the relationship of Prob = (R1+R2)/a to
+    calculate the eclipse probability. This function assumes that mass is given
+    in units of solar masses, period is given in units of days, and radii are
+    given in units of solar radii.'''
+
+    Prob = 0.238 * mass**(-1/3) * period**(-2/3) * radius
+    return Prob
+
 def num_missing_binaries(periods):
     '''Infer the number of noneclipsing binaries from eclipsing ones.
     

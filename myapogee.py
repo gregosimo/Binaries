@@ -164,6 +164,7 @@ def aspcap_spectrum_filename(apogee_id, apred_vers=APRED_VERS,
     filename = "aspcapStar-{0}-{1}-{2}.fits".format(apred_vers,
             results_vers, apogee_id)
     return filename
+
 ###############################################################################
 # Routines to read in APOGEE spectra #
 ###############################################################################
@@ -284,7 +285,7 @@ class APOGEEStar:
             raise ValueError("{0} has no observations.".format(
                 self.twomass_id)) 
 
-class APOGEESpectrum(Spectrum):
+class APOGEESpectrum(object):
     '''Class which holds an APOGEE spectrum.
 
     This class is optimized to hold spectra which come from APOGEE. In
