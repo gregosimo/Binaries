@@ -1946,8 +1946,8 @@ def generate_abs_mag_column_with_errors(
     if parallaxcol != "" and distcol == "":
         if fullgaia:
             dmo = parallax_to_distance_modulus_fulk(
-                (apotable[parallaxcol]+parallax_offset)*1000,
-                apotable[parallax_err_col]*1000)
+                (apotable[parallaxcol]+parallax_offset)/1000,
+                apotable[parallax_err_col]/1000)
             distance_modulus_down, distance_modulus, distance_modulus_up = dmo
         else:
             distance_modulus = parallax_to_distance_modulus(
