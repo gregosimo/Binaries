@@ -961,6 +961,20 @@ def read_Rebull_cross_ids(
     rebull_table = Table.read(rebull_path, format="ascii.cds")
     return rebull_table
 
+@au.memoized
+def McQuillan_EHK():
+    '''Return a table which has the EHK catalog appended to Mcquillan.
+    
+    This is useful for getting Johnson photometry for the McQuillan targets.'''
+    mcq = mcquillan_with_stelparms()
+    mcqcombo = catalog.add_Everett_photometry(mcq, "ra", "dec")
+    mcqcombo["B-V"] = mcqcombo["B"] - mcqcombo["V"]
+    mcqcombo["B-V_err"] = np.sqrt(mcqcombo["B_err"]**2 + mcqcombo["V_err"]**2)
+    catalog.generate_abs_mag_column_with_errors(
+        mcqcombo, "V", "V_err", "M_V", "M_V_err1", "M_V_err2",
+        lambda x: x, lambda x, y: y, parallaxcol="parallax",
+        parallax_err_col="parallax_error", parallax_offset=0.05, fullgaia=False)
+    return mcqcombo
 
 
 ###########
