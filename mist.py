@@ -59,6 +59,7 @@ class MISTIsochrone(models.StellarIsochrone):
         self.AV=AV
         self.MIST_version=MIST_version
         self.MESA_version=MESA_version
+        self.phot_bands = list(set(band_translation.values()))
 
         self.increasing_colnames = set(band_translation.values())
         self.decreasing_colnames = set([self.mass_col, self.logteff_col,

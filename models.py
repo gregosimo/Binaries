@@ -5,6 +5,8 @@ from astropy.table import Table
 import numpy as np
 import matplotlib.pyplot as plt
 
+import sed
+
 class StellarEvolutionaryTrack(object):
     '''A generic class for a stellar evolutionary track.
 
@@ -156,6 +158,22 @@ class StellarIsochrone(object):
                  marker="o")
         plt.xlabel(xcol)
         plt.ylabel(ycol)
+
+    def make_color_col(self, band1, band2):
+        '''Combine two bands to make a color column.
+        
+        Note that the function assumes, but does not enforce, that band1 is
+        bluer than band2. NOTE: This does not work for MIST yet.'''
+        if band1 not in self.phot_bands:
+            raise ValueError("{0} not a recognized band".format(band1))
+        if band2 not in self.phot_bands:
+            raise ValueError("{0} not a recognized band".format(band2))
+        if band1 == band2:
+            raise ValueError("Two bands must be distinct.")
+
+        for v in self.iso_dict.values():
+            color = "-".join([band1, band2])
+            v[color] = v[band1] - v[band2]
 
 def bin_nearby_table_values(table, bin_col, decimals):
     '''Bin the table according to values nearby in bin_col.
