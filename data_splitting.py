@@ -833,6 +833,19 @@ class APOGEESplitter(KeplerSplitter):
             col, splitvalues, splitnames, met_crit, null_value=null_value, 
             invert_inequality=invert_inequality)
 
+    def split_alpha(self, splitvalues, splitnames, col="ALPHA_FE",
+                    alpha_crit="Alpha", null_value=None,
+                    invert_inequality=False):
+        '''Split the data according to alpha abundance.
+
+        Split the sample based on the boundaries given in splitvalues. The
+        names for the categories should be given in splitnames. The choice of
+        metallicity can be specified with the col keyword.
+
+        For more information on invert_inequality, see split_by_col.'''
+        self.split_by_col(
+            col, splitvalues, splitnames, alpha_crit, null_value=null_value, 
+            invert_inequality=invert_inequality)
 
     def split_spectroscopic_rapid_rotators(
         self, splitperiods, splitnames, radius_col="radius", 
