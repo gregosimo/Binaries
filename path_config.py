@@ -69,7 +69,7 @@ KOI_PATH = HEAD_DIR / "koi.csv"
 TGAS_MCQUILLAN_APOGEE_TIDSYNC_PATH = (
     HEAD_DIR / "TGAS_McQuillan_APOGEE_tidsync.fits")
 TGAS_KEPLER_OVERLAP = HEAD_DIR / "TGAS_Kepler.csv"
-BERGER_DR2_KEPLER = HEAD_DIR / "DR2PapTable1.txt"
+BERGER_DR2_KEPLER = HEAD_DIR / "apjaada83t1_mrt.txt"
 BERGER_MISSING_GAIA = HEAD_DIR / "Missing_Berger.vot"
 FLICKER_LOGG = HEAD_DIR / "flicker_loggs.txt"
 BRUNTT_PATH = HEAD_DIR / "Bruntt_vsini.vot"

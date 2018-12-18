@@ -4,6 +4,7 @@ from astropy.table import Table, vstack, Column
 from astropy.coordinates import SkyCoord, FK5
 import astropy.units as u
 from astropy.io import fits
+from astroquery.gaia import Gaia
 from scipy.io import readsav
 import numpy as np
 import numpy.core.defchararray as npstr
@@ -237,16 +238,21 @@ def read_TGAS_Kepler(tgas_kep_path=paths.TGAS_KEPLER_OVERLAP):
 
     return tgas
 
-def read_Gaia_DR2_Kepler(gaia_dr2_kep_path=paths.GAIA_BERGER_OVERLAP):
+def read_Gaia_DR2_Kepler(
+        gaia_dr2_kep_path=paths.GAIA_BERGER_OVERLAP, rewrite=False):
     '''Read the Gaia DR2 table of stars overlapping with Kepler.
 
     If this file doesn't exist, use the astroquery package to get it from the
     Vizier xMatch service.'''
+    if rewrite:
+        dr2 = read_Berger_DR2_Kepler()
+
+        gaia = Gaia()
     dr2 = Table.read(gaia_dr2_kep_path, format="fits")
     au.set_numeric_fill_values(dr2, -9999)
     return dr2
 
-def read_Berger_DR2_Kepler(berger_dr2_kep=paths.BERGER_DR2_KEPLER):
+def read_Berger_DR2_Kepler_old(berger_dr2_kep=paths.BERGER_DR2_KEPLER):
     '''Read in the Gaia parameters in Berger et al (2018).'''
     desired_cols = [
         "KIC", "source_id", "dis", "disep", "disem", "rad", "radep", "radem", 
@@ -257,6 +263,15 @@ def read_Berger_DR2_Kepler(berger_dr2_kep=paths.BERGER_DR2_KEPLER):
     au.set_numeric_fill_values(berger, -9999)
     berger["class"] = np.asarray(npstr.replace(berger["class"], "\\\\", ""),
                                  dtype=np.int)
+    return berger
+
+def read_Berger_DR2_Kepler(berger_dr2_kep=paths.BERGER_DR2_KEPLER):
+    '''Read in the Gaia parameters in Berger et al (2018).'''
+    desired_cols = [
+        "KIC", "Gaia", "D", "E_D", "e_D", "R*", "E_R*", "e_R*", 
+        "AV", "Evol", "Bin"]
+    berger = Table.read(berger_dr2_kep, format="ascii.cds",
+                        include_names=desired_cols)
     return berger
 
 def APOGEE_TGAS(tgas_kep_path=paths.TGAS_KEPLER_OVERLAP,
