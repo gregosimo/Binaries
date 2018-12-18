@@ -23,8 +23,8 @@ def Noyes_convective_overturn_timescale(bv):
 
     return 10**logt
 
-def McQuillan_Activity_Rossby_Relation():
-    '''Plot the McQuillan activity/Rossby number relationship.'''
+def Activity_Populations():
+    '''Classify McQuillan targets by activity.'''
     # I haven't correctly separated the subgiants. So for now I'm going to only
     # use the sample with 1.5 > B-V > 1.
     mcq = catin.McQuillan_EHK()
@@ -46,11 +46,30 @@ def McQuillan_Activity_Rossby_Relation():
     active_sample = mcq_cool[mcq_cool["K Excess"] > -0.3]
 
     cot = Noyes_convective_overturn_timescale(active_sample["B-V"])
-    rossby_num = active_sample["Prot"] / cot
+    active_sample["Rossby"] = active_sample["Prot"] / cot
+
+    return active_sample
+
+def McQuillan_Activity_Rossby_Relation():
+    '''Plot the McQuillan activity/Rossby number relationship.'''
+    samp = Activity_Populations()
+
+    stand_pop = np.log10(samp["Rper"]) < np.log10(1.8e4) + (
+        (np.log10(1.8e4) - np.log10(3.8e3)) / 
+        (np.log10(0.64) - np.log10(0.95)) * (
+            np.log10(samp["Rossby"]) - np.log10(0.64)))
+    new_pop = np.log10(samp["Rper"]) > np.log10(1.8e4) + (
+        (np.log10(1.8e4) - np.log10(3.8e3)) / 
+        (np.log10(0.64) - np.log10(0.95)) * (
+            np.log10(samp["Rossby"]) - np.log10(0.64)))
 
     f, ax = plt.subplots(1, 1)
-    ax.errorbar(rossby_num, active_sample["Rper"], marker=".", color=bc.black,
-                ls="")
+    ax.errorbar(
+        samp["Rossby"][stand_pop], samp["Rper"][stand_pop], marker=".",
+        color='r', ls="")
+    ax.errorbar(
+        samp["Rossby"][new_pop], samp["Rper"][new_pop], marker=".",
+        color='b', ls="")
 #   hr.absmag_teff_plot(mcq_cool["teff"], mcq_cool["M_K"],
 #                       marker=".", color=bc.black, ls="")
     ax.set_xlabel("Rossby Number")
@@ -58,5 +77,19 @@ def McQuillan_Activity_Rossby_Relation():
     ax.set_xscale("log")
     ax.set_yscale("log")
 
+def McQuillan_Activity_Rossby_HR_Location():
+    '''Plot the targets used for McQuillan activity/Rossby number relationship.'''
+    fullmcq = catin.McQuillan_EHK()
+    clean_mcq = fullmcq[np.logical_not(au.multi_logical_or(
+        fullmcq["teff"].mask, fullmcq["M_K"].mask))]
+    samp = Activity_Populations()
 
+    f, ax = plt.subplots(1, 1)
+    hr.absmag_teff_plot(
+        fullmcq["teff"], fullmcq["M_K"], marker=".", color=bc.black, ls="",
+        axis=ax)
+    hr.absmag_teff_plot(
+        samp["teff"], samp["M_K"], marker=".", color='r', ls="", axis=ax)
 
+    ax.set_xlabel("TEFF")
+    ax.set_ylabel("M_K")
