@@ -1370,12 +1370,12 @@ def bad_ASPCAP_indices(aspcapflags, warn=False):
     '''
     badcolumns = [
         "TEFF_BAD", "LOGG_BAD", "VMICRO_BAD", "M_H_BAD", "ALPHA_M_BAD", 
-        "CHI2_BAD", "SN_BAD", "COLORTE_BAD", "ATMOS_HOLE_BAD", "ROTATION_BAD", 
+        "CHI2_BAD", "SN_BAD", "COLORTE_BAD", "ATMOS_HOLE_BAD",
         "C_M_BAD", "N_M_BAD", "NO_ASPCAP_RESULT"]
     warncolumns = [
         "TEFF_WARN", "LOGG_WARN", "VMICRO_WARN", "M_H_WARN", "ALPHA_M_WARN", 
-        "CHI2_WARN", "SN_WARN", "COLORTE_WARN", "ATMOS_HOLE_WARN", 
-        "ROTATION_WARN", "C_M_WARN", "N_M_WARN"]
+        "CHI2_WARN", "SN_WARN", "COLORTE_WARN", "ATMOS_HOLE_WARN",
+        "C_M_WARN", "N_M_WARN"]
     bad_indices = au.multi_logical_or(*[search_in_ASPCAPFLAGS(
         aspcapflags, badcol) for badcol in badcolumns])
     if warn:
