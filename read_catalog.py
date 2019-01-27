@@ -239,17 +239,78 @@ def read_TGAS_Kepler(tgas_kep_path=paths.TGAS_KEPLER_OVERLAP):
     return tgas
 
 def read_Gaia_DR2_Kepler(
-        gaia_dr2_kep_path=paths.GAIA_BERGER_OVERLAP, rewrite=False):
+        gaia_dr2_kep_path=paths.GAIA_BERGER_OVERLAP, rewrite=False,
+        username="gsimonia"):
     '''Read the Gaia DR2 table of stars overlapping with Kepler.
 
     If this file doesn't exist, use the astroquery package to get it from the
     Vizier xMatch service.'''
     if rewrite:
-        dr2 = read_Berger_DR2_Kepler()
+        # Instead I want to upload this file to the Gaia archive.
+        berger = read_Berger_DR2_Kepler()
 
-        gaia = Gaia()
-    dr2 = Table.read(gaia_dr2_kep_path, format="fits")
-    au.set_numeric_fill_values(dr2, -9999)
+        berger.rename_column("R*", "rad")
+        berger.rename_column("e_R*", "rad_down")
+        berger.rename_column("E_R*", "rad_up")
+        berger.rename_column("e_D", "D_down")
+        berger.rename_column("E_D", "D_up")
+
+        bergerpath = paths.HEAD_DIR / "Berger_temp.vo"
+        berger.write(str(bergerpath), format="votable", overwrite=True)
+        print("Please upload file at {0} to Gaia Archive.".format(bergerpath))
+        tablename = input("Enter the table name on the Gaia Archive: ")
+        # Then perform a join operation
+        joinstr = """
+SELECT g.source_id, g.ra, g.ra_error, g.dec, g.dec_error, g.parallax, 
+    g.parallax_error, g.pmra, g.pmra_error, g.pmdec, g.pmdec_error,
+    g.ra_dec_corr, g.ra_parallax_corr, g.ra_pmra_corr,
+    g.ra_pmdec_corr, g.dec_parallax_corr, g.dec_pmra_corr,
+    g.dec_pmdec_corr, g.parallax_pmra_corr, g.parallax_pmdec_corr,
+    g.pmra_pmdec_corr, g.astrometric_n_obs_al,
+    g.astrometric_n_obs_ac, g.astrometric_n_good_obs_al,
+    g.astrometric_n_bad_obs_al, g.astrometric_gof_al,
+    g.astrometric_chi2_al, g.astrometric_excess_noise,
+    g.astrometric_excess_noise_sig, g.astrometric_params_solved,
+    g.astrometric_primary_flag, g.astrometric_weight_al,
+    g.astrometric_matched_observations, g.visibility_periods_used,
+    g.matched_observations, g.duplicated_source, b.KIC, b.D,
+    b.D_down, b.D_up, b.rad, b.rad_down, b.rad_up, b.AV, 
+    g.phot_g_n_obs, g.phot_g_mean_flux, g.phot_g_mean_flux_error,
+    g.phot_g_mean_mag, g.phot_bp_n_obs, g.phot_bp_mean_flux,
+    g.phot_bp_mean_flux_error, g.phot_bp_mean_mag, g.phot_rp_n_obs,
+    g.phot_rp_mean_flux, g.phot_rp_mean_flux_error,
+    g.phot_rp_mean_mag, g.phot_bp_rp_excess_factor,
+    g.phot_proc_mode, g.radial_velocity, g.radial_velocity_error,
+    g.rv_nb_transits, g.phot_variable_flag, g.a_g_val,
+    g.a_g_percentile_lower, g.a_g_percentile_upper,
+    g.e_bp_min_rp_val, g.e_bp_min_rp_percentile_lower,
+    g.e_bp_min_rp_percentile_upper, 
+    g.lum_val, g.lum_percentile_lower, g.lum_percentile_upper
+FROM gaiadr2.gaia_source as g
+RIGHT OUTER JOIN user_{0}.{1} AS b
+ON g.source_id = b.GAIA
+ORDER BY KIC DESC;
+            """.format(username, tablename)
+        print("Please run the following command")
+        print(joinstr)
+        gaia_newtablename  = input(
+              "Please enter the name of the saved table: ")
+        # Then *automatically* download it from my local cache.
+        Gaia.login_gui()
+
+        downloadstr = "SELECT * FROM user_{0}.{1}".format(
+            username, gaia_newtablename)
+
+        print("Running query '{0}'...".format(downloadstr))
+        job = Gaia.launch_job_async(
+            downloadstr, output_file=str(gaia_dr2_kep_path), output_format="votable",
+            dump_to_file=True)
+        print("Query finished. Downloading...")
+
+        dr2 = job.get_results()
+        print("Download finished")
+    else:
+        dr2 = Table.read(gaia_dr2_kep_path, format="votable")
     return dr2
 
 def read_Berger_DR2_Kepler_old(berger_dr2_kep=paths.BERGER_DR2_KEPLER):
@@ -363,7 +424,7 @@ def read_dr14_allStar(allstarpath=paths.DR14_ALLSTAR_PATH, opt="kepler"):
         "APOGEE2_TARGET2", "APOGEE2_TARGET3", "SNREV", "MIN_H", "MAX_H",
         "MIN_JK", "MAX_JK", "FPARAM", "FPARAM_COV", "TEFF", "TEFF_ERR", "LOGG", "LOGG_ERR",
         "VMICRO", "VMACRO", "VSINI", "M_H", "M_H_ERR", "ALPHA_M",
-        "ALPHA_M_ERR", "ASPCAPFLAG", "ASPCAPFLAGS", "ASPCAP_CHI2",
+        "ALPHA_M_ERR", "ASPCAPFLAG", "ASPCAPFLAGS", "ASPCAP_CHI2", "FELEM",
         "STABLERV_RCHI2", "FE_H", "PMRA", "PMDEC",
         "PM_SRC", "ALL_VISITS", "VISITS"]
     if opt:
@@ -614,6 +675,11 @@ def read_Meibom_M34_periods(filepath=paths.MEIBOM_M34_PERIODS):
 
 def read_Lurie_periods(filepath=paths.LURIE_PERIOD_PATH):
     '''Read in the periods from Kepler Eclipsing Binaries.'''
+    tab = Table.read(str(filepath), format="ascii.cds")
+    return tab
+
+def read_Raghavan_sample(filepath=paths.RAGHAVAN_TABLE_13):
+    '''Read in the survey information about the full Raghavan sample.'''
     tab = Table.read(str(filepath), format="ascii.cds")
     return tab
 
