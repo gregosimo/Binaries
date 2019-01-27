@@ -126,7 +126,7 @@ class StellarIsochrone(object):
 
     def isochrone_derivative(
             self, age, xvals, xcol, ycol, interp_kind="linear",
-            mask_outside_bounds=True, ef=10**-2):
+            mask_outside_bounds=True, increase=True, ef=10**-2):
         '''Return the derivatives of ycol with respect to xcol at xvals.
         
         Calculate the derivative of ycol with respect to xcol at the values of
@@ -143,10 +143,10 @@ class StellarIsochrone(object):
 
         posy = self.interpolate_isochrone_cols(
         age, xvals+posh, xcol, ycol, interp_kind=interp_kind,
-            mask_outside_bounds=mask_outside_bounds)
+            mask_outside_bounds=mask_outside_bounds, increase=increase)
         negy = self.interpolate_isochrone_cols(
         age, xvals-negh, xcol, ycol, interp_kind=interp_kind,
-            mask_outside_bounds=mask_outside_bounds)
+            mask_outside_bounds=mask_outside_bounds, increase=increase)
 
         deriv = (posy-negy)/(posh+negh)
         return deriv
