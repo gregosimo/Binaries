@@ -1354,7 +1354,9 @@ def initialize_clean_APOGEE(aposplit):
 def initialize_vsini(aposplit):
     '''Initialize the vsini cuts for the APOGEE sample.'''
     aposplit.split_vsini(
-        [7, 10], ("Vsini nondet", "Vsini marginal", "Vsini det", "No Vsini"),
+        [7, 10, 10**(1.982-0.301/8)], (
+            "Vsini nondet", "Vsini marginal", "Vsini det", "Vsini lower", 
+            "No Vsini"),
         null_value=np.ma.masked)
 
     aposplit.split_dlsb()
