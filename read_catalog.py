@@ -311,6 +311,15 @@ ORDER BY KIC DESC;
         print("Download finished")
     else:
         dr2 = Table.read(gaia_dr2_kep_path, format="votable")
+        # Rename these to be uppercase.
+        dr2.rename_column("kic", "KIC")
+        dr2.rename_column("d", "D")
+        dr2.rename_column("d_down", "D_down")
+        dr2.rename_column("d_up", "D_up")
+        dr2.rename_column("av", "AV")
+        dr2.replace_column(
+            "phot_variable_flag", np.asarray(
+                dr2["phot_variable_flag"], np.unicode_))
     return dr2
 
 def read_Berger_DR2_Kepler_old(berger_dr2_kep=paths.BERGER_DR2_KEPLER):
@@ -954,11 +963,11 @@ def stelparms_with_Gaia(
     kiccat = read_KIC_DR25_catalog(parmpath)
     gaiacat = read_Gaia_DR2_Kepler()
 
-    joinedcat = au.join_by_id(kiccat, gaiacat, "kepid", "kic", join_type="left")
+    joinedcat = au.join_by_id(kiccat, gaiacat, "kepid", "KIC", join_type="left")
     catalog.generate_abs_mag_column_with_errors(
         joinedcat, "kmag", "kmag_err", "M_K", "M_K_err1", "M_K_err2",
         samp.AV_to_AK, samp.AV_err_to_AK_err, parallaxcol="parallax",
-        parallax_err_col="parallax_error", parallax_offset=0.05)
+        parallax_err_col="parallax_error", parallax_offset=0.05, fullgaia=False)
     return joinedcat
 
 def dr14_with_ElBadry(binaritycol="Binarity"):
