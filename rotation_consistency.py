@@ -30,7 +30,7 @@ import matplotlib.pyplot as plt
 from matplotlib.ticker import AutoMinorLocator
 from scipy.stats import uniform
 from scipy.special import erf
-from scipy.integrate import quad
+from scipy.integrate import quad, dblquad
 from scipy.special import gammaincc
 import astropy_util as au
 
@@ -691,6 +691,7 @@ def plot_vsini_velocity(
     dlogverr = logperiod_and_logradius_to_logvelocity_err(dlogrerr, dlogperr)
 
     highv_indices = np.logical_or(vsini > vsini_lim, infvel > vsini_lim)
+    print(np.count_nonzero(highv_indices))
     vsini = vsini[highv_indices]
     infvel = infvel[highv_indices]
     dlogverr = dlogverr[highv_indices]
@@ -755,8 +756,6 @@ def plot_vsini_velocity(
              (np.log10(max_y)-np.log10(min_y)) * 
              (np.log10(max_x) - np.log10(min_x)) / (
                  np.log10(top_half_bound[0]) - np.log10(bottom_half_bound[0])))/np.pi*180
-        print(rotangle)
-        print(half_rotangle)
         med = 10**min(log_med_x, log_med_y)
         ax.text(med/1.2, med, r"$\sin i = 1$", rotation=rotangle)
         ax.text(med/1.2, med/2, r"$\sin i = 0.5$", rotation=half_rotangle)
@@ -1216,8 +1215,8 @@ def compare_sini_distribution(velocities, vsinis, vsini_cutoff=7, nbins=20,
     plt.ylabel("N(sini)")
 
 def compare_vsini_distributions_logerr(
-        velocities, vsinis, vsini_percent=0.1, vsini_cutoff=5, nbins=100,
-        maxv=100):
+        log_velocities, log_vsinis, vsini_percent=0.1, vsini_cutoff=5, 
+        nbins=100, maxv=100):
     '''Compare the observed vsini distribution to that inferred from vrot.
 
     This will reconstruct a vsin(i) distribution using the provided velocity
@@ -1225,9 +1224,8 @@ def compare_vsini_distributions_logerr(
     assuming that errors are lognormal. The reconstruction involves convolving
     with a fractional vsini uncertainty and then convolving with a population
     of random inclinations.'''
-    log_velocities = np.log10(velocities)
-    log_vsinis = np.log10(vsinis)
     logv_err = vsini_percent / np.log(10)
+    logvsini_cutoff = np.log10(vsini_cutoff)
     logv_bins = np.linspace(0, np.log10(maxv), nbins+1, endpoint=True)
     vel_hist, bins = np.histogram(log_velocities, bins=logv_bins)
     dlogv = logv_bins[2]-logv_bins[1]
@@ -1326,7 +1324,7 @@ def compare_vsini_distribution(velocities, vsinis, vsini_percent=0.1,
     num_upper_vsinis = np.sum(vsini_hist[:upper_index])
     vsini_hist[:upper_index] = 0
 
-    fig, (ax1, ax2) = plt.subplots(2, 1, sharex=True)
+    fig, (ax1, ax2) = plt.subplots(2, 1, sharex=True, figsize=(12, 12))
     # Plot the pdf
     modelcolor = "#000000"
     rotcolor = "#377eb8"
@@ -1384,6 +1382,44 @@ def compare_vsini_distribution(velocities, vsinis, vsini_percent=0.1,
     prob = gammaincc(0.5*dof, 0.5*lucy_Ysq)
     print("Calculated Chi-squared with {1:d} dof: {0:f}".format(lucy_Ysq, dof))
     print("Probability of data is {0:.4f}".format(prob))
+
+def test_accurate_vsini(
+        logvelocities, logv_err, vsini_percent=10, vsini_cutoff=5, nbins=70, 
+        maxv=70):
+    '''This is an attempt to do things properly.
+
+    In this routine, the integrals will be calculated exactly, and we'll see if
+    that ends up being too slow. This function will basically calculate the
+    predicted vsini distribution at each point in the histogram.'''
+    vel_bins, dv = np.linspace(
+        0, np.log10(maxv), nbins+1, endpoint=True, retstep=True)
+    def logvsini(v):
+        return np.sum(gaussfunc(v, logvelocities, logv_err))
+    vals = np.zeros(len(vel_bins))
+    for i, v in enumerate(vel_bins):
+        vals[i] = vsini_dist(v, logvsini, vsini_percent=vsini_percent)
+
+    return vel_bins, vals
+
+def vsini_dist(logvsini, logvdist, vsini_percent=10):
+    '''Calculate the probability of vsini given a velocity distribution.
+
+    This function requires a function logvdist(v) which represents the 
+    distribution of v. It convolves that distribution with sin i and also 
+    assumes an observational uncertainty given in vsini_percent..
+    '''
+    def f(y, v):
+        return (
+            logvdist(v) * 10**(2 * (y - v)) / np.sqrt(1 - 10**(2*(y-v))) * 
+            gaussfunc(logvsini, y, vsini_percent/np.log(10)/100))
+    ans, err = dblquad(f, -np.inf, np.inf, lambda x: -np.inf, lambda x: x)
+    return ans
+
+def gaussfunc(x, mu, sig):
+    '''Evaluate a Gaussian function at a given point.'''
+    sigsq = sig**2
+    return np.exp(-(x-mu)**2/2/sigsq) / np.sqrt(2*np.pi*sigsq)
+
 
 def temperature_diff_vsini_comparison(
     hot_velocities, hot_vsinis, cool_velocities, cool_vsinis,

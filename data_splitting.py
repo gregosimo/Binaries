@@ -1254,7 +1254,8 @@ class APOKASCSplitter(APOGEESplitter):
         values in the dwarfcol column. The dwarfcol column should have numbers
         for objects that have been run through the dwarf pipeline, and null for
         objects that don't.'''
-        invalid = catalog.invalid_indices(self.data, dwarfcol)
+        invalid = catalog.invalid_indices(
+            self.data, dwarfcol, maskvalue=-9999.0)
         self._setup_complement_index(splitnames, invalid, apodwarf_crit)
 
     def split_Jen_targets(
