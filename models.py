@@ -96,7 +96,15 @@ class StellarIsochrone(object):
         the interpolation.
         
         The kind of interpolation to be done should be given as interp_kind, which
-        by default is linear because of the high density of points.'''
+        by default is linear because of the high density of points.
+        
+        If the mask_outside_bounds flag keyword is enabled, any of the invals
+        which fall outside of the range desribed by the isochrone will be
+        masked. Otherwise, this function will return an error.
+        
+        This function assumes that invals in the isochrone should be
+        increasing. If using decreasing values, change the increasing keyword to 
+        False.'''
         met_table = self.iso_table(age)
         if increase:
             restricted_table = interpolation_table_increasing_stretch(
