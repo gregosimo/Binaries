@@ -1361,6 +1361,22 @@ def search_in_ASPCAPFLAGS(aspcapflags, flagval):
     indexarr = npstr.find(strcol, flagval) >= 0
     return indexarr
 
+def chain_flags(aspcapflags, **kwargs):
+    '''Select elements of aspcapflags with flags values in kwargs.
+
+    Returns an index array to aspcapflags with flags specified in kwargs. The
+    keyword should be the name of an APOGEE flag (e.g. TEFF_BAD, LOGG_BAD) and
+    the value should be either True or False. If True, all True objects in the
+    returned index array will have that flag enabled. If False, all True 
+    objects in the returned index array will have that flag disabled.'''
+    indexarr = np.ones_like(aspcapflags, dtype=bool)
+    for key, val in kwargs.items():
+        keyflags = search_in_ASPCAPFLAGS(aspcapflags, key)
+        if not val:
+            keyflags = np.logical_not(keyflags)
+        indexarr = np.logical_and(indexarr, keyflags)
+    return indexarr
+
 def bad_ASPCAP_indices(aspcapflags, warn=False):
     '''Picks bad ASPCAP flags from flag array.
 
@@ -1370,12 +1386,11 @@ def bad_ASPCAP_indices(aspcapflags, warn=False):
     '''
     badcolumns = [
         "TEFF_BAD", "LOGG_BAD", "VMICRO_BAD", "M_H_BAD", "ALPHA_M_BAD", 
-        "CHI2_BAD", "SN_BAD", "COLORTE_BAD", "ATMOS_HOLE_BAD",
-        "C_M_BAD", "N_M_BAD", "NO_ASPCAP_RESULT"]
+        "CHI2_BAD", "SN_BAD", "COLORTE_BAD", "C_M_BAD", "N_M_BAD", 
+        "NO_ASPCAP_RESULT"]
     warncolumns = [
         "TEFF_WARN", "LOGG_WARN", "VMICRO_WARN", "M_H_WARN", "ALPHA_M_WARN", 
-        "CHI2_WARN", "SN_WARN", "COLORTE_WARN", "ATMOS_HOLE_WARN",
-        "C_M_WARN", "N_M_WARN"]
+        "CHI2_WARN", "SN_WARN", "COLORTE_WARN", "C_M_WARN", "N_M_WARN"]
     bad_indices = au.multi_logical_or(*[search_in_ASPCAPFLAGS(
         aspcapflags, badcol) for badcol in badcolumns])
     if warn:
@@ -1912,7 +1927,7 @@ def distance_err_to_distance_modulus_err(dist_err, dist):
     return 5 * dist_err / dist / np.log(10)
 
 def generate_abs_mag_column(
-        apotable, appcol, abscol, v_to_ext, avcol="Av", parallaxcol="", 
+        apotable, appcol, abscol, v_to_ext, avcol="AV", parallaxcol="", 
         distcol=""):
     '''Create a extinction-corrected column of absolute magnitudes.
 
@@ -1943,7 +1958,7 @@ def generate_abs_mag_column_with_errors(
         apotable, appcol, apperrcol, abscol, absupcol, absdowncol, v_to_ext,
         v_err_to_ext_err, parallaxcol="", parallax_err_col="",
         parallax_offset=0.05, distcol="", dist_up_col="", dist_down_col="",  
-        avcol="av", avupcol="av_err1", avdowncol="av_err2", fullgaia=True):
+        avcol="AV", avupcol="", avdowncol="", fullgaia=True):
     '''Create absolute magnitude columns with Gaia info and photometry.
 
     This calculates the given K-band absolute magnitude using the usual
@@ -1988,8 +2003,14 @@ def generate_abs_mag_column_with_errors(
             apotable[dist_down_col], apotable[distcol])
 
     new_ext = v_to_ext(apotable[avcol])
-    new_ext_up = v_err_to_ext_err(apotable[avcol], apotable[avupcol])
-    new_ext_down = v_err_to_ext_err(apotable[avcol], apotable[avdowncol])
+    if avupcol == "" and avdowncol == "":
+        new_ext_up = new_ext
+        new_ext_down = new_ext
+    elif avupcol != "" and avdowncol != "":
+        new_ext_up = v_err_to_ext_err(apotable[avcol], apotable[avupcol])
+        new_ext_down = v_err_to_ext_err(apotable[avcol], apotable[avdowncol])
+    else: 
+        ValueError("Only received one type of uncertainty for extinction.")
 
     apotable[abscol] = sed.calc_abs_magnitude(
         apotable[appcol], distance_modulus, new_ext)
