@@ -89,7 +89,7 @@ def aspcap_dwarf_teff_uncertainties(uncor_teff, sn, uncor_mh):
     Calculate the error in Teff using the dwarf relation reported in Holtzman
     et al (2018).'''
     Ateff = 4.583
-    Bteff = 9.000290
+    Bteff = 0.000290
     Cteff = -0.00130
     Dteff = -0.243
 
