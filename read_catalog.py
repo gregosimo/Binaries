@@ -916,8 +916,9 @@ def APOKASC_with_KIC_stelparms(
     apokic = au.join_by_id(apo, kiccat, "KEPLER_INT", "kepid")
     return apokic
 
-def stelparms_with_original_KIC(parmpath=paths.KIC_CATALOG,
-                                kicpath=paths.ORIG_KIC_ABRIDGED):
+def stelparms_with_original_KIC(
+        parmpath=paths.KIC_CATALOG, kicpath=paths.ORIG_KIC_ABRIDGED,
+        huberpath=paths.HUBER_CATALOG):
     '''Read in the Huber and original KIC stellar parameters.'''
     kiccat = stelparms_with_Gaia(parmpath)
     origcat = read_abridged_original_KIC(kicpath)
@@ -927,7 +928,13 @@ def stelparms_with_original_KIC(parmpath=paths.KIC_CATALOG,
             "kepid", "KIC Teff", "KIC logg"))
     newcat = au.join_by_id(kiccat, orig_subtable, "kepid", "kepid",
                            join_type="left")
-    return newcat
+    hubercat = read_Huber_KIC_catalog()[
+        ["KIC", "Teff", "E_Teff", "e_Teff", "r_Teff", "log(g)", "e_log(g)",
+         "E_log(g)", "r_log(g)"]]
+    combocat = au.join_by_id(
+        newcat, hubercat, "kepid", "KIC", join_type="left")
+    del(combocat["KIC"])
+    return combocat
 
 def stelparms_triple_KIC(
     origpath=paths.ORIG_KIC_ABRIDGED, pinpath=paths.PINSONNEAULT_CORRECTIONS,
