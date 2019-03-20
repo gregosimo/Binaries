@@ -691,16 +691,36 @@ class KeplerSplitter(DataSplitter):
 
     def split_provenance(
             self, prov_col, prov_list, splitnames=None, 
-            prov_crit="Provenances"):
+            prov_crit="Provenances", null_value=None):
         '''Split based on provenance for a given column.
         
         The column which holds the provenances should be given in prov_col. A
-        list of provenances should be given in prov_list.'''
+        list of provenances should be given in prov_list. The splitnames
+        function should have a length that is at least one greater than
+        prov_list. If null_value is not given, the last value should be a
+        catch-all for all other provenances that aren't of interest. If
+        null_value is given, then there is an additional name for objects which
+        weren't in the Huber catalog.
+        '''
         if splitnames is None:
-            splitnames = prov_list
+            splitnames = prov_list + ["Others"]
         indexarr = []
         for prov in prov_list:
             indexarr.append(self.data[prov_col] == prov)
+        # If we have a null_value, gather up all of those.
+        if null_value is not None:
+            indexarr.append(au.check_null(self.data[prov_col], null_value))
+            # If null_value can be compared, then remove it from the other
+            # indices.
+            if null_value == null_value:
+                newindexarr = []
+                for ind in indexarr[:-1]:
+                    newindexarr.append(
+                        np.logical_and(ind, np.logical_not(indexarr[-1])))
+                newindexarr.append(indexarr[-1])
+                indexarr = newindexarr
+        otherflags = np.logical_not(au.multi_logical_or(*indexarr))
+        indexarr.insert(-1, otherflags)
         self._setup_indices(splitnames, indexarr, prov_crit)
 
 class McQuillanSplitter(KeplerSplitter):
@@ -1389,6 +1409,11 @@ def initialize_full_APOGEE(aposplit):
 
     aposplit.split_El_Badry_targets()
 
+    aposplit.split_provenance(
+        "r_Teff", ["PHO54"], splitnames=(
+            "Huber Photometry", "Other Teffs", "Not in Huber"), 
+        prov_crit="Huber Photometry", null_value=np.ma.masked)
+    
 def general_to_hot_kic_sample(apogeesplitter):
     '''Get the subset of the hot sample that has KIC parameters.'''
     hot_kic = apogeesplitter.split_subsample([
