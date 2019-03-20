@@ -63,6 +63,7 @@ def EBV_to_AV(EB_V, Rv=3.1):
 # These are coefficients that are given by the IRSA dust map service.
 CCM_reddening = {"B": 1.337, "V": 1.000, "I": 0.479, "J": 0.282, "H": 0.190,
                  "K": 0.114, "Ks": 0.114, "Kp": 0.9}
+green_reddening = {"J": 0.237, "H": 0.119, "K": 0.588, "Ks": 0.588}
 
 def AV_to_Aband(AV, band, system="CCM"):
     '''Convert V-band extinction to extinction in a different band.
@@ -72,6 +73,8 @@ def AV_to_Aband(AV, band, system="CCM"):
     is that from Cardelli, Clayton, and Mathis (1989) (CCM).'''
     if system.lower() == "ccm":
         banddict = CCM_reddening
+    if system.lower() == "green18":
+        banddict = green_reddening
     Aband = banddict[band] * AV
     return Aband
     
