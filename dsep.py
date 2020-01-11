@@ -334,6 +334,44 @@ class DSEPIsochrone(models.StellarIsochrone):
 
         return 10**interp_out
 
+class DSEPEvolutionaryTrack(models.StellarEvolutionaryTrack):
+    '''Encapsulating the DSEP Evolutionary Track.
+
+    Unfortunately, none of the evolutionary tracks are updated to the 2012
+    photometric calibration (not that I know what exactly that means). So the
+    tracks I use will be older using the 2008 calibration. I'm going to assume
+    nobody will care.'''
+    logteff_col = "Log Teff"
+    loglum_col = "Log L/Lo"
+    age_col = "Age"
+
+    @classmethod
+    def track_from_file(
+            cls, mass, feh, afe=2, bands=1, dsep_root=paths.DSEP_TRACKS):
+        '''Read in the MIST tracks.'''
+        filename = format_DSEP_track_filename(feh, afe, mass, bands)
+        # The parent directory is generally the metallicity and alpha part.
+        parentdir = filename[4:15]
+        filepath = dsep_root / parentdir / filename
+
+        track_table = Table.read(
+            str(filepath), format="ascii.fixed_width_no_header", col_starts=(
+                0, 12, 20, 28, 36, 44, 52, 60, 68, 76, 84, 92), col_ends=(
+                    11, 19, 27, 35, 43, 51, 59, 67, 75, 83, 91, 100), names=[
+                    "Age", "Log Teff", "Log g", "Log L/Lo", "U", "B", "V", "R",
+                    "I", "J", "H", "Ks"])
+
+        dsep_track = cls(track_table, cls.age_col, mass, feh, afe)
+        return dsep_track
+
+    def restrict_pms(self):
+        '''Remove pre-MS entries from the track table.
+        
+        This is very hacky, and may need to be removed. But I just want it to
+        be done with.'''
+        self.tracktable = self.tracktable[self.tracktable[self.age_col] > 1e9]
+
+
 def interpolate_DSEP_isochrone_cols(
         iso, age, interp_in, incol="LogTeff", outcol="Ks",
         interp_kind="linear", mask_outside_bounds=True):
@@ -1143,6 +1181,10 @@ def fill_feh_filename_template(template, feh):
     width = int(template[num_index:num_index+1])
     return template.format(feh_sign=feh_sign, feh=int(abs(feh)*10**(width-1)))
 
+def fill_mass_filename_template(template, mass):
+    '''Fills in the mass portion of the filename template for tracks.'''
+    return template.format(mass=int(mass*100+0.5))
+
 def fill_afe_filename_template(template, afe):
     '''Fills in the [a/Fe] portion of the filename template.'''
     afe_val = 0.2 * (afe - 2)
@@ -1162,6 +1204,21 @@ def fill_band_suffix_filename_template(template, bands):
         suffix = "CFHTugriz"
     elif bands == 11:
         suffix = "SDSSugriz"
+    elif 0 < bands <= 15:
+        raise ValueError("Band {0} not implemented yet.".format(bands))
+    else:
+        raise ValueError("Band number not recognized")
+
+    return template.format(suf=suffix)
+
+def fill_band_suffix_filename_template_old(template, bands):
+    '''Fill in the suffix which depends on the band label.
+
+    This is only valid for the 2008 photometric calibratoins, not the more
+    recent ones. I only implement this because the tracks are only available
+    for the 2008 photometric calibrations.'''
+    if bands == 1:
+        suffix = "jc2mass"
     elif 0 < bands <= 15:
         raise ValueError("Band {0} not implemented yet.".format(bands))
     else:
@@ -1221,6 +1278,30 @@ def format_DSEP_isochrone_filename(feh, afe, Y, bands):
     band_str = fill_band_suffix_filename_template(band_temp, bands)
 
     finalstr = "{0}{1}{2}.{3}".format(feh_str, afe_str, y_str, band_str)
+
+    return finalstr
+
+def format_DSEP_track_filename(feh, afe, mass, bands):
+    '''Creates a filename which identifies a DSEP track.
+
+    This format is m???feh(p|m)??afe(p|m)?.{bands}. The three digits are the
+    mass of the star (from 010 to 500), the two digits are the [Fe/H] with p
+    for positive and m for negative metallicity. Next is alpha abundance which
+    follows the same pattern. Finally the band is the final piece.'''
+
+    mass_temp = "m{mass:03d}"
+    mass_str = fill_mass_filename_template(mass_temp, mass)
+
+    afe_temp = "afe{afe_sign}{afe:01d}"
+    afe_str = fill_afe_filename_template(afe_temp, afe)
+
+    feh_temp = "feh{feh_sign}{feh:02d}"
+    feh_str = fill_feh_filename_template(feh_temp, feh)
+
+    band_temp = "{suf}"
+    band_str = fill_band_suffix_filename_template_old(band_temp, bands)
+
+    finalstr = "{0}{1}{2}.{3}".format(mass_str, feh_str, afe_str, band_str)
 
     return finalstr
 

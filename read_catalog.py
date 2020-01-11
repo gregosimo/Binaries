@@ -338,8 +338,8 @@ def read_Berger_DR2_Kepler_old(berger_dr2_kep=paths.BERGER_DR2_KEPLER):
 def read_Berger_DR2_Kepler(berger_dr2_kep=paths.BERGER_DR2_KEPLER):
     '''Read in the Gaia parameters in Berger et al (2018).'''
     desired_cols = [
-        "KIC", "Gaia", "D", "E_D", "e_D", "R*", "E_R*", "e_R*", 
-        "AV", "Evol", "Bin"]
+        "KIC", "Gaia", "Teff", "e_Teff", "D", "E_D", "e_D", "R*", "E_R*", 
+        "e_R*", "AV", "Evol", "Bin"]
     berger = Table.read(berger_dr2_kep, format="ascii.cds",
                         include_names=desired_cols)
     return berger
@@ -433,8 +433,8 @@ def read_dr14_allStar(allstarpath=paths.DR14_ALLSTAR_PATH, opt="kepler"):
         "APOGEE2_TARGET2", "APOGEE2_TARGET3", "SNREV", "MIN_H", "MAX_H",
         "MIN_JK", "MAX_JK", "FPARAM", "FPARAM_COV", "TEFF", "TEFF_ERR", "LOGG", "LOGG_ERR",
         "VMICRO", "VMACRO", "VSINI", "M_H", "M_H_ERR", "ALPHA_M",
-        "ALPHA_M_ERR", "ASPCAPFLAG", "ASPCAPFLAGS", "ASPCAP_CHI2", "FELEM",
-        "STABLERV_RCHI2", "FE_H", "PMRA", "PMDEC",
+        "ALPHA_M_ERR", "MG_FE", "MG_FE_ERR", "ASPCAPFLAG", "ASPCAPFLAGS", 
+        "ASPCAP_CHI2", "FELEM", "STABLERV_RCHI2", "FE_H", "PMRA", "PMDEC",
         "PM_SRC", "ALL_VISITS", "VISITS"]
     if opt:
             allstar_hdus = fits.open(str(allstarpath), memmap=True)
@@ -928,12 +928,12 @@ def stelparms_with_original_KIC(
             "kepid", "KIC Teff", "KIC logg"))
     newcat = au.join_by_id(kiccat, orig_subtable, "kepid", "kepid",
                            join_type="left")
+    del(newcat["KIC"])
     hubercat = read_Huber_KIC_catalog()[
         ["KIC", "Teff", "E_Teff", "e_Teff", "r_Teff", "log(g)", "e_log(g)",
-         "E_log(g)", "r_log(g)"]]
+         "E_log(g)", "r_log(g)", "R", "e_R", "E_R"]]
     combocat = au.join_by_id(
         newcat, hubercat, "kepid", "KIC", join_type="left")
-    del(combocat["KIC"])
     return combocat
 
 def stelparms_triple_KIC(
@@ -958,8 +958,6 @@ def ebs_with_stelparms(ebpath=paths.EB_PATH, kic_path=paths.KIC_CATALOG,
     ebs = read_villanova_EBs(ebpath)
     ebs.remove_columns(["kmag", "Teff"])
     stellcat = stelparms_triple_KIC(kic_path)
-    del(stellcat["kic"])
-    del(stellcat["KIC"])
     ebcat = au.join_by_id(
         ebs, stellcat, "KIC", "kepid", join_type="left")
     return ebcat
@@ -1000,6 +998,7 @@ def Rebull_Pleiades_Periods(
         rebull_path=paths.REBULL_PLEIADES_PERIOD_PATH,
         cross_path=paths.REBULL_CROSSID_PATH, dr14path=paths.DR14_ALLSTAR_PATH,
         stauffer_path=paths.STAUFFER_PLEIADES_MASSES,
+        gaia_path=paths.PLEIADES_GAIA_TARGETS,
         multipath=paths.REBULL_PLEIADES_MULTIPERIOD_PATH):
     '''A combined table with the Rebull periods and EPIC parameters.'''
     period_table = read_Rebull_Pleiades_Periods(rebull_path)
@@ -1017,12 +1016,28 @@ def Rebull_Pleiades_Periods(
     period_combo = au.join_by_id(
         stauffer_combo, cross_table, "EPIC", "EPIC", conflict_suffixes=(
         "_REST", "_CROS"), join_type="left")
+    gaia_table = read_Pleiades_Gaia_Targets(gaia_path)
+    gaia_combo = au.join_by_id(
+        period_combo, gaia_table, "2MASS", "twomass_id",
+        conflict_suffixes=("_Gaia", ""), join_type="left")
     dr14 = read_dr14_allStar(opt="Pleiades")
     apo_combo = catalog.join_by_2MASS_key(
-        dr14, period_combo, "APOGEE_ID", "2MASS", conflict_suffixes=(
+        dr14, gaia_combo, "APOGEE_ID", "2MASS", conflict_suffixes=(
         "_APO", "_REB"), join_type="inner")
 
     return apo_combo
+
+def read_Pleiades_Gaia_Targets(tabpath=paths.PLEIADES_GAIA_TARGETS):
+    '''Read the Gaia targets for the Pleiades.
+
+    The full target list is from Rebull et al (2017).'''
+    tab = Table.read(tabpath, format="votable")
+    # For some reason the 2MASS id is an object array, not a string. So convert
+    # it.
+    twomassid = tab["twomass_id"]
+    del(tab["twomass_id"])
+    tab["twomass_id"] = np.array(twomassid, dtype=np.str_)
+    return tab
 
 def Hyades_DR14(
         hyades_path=paths.MERMILLIOD_CLUSTER_TABLE_11,

@@ -39,6 +39,8 @@ from astropy.modeling.polynomial import Polynomial1D
 import astropy_util as au
 import scipy
 from scipy.interpolate import interp1d
+import scipy.optimize as op
+from scipy.special import erf, erfc
 
 import catalog
 import hrplots as hr
@@ -1004,6 +1006,40 @@ def calc_model_mag_fixed_age_alpha(
         np.log10(teffs), logteffcol, bandcol, feh, age, alpha=alpha, 
         model=model)
 
+def calc_model_fixed_age_feh_alpha(
+        invals, incol, outcol, feh, age, alpha=0.0, model="MIST v1.2"):
+    '''Interpolate from incol to outcol on an isochrone of given metallicity.
+
+    This function requires age, [Fe/H], and [a/Fe] to be isochrone gridpoints.
+    The function will return an array of incol values interpolated to
+    outcol.'''
+    invals = np.atleast_1d(invals)
+
+    # If the input column is a photometry magnitude, then the input column is
+    # decreasing. Otherwise it's increasing.
+    if model.upper().startswith("MIST"):
+        mag_cols = mist.band_translation.values()
+    elif model.upper().startswith("DSEP"):
+        mag_cols = dsep.band_translation.values()
+    input_increasing = incol not in mag_cols
+
+    if model.upper().startswith("MIST"):
+        try:
+            version = float(model[-3:])
+        except ValueError:
+            version = mist.LATEST_MIST_VERSION
+        iso = mist.MISTIsochrone.isochrone_from_file(
+            feh, alpha=alpha, MIST_version=version)
+    elif model.upper().startswith("DSEP"):
+        iso = dsep.DSEPIsochrone.isochrone_from_file(
+            feh, afe=dsep.alpha_bin(alpha))
+
+    outvals = iso.interpolate_isochrone_cols(
+        age, invals, incol, outcol, interp_kind="linear",
+        mask_outside_bounds=True, increase=input_increasing)
+
+    return np.ma.masked_invalid(outvals)
+
 def calc_model_over_feh_fixed_age_alpha(
         invals, incol, outcol, fehs, age, alpha=0.0, model="MIST v1.2"):
     '''Interpolate from incol to outcol at a given metallicity.
@@ -1229,6 +1265,85 @@ def calc_photometric_excess(teffs, fehs, alphas, mag, photvals, age=3):
     magdiff = photvals - DSEPmags
 
     return magdiff
+
+##############
+# Derivation #
+##############
+
+def synthetic_data():
+    '''Get test data.'''
+    ndata = 100
+    sig1 = np.abs(0.07/np.log(10) + 0.00*np.random.randn(ndata))
+
+    true_sig2 = 0.1/np.log(10)
+    vthresh_1 = 0
+    vthresh_2 = 0
+    vmax = 200
+    v = np.sort(np.random.rand(ndata)*(vmax/2-1) + 1)
+
+    vdet_1 = v > vthresh_1
+    vdet_2 = v > vthresh_2
+
+    vnondet_1 = np.random.rand(ndata)*vthresh_1
+    vnondet_2 = np.random.rand(ndata)*vthresh_2
+
+    err1 = sig1 * np.random.randn(ndata)
+    err2 = true_sig2 * np.random.randn(ndata)
+    v1 = np.where(vdet_1, v * 10**err1, vnondet_1)
+    v2 = np.where(vdet_2, v * 10**err2, vnondet_2)
+
+    return v1, v2, sig1*v1*np.log(10)
+
+def lnlike_full(theta, v1, v2, sig1, vmax):
+    '''Likelihood function (log)
+    
+    This is the likelihood of drawing v1 and v2 from the parent distribution.'''
+    sig2 = np.exp(theta[0])
+    if sig2 < 0:
+        raise ValueError("Sig2 must be positive.")
+    combosig = np.sqrt(sig1**2+sig2**2)
+    # I want to avoid problems with roundoff errors when erf ~ 1
+    erfarg1 = (sig1**2 * v2 + sig2**2 * v1) / (np.sqrt(2) * sig1 * sig2 * combosig)
+    erfarg2 = (sig1**2 * (v2 - vmax) + sig2**2 * (v1 - vmax)) / (np.sqrt(2) * sig1 * sig2 * combosig)
+    # The erfc trick doesn't work when both erfarg1 and erfarg2 and negative.
+    # I want to take advantage of the fact that erfdiff(erfarg1, erfarg2) = -erfdiff(-erfarg2, -erfarg1)
+    dualnegs = np.logical_and(erfarg1 < 0, erfarg2 < 0)
+    erfarg1_nonneg = np.where(dualnegs, -erfarg1, erfarg1)
+    erfarg2_nonneg = np.where(dualnegs, -erfarg2, erfarg2)
+    dualneg_coeff = np.where(dualnegs, -1, 1)
+    erfdiff = np.where(
+        np.logical_and(erfarg1_nonneg > 0.5, erfarg2_nonneg > 0.5),
+        erfc(erfarg2_nonneg) - erfc(erfarg1_nonneg), 
+        erf(erfarg1_nonneg) - erf(erfarg2_nonneg))
+    if np.any(dualneg_coeff*erfdiff < 0):
+        raise ValueError("Encountered negative value in log.")
+    lnprob = -0.5*((v1 - v2)**2 / combosig**2 - 2 * np.log(dualneg_coeff*erfdiff) +
+                 np.log(8 * np.pi * combosig**2)) - np.log(vmax)
+    return np.sum(lnprob)
+
+def calc_ml(v1, v2, sig1, vmax):
+    '''Calculate the maximum likelihood value for the objects.'''
+    nll_full = lambda *args: -lnlike_full(*args)
+    result = op.minimize(nll_full, [np.log(0.1/np.log(10))], args=(v1, v2, sig1, vmax))
+    sig2_ml  = np.exp(result["x"][0])
+    return sig2_ml
+
+def lnprior_sig2(theta):
+    '''Calculate a flat prior for sig2.'''
+    sig2 = np.exp(theta[0])
+    if 0 < sig2 < 0.5/np.log(10):
+        return 0.0
+    else:
+        return -np.inf
+
+def lnprob(theta, v1, v2, sig1, vmax):
+    '''Posterior probability for sig2 and v.'''
+    lp = lnprior_sig2(theta)
+    if not np.isfinite(lp):
+        return -np.inf
+    else:
+        return lp + lnlike_full(theta, v1, v2, sig1, vmax)
+
 
 ###############################################################################
 # Binary Excess #

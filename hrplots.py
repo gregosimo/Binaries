@@ -54,6 +54,20 @@ def absmag_teff_plot(teff, mag, **kwargs):
     ax.set_xlabel("Teff (K)")
     ax.set_ylabel("Absolute Magnitude")
 
+def color_mag_plot(colormag, mag, **kwargs):
+    '''Plots values in magnitude/color space.
+
+    Color and magnitude are values which should be plotted. Other
+    keyword parameters will be passed to the underlying errorbar routine.'''
+    try:
+        ax = kwargs.pop("axis")
+    except KeyError:
+        ax = plt.gca()
+    ax.errorbar(colormag, mag, **kwargs)
+    invert_y_axis(ax)
+    ax.set_xlabel("Color")
+    ax.set_ylabel("Magnitude")
+
 def logL_teff_plot(teff, loglum, **kwargs):
     '''Plots values in LogLuminosity/Teff space.
 

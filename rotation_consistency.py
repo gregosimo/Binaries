@@ -29,8 +29,8 @@ import numpy as np
 import matplotlib.pyplot as plt
 from matplotlib.ticker import AutoMinorLocator
 from scipy.stats import uniform
-from scipy.special import erf
-from scipy.integrate import quad, dblquad
+from scipy.special import erf, erfc
+from scipy.integrate import quad, dblquad, nquad
 from scipy.special import gammaincc
 import astropy_util as au
 
@@ -674,8 +674,8 @@ def compare_rotation_velocity_radius(
 
 def plot_vsini_velocity(
     vsini, period, perioderr, radii, raderr, color='k', ax=None, 
-        vsini_fracerr=0.15, vsini_lim=7, label="", xticks=10, yticks=10, 
-        sini_label=True, marker="*"):
+        vsini_fracerr=0.12, vsini_lim=10, label="", xticks=10, yticks=10, 
+        sini_label=True, marker="*", ms=10):
     '''Make a plot of vsini vs velocity.
 
     Vsini will be on the y-axis while velocity will be on the x-axis. The
@@ -692,6 +692,8 @@ def plot_vsini_velocity(
 
     highv_indices = np.logical_or(vsini > vsini_lim, infvel > vsini_lim)
     print(np.count_nonzero(highv_indices))
+    vsini_old = vsini
+    infvel_old = infvel
     vsini = vsini[highv_indices]
     infvel = infvel[highv_indices]
     dlogverr = dlogverr[highv_indices]
@@ -703,7 +705,7 @@ def plot_vsini_velocity(
 
     ax.errorbar(
         infvel, vsini, xerr=[downvel, upvel], yerr=[downvsini, upvsini],
-        color=color, ls="None", marker=marker, label=label)
+        color=color, ls="None", marker=marker, label=label, ms=ms)
     ax.set_xscale("log")
     ax.set_yscale("log")
 #   au.adjust_axes(
@@ -714,8 +716,8 @@ def plot_vsini_velocity(
     min_x, max_x = ax.get_xlim()
     min_y, max_y = ax.get_ylim()
     # Show sini = 1 and sini = 1/2.
-    log_med_x = np.log10(min_x) + 0.6*(np.log10(max_x) - np.log10(min_x))
-    log_med_y = np.log10(min_y) + 0.6*(np.log10(max_y) - np.log10(min_y))
+    log_med_x = np.log10(min_x) + 0.89*(np.log10(max_x) - np.log10(min_x))
+    log_med_y = np.log10(min_y) + 0.89*(np.log10(max_y) - np.log10(min_y))
     if max_y > max_x:
         top_bound_point = max_x, max_x
     else:
@@ -728,6 +730,9 @@ def plot_vsini_velocity(
     ax.plot(
         [bottom_bound_point[0], top_bound_point[0]], 
         [bottom_bound_point[1], top_bound_point[1]], 'k-', lw=3)
+    ax.plot(
+        [bottom_bound_point[0], top_bound_point[0]], 
+        [bottom_bound_point[1]/2, top_bound_point[1]/2], 'k--', lw=3)
     ax.fill_between(
         [bottom_bound_point[0], top_bound_point[0]], [max_y, max_y], 
         [bottom_bound_point[1], top_bound_point[1]], hatch="\\", 
@@ -741,9 +746,6 @@ def plot_vsini_velocity(
         bottom_half_bound = min_x, min_x/2
     else:
         bottom_half_bound = 2*min_y, min_y
-    ax.plot(
-        [bottom_half_bound[0], top_half_bound[0]], 
-        [bottom_half_bound[1], top_half_bound[1]], 'k--')
 
     if sini_label:
         rotangle = np.arctan(
@@ -758,17 +760,20 @@ def plot_vsini_velocity(
                  np.log10(top_half_bound[0]) - np.log10(bottom_half_bound[0])))/np.pi*180
         med = 10**min(log_med_x, log_med_y)
         ax.text(med/1.2, med, r"$\sin i = 1$", rotation=rotangle)
-        ax.text(med/1.2, med/2, r"$\sin i = 0.5$", rotation=half_rotangle)
+        ax.text(med/1.2, med/2, r"$\sin i = 0.5$", rotation=rotangle)
         print(med)
 
 
     # Show the detection thresholds.
     ax.plot([0, vsini_lim, vsini_lim], [vsini_lim, vsini_lim, 0], 'r--')
+    ax.plot(
+        infvel_old[~highv_indices], vsini_old[~highv_indices], marker=".", 
+        color="gray", ls="", alpha=1.0, label="")
 
     ax.set_xlim(min_x, max_x)
     ax.set_ylim(min_y, max_y)
-    ax.set_xlabel(r"$v_{eq}$ (km/s) from $R$ and $P_{rot}$")
-    ax.set_ylabel("APOGEE $v \sin i$ (km/s)")
+    ax.set_xlabel(r"$v_{eq}$ (km s$^{-1}$) from $R$ and $P_{rot}$")
+    ax.set_ylabel("APOGEE $v \sin i$ (km s$^{-1}$)")
 
 def plot_rotation_radius(
         vsini, period, radii, raderr_below, raderr_above, color="k", ax=None,
@@ -1394,12 +1399,69 @@ def test_accurate_vsini(
     vel_bins, dv = np.linspace(
         0, np.log10(maxv), nbins+1, endpoint=True, retstep=True)
     def logvsini(v):
-        return np.sum(gaussfunc(v, logvelocities, logv_err))
+        return gaussian_average(v, logvelocities, logv_err)
     vals = np.zeros(len(vel_bins))
     for i, v in enumerate(vel_bins):
         vals[i] = vsini_dist(v, logvsini, vsini_percent=vsini_percent)
 
     return vel_bins, vals
+
+def gaussian_average(vs, mus, sigs):
+    '''Evaluate vs for a sum of Gaussians.
+    
+    The number of objects should be given in mus. sigs can either be a scalar
+    corresponding to a common uncertainty for all observations, or an array
+    with length equal to mus which corresponds to the uncertainty in each mu.'''
+    vs = np.atleast_1d(vs)
+    gaussmatrix = (
+        np.exp(-(vs[:,np.newaxis] - mus)**2 / 2 / sigs**2) / 
+        np.sqrt(2 * np.pi) / sigs)
+    return np.sum(gaussmatrix, axis=1) / len(mus)
+
+def cum_gaussian_average(vs, mus, sigs):
+    '''Evaluate vs for a sum of Gaussians.
+    
+    The number of objects should be given in mus. sigs can either be a scalar
+    corresponding to a common uncertainty for all observations, or an array
+    with length equal to mus which corresponds to the uncertainty in each mu.'''
+    vs = np.atleast_1d(vs)
+    cummatrix = erfc((mus - vs[:,np.newaxis]) / np.sqrt(2) / sigs) / 2
+        
+    return np.sum(cummatrix, axis=1) / len(mus)
+
+def vsini_dist_noerr(logvsini, logvs, vsini_percent=10):
+    '''Calculate the probability of vsini given high-precision observations.'''
+    sigobs = vsini_percent / np.log(10) / 100
+    logvsini = np.atleast_1d(logvsini)
+    integralgrid = np.zeros(len(logvsini))
+    for i in range(len(logvsini)):
+        vbase = logvsini[i]
+        ans, err = quad(
+            lambda t: 
+                np.sum(
+                    10**(2*(t-logvs[logvs > t])) / 
+                    np.sqrt(1 - 10**(2 * (t - logvs[logvs > t])))) * np.log(10) * 
+            np.exp(-(vbase - t)**2 / 2 / sigobs**2) / 
+            np.sqrt(2 * np.pi) / sigobs, -np.inf, np.inf)
+        integralgrid[i] = ans
+    return integralgrid
+
+def vsini_dist_noerr(logvsini, logvs, vsini_percent=10):
+    '''Calculate the probability of vsini given high-precision observations.'''
+    sigobs = vsini_percent / np.log(10) / 100
+    logvsini = np.atleast_1d(logvsini)
+    integralgrid = np.zeros(len(logvsini))
+    for i in range(len(logvsini)):
+        vbase = logvsini[i]
+        ans, err = quad(
+            lambda t: 
+                np.sum(
+                    10**(2*(t-logvs[logvs > t])) / 
+                    np.sqrt(1 - 10**(2 * (t - logvs[logvs > t])))) * np.log(10) * 
+            np.exp(-(vbase - t)**2 / 2 / sigobs**2) / 
+            np.sqrt(2 * np.pi) / sigobs, -np.inf, np.inf)
+        integralgrid[i] = ans
+    return integralgrid
 
 def vsini_dist(logvsini, logvdist, vsini_percent=10):
     '''Calculate the probability of vsini given a velocity distribution.
@@ -1408,12 +1470,221 @@ def vsini_dist(logvsini, logvdist, vsini_percent=10):
     distribution of v. It convolves that distribution with sin i and also 
     assumes an observational uncertainty given in vsini_percent..
     '''
-    def f(y, v):
-        return (
-            logvdist(v) * 10**(2 * (y - v)) / np.sqrt(1 - 10**(2*(y-v))) * 
-            gaussfunc(logvsini, y, vsini_percent/np.log(10)/100))
-    ans, err = dblquad(f, -np.inf, np.inf, lambda x: -np.inf, lambda x: x)
-    return ans
+    sigobs = vsini_percent / np.log(10) / 100
+    logvsini = np.atleast_1d(logvsini)
+    integralgrid = np.zeros(len(logvsini))
+    for i in range(len(logvsini)):
+        vbase = logvsini[i]
+        opts = {"limit": 500}
+        ans, err = nquad(
+            lambda v, t: logvdist(v) * 
+                10**(2*(t-v)) / np.sqrt(1 - 10**(2 * (t - v))) * np.log(10) * 
+                np.exp(-(vbase - t)**2 / 2 / sigobs**2) / np.sqrt(2 * np.pi) / 
+                sigobs, [lambda x: (x, np.inf), (-np.inf, np.inf)], [opts, {}])
+        integralgrid[i] = ans
+    return integralgrid
+
+def cum_vsini_dist(logvsini, logvdist, vsini_percent=10):
+    '''Calculate cumulative vsini distribution given a velocity distribution.
+
+    This function requires a function logvdist(v) which represents the
+    distribution of v. It convolves that distribution with sin i and also
+    assumes an observational uncertainty given in vsini_percent.'''
+    sigobs = vsini_percent / np.log(10) / 100
+    logvsini = np.atleast_1d(logvsini)
+    integralgrid = np.zeros(len(logvsini))
+    for i in range(len(logvsini)):
+        vbase = logvsini[i]
+        ans, err = dblquad(
+            lambda v, t: logvdist(v) * 
+                10**(2*(t-v)) / np.sqrt(1 - 10**(2 * (t - v))) * np.log(10) * 
+                erfc((t-vbase)/np.sqrt(2)/sugobs) / 2 , -np.inf, np.inf, 
+            lambda x: x, lambda x: np.inf)
+        integralgrid[i] = ans
+    return integralgrid
+
+def cum_vsini_dist_thresh(logvsini, logvdist, vsini_percent=10, vthresh=10):
+    '''Calculate cumulative vsini distribution given a velocity and threshold.
+
+    This function requires a function logvdist(v) which represents the
+    distribution of v. It convolves that distribution with sin i and also
+    assumes an observational uncertainty given in vsini_percent. It also
+    assumes there is a detection threshold at vthresh. For all values of
+    logvsini below the detection threshold, the distribution will be constant
+    with the value of the cumulative fraction below vthresh.'''
+    logvthresh = np.log10(vthresh)
+    distgrid = np.zeros(len(logvsini))
+    logvthreshval = cum_vsini_dist(
+        logvthresh, logvdist, vsini_percent=vsini_percent)
+    below_thresh = logvsini < logvthresh
+    above_thresh = logvsini >= logvthresh
+    distgrid[below_thresh] = logvthreshval
+    distgrid[above_thresh] = cum_vsini_dist_thresh(
+        logvsini[above_thresh], logvdist, vsini_percent=vsini_percent)
+    return distgrid
+
+def trapezoid_weights(n, dx):
+    '''Generate weights for the Trapezoidal Rule.'''
+    w = np.ones(n) * dx
+    w[0] = w[0] / 2
+    w[-1] = w[-1] / 2
+    return w
+
+def logsini_convolve(x):
+    '''Make the logsini convolution for x.'''
+    invalids = x >= 0
+    expt = 10**(2*x)
+    vals = expt / np.sqrt(1 - expt) * np.log(10)
+    vals[invalids] = 0
+    return vals
+
+def compare_vsini_distribution_full(
+        periods, period_errs, radii, radius_errs, vsinis, vsini_percent=10, 
+        vsini_cutoff=10):
+    '''Compare the measured vsini to the vsini derived from period and radii.'''
+    sigobs = vsini_percent / 100 / np.log(10)
+    logvs, dv = np.linspace(-2, 4, 20000, endpoint=True, retstep=True)
+    # By experimentation I found this is the limiting step in precision.
+    logvsinis, dvsi = np.linspace(-2, 4, 20000, endpoint=True, retstep=True)
+    logobsvsinis, dobs = np.linspace(0, 2, 1000, endpoint=True, retstep=True)
+    wv = trapezoid_weights(len(logvs), dv)
+    wvsini = trapezoid_weights(len(logvsinis), dvsi)
+    wobs = trapezoid_weights(len(logobsvsinis), dobs)
+
+    # Calculate nondetection indices
+    nondets = logobsvsinis <= np.log10(vsini_cutoff)
+    nondet_weights = trapezoid_weights(np.count_nonzero(nondets), dobs)
+
+
+    logvelocities = np.log10(period_to_velocities(periods, radii))
+    logvelocity_errors = np.sqrt(
+        (period_errs/periods/np.log(10))**2 +
+        (radius_errs/radii/np.log(10))**2)
+    print(min(logvelocity_errors))
+    logvsini_observed = gaussian_average(
+        logobsvsinis, np.log10(vsinis), sigobs)
+    logvsini_cumulative = cum_gaussian_average(
+        logobsvsinis, np.log10(vsinis), sigobs)
+
+    obs_nondet_frac = np.sum(nondet_weights * logvsini_observed[nondets])
+    logvsini_observed[nondets] = 0
+    logvsini_cumulative[nondets] = obs_nondet_frac
+
+    logvdist = gaussian_average(logvs, logvelocities, logvelocity_errors)
+    print("V Residual: {0:.1f}%".format((1-np.sum(wv*logvdist))*100))
+    # This step takes up the most memory. See if there's a way to move this to
+    # CPU-land. Because half of the memory is wasted in this step (over half of
+    # the grid becomes NaNs, it may be more useful  to iterate this to a for
+    # loop, and maybe cache values of logvsini_convolve.
+    logvsinidist = np.sum(
+        wv*logvdist*logsini_convolve(logvsinis[:,np.newaxis] - logvs), axis=1)
+#   print("Vsini Residual: {0:.1f}%".format(
+#       (1 - np.sum(wvsini * logvsinidist)) * 100))
+    logvsiniobs = np.sum(
+        wvsini * logvsinidist * gaussfunc(
+            logobsvsinis[:,np.newaxis] - logvsinis, 0, sigobs), axis=1)
+    print("Observed Vsini Residual: {0:.1f}%".format(
+        (1 - np.sum(wobs * logvsiniobs)) * 100))
+    logvsinicdf = np.sum(
+        wvsini * logvsinidist * erfc(
+            (logvsinis - logobsvsinis[:,np.newaxis]) / np.sqrt(2) / sigobs) / 2,
+        axis=1)
+    print("Cumulative Vsini Residual: {0:.1f}%".format(
+        (1 - logvsinicdf[-1]) * 100))
+
+    # Now make corrections for the vsini threshold.
+    nondet_frac = np.sum(nondet_weights * logvsiniobs[nondets])
+    logvsiniobs[nondets] = 0
+    logvsinicdf[nondets] = nondet_frac
+
+    fig, (ax1, ax2) = plt.subplots(2, 1, sharex=True, figsize=(12, 12))
+    # Plot the pdf
+    modelcolor = "#000000"
+    rotcolor = "#377eb8"
+    aspcapcolor = "#e41a1c"
+    ax1.plot(logvs, logvdist, color=rotcolor, lw=1, label="Vrot")
+    ax1.plot(logobsvsinis, logvsini_observed, lw=3, label="ASPCAP vsini", 
+             color=aspcapcolor)
+    ax1.plot(logobsvsinis, logvsiniobs, lw=4, label="Model vsini", c=modelcolor)
+    ax1.set_xlim(logobsvsinis[0], logobsvsinis[-1])
+    ax1.set_ylabel("N (vsini)")
+    ax1.legend(loc="upper right")
+    ax1.text(0.3, 0.8, "{0:d} Total".format(len(logvelocities)),
+             transform=ax1.transAxes, color=modelcolor)
+    ax1.text(0.3, 0.7, "Nondetection Fraction: {0:.1f}%".format(
+        obs_nondet_frac * 100), transform=ax1.transAxes, color=aspcapcolor)
+    ax1.text(0.3, 0.6, "Nondetection Fraction: {0:.1f}%".format(
+        nondet_frac * 100), transform=ax1.transAxes, color=modelcolor)
+
+    ax2.plot(logobsvsinis, logvsinicdf, lw=3, label="Model", c="#000000")
+    ax2.plot(logobsvsinis, logvsini_cumulative, lw=2, label="ASPCAP", 
+             c="#e41a1c")
+    ax2.xaxis.set_minor_locator(AutoMinorLocator())
+    ax2.set_xlabel("V sin(i) (km/s)")
+    ax2.set_ylabel("f (< vsini)")
+    ax2.set_ylim(0, 1)
+
+    # Now do some hypothesis testing.
+    # We found that adding up the Kernel Densities is not smooth enough to take
+    # in one sitting. Instead I'd like to calculate the distribution for each
+    # center directly, and then add them up. 
+    for c, w in zip(logvelocities[~nondets], logvelocity_errors[~nondets]):
+        pass
+
+def plot_vsini_dist(logveqs, ax=None, sini_cutoff=0.5):
+    '''Plot the convolved vsini distribution of the veqs.'''
+    logvs = np.linspace(0, 2, 1000)
+    dist = vsini_average(logvs, logveqs, sini_cutoff=sini_cutoff)
+
+    if not ax:
+        f, ax = plt.subplots(1, 1)
+    ax.plot(logvs, dist)
+    ax.plot(np.log10([10, 10]), [0+0.1, ax.get_ylim()[1]-0.1])
+    ax.set_xlabel("Log10(vsini)")
+    ax.set_ylabel("Density")
+
+def vsini_average(logvs, logveqs, sini_cutoff=0.5):
+    '''Evaluate logvs for a sum of sinis.
+    
+    Generates a distribution evaluated on logvs which is the average of objects
+    with equatorial velocities logveqs. This function also accepts a cutoff in
+    sini, which by default is sini=0.5.'''
+    logvs = np.atleast_1d(logvs)
+    coeff = np.log(10) / np.sqrt(1 - sini_cutoff**2) 
+    expfactor = 10**(2*(logvs[:,np.newaxis] - logveqs))
+    sini_matrix = coeff * expfactor / np.sqrt(1 - expfactor)
+    badvs = logvs[:,np.newaxis] > logveqs
+    truncvs = logvs[:,np.newaxis] < logveqs + np.log10(sini_cutoff)
+    sini_matrix[badvs] = 0
+    sini_matrix[truncvs] = 0
+    return np.sum(sini_matrix, axis=1) / len(logveqs)
+
+def calc_spec_rapid_num(
+        logveqs, log_det_thresh=np.log10(10), sini_cutoff=0.5):
+    '''Calculate how much of the rapid rotators are detectable.
+
+    For the full sample of logveqs, calculate the integrated amount of sample
+    which is above log_det_thresh after convolving with a sini distribution
+    that is cutoff at sini_cutoff.'''
+    coeff = 1 / np.sqrt(1 - sini_cutoff**2)
+    fracs = coeff * np.sqrt(1 - 10**(2*(log_det_thresh - logveqs)))
+    badvs = logveqs <= log_det_thresh
+    truncvs = log_det_thresh < logveqs + np.log10(sini_cutoff)
+    fracs[badvs] = 0
+    fracs[truncvs] = 1
+    return np.sum(fracs)
+
+
+def cum_gaussian_average(vs, mus, sigs):
+    '''Evaluate vs for a sum of Gaussians.
+    
+    The number of objects should be given in mus. sigs can either be a scalar
+    corresponding to a common uncertainty for all observations, or an array
+    with length equal to mus which corresponds to the uncertainty in each mu.'''
+    vs = np.atleast_1d(vs)
+    cummatrix = erfc((mus - vs[:,np.newaxis]) / np.sqrt(2) / sigs) / 2
+        
+    return np.sum(cummatrix, axis=1) / len(mus)
 
 def gaussfunc(x, mu, sig):
     '''Evaluate a Gaussian function at a given point.'''

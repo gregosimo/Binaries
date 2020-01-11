@@ -34,6 +34,8 @@ import path_config as paths
 import sed
 import browse_APOGEE_spectra as browse
 import read_catalog as catin
+import data_splitting as dsplit
+import sample_characterization as samp
 
 SDSS3_URL = "http://data.sdss3.org"
 
@@ -237,6 +239,113 @@ def select_tidally_synchronized_binaries(
     loggcut = perform_logg_cut(temp_cut, lowlogg=logg, loggcol=loggcol)
 
     return loggcut
+
+def select_APOGEE_dwarfs(apotargs):
+    '''Select APOGEE dwarfs for activity relations.'''
+    dsplit.initialize_clean_APOGEE(apotargs)
+
+    apotargs.split_teff(
+        "TEFF", 7700, ("APOGEE Sample", "APOGEE Telluric", "No APOGEE Teff"),
+        null_value=np.ma.masked, teff_crit="APOGEE Teff Sample")
+    apotargs.split_metallicity(
+        -1, ("Low Metallicity", "Normal Metallicity", "No Metallicity"),
+        col="FE_H", null_value=np.ma.masked)
+
+    cleantargs = apotargs.split_subsample([
+        "~Bad", "APOGEE Sample", "K Detection", "In Gaia", "~No Metallicity"])
+
+    cleantargs.data["MIST K"] = samp.calc_model_mag_fixed_age_feh_alpha(
+        cleantargs.data["TEFF"], 0.0, "Ks", age=1e9,
+        model="MIST v1.2")
+
+    cleantargs.data["K Excess"] = (
+        cleantargs.data["M_K"] - cleantargs.data["MIST K"])
+    cleantargs.split_mag(
+        "K Excess", [-0.3], splitnames=(
+            "Photometric Binaries", "Photometric Singles", "No K Diff"), 
+        mag_crit="photbin", null_value=np.ma.masked)
+
+    targs = cleantargs.subsample(["Photometric Singles"])
+    return targs
+
+def write_APOGEE_dwarfs():
+    '''Plot the APOGEE dwarfs selected for activity relations.'''
+    apotargs = dsplit.APOGEESplitter()
+    sample = select_APOGEE_dwarfs(apotargs)
+    fullsamp = apotargs.subsample([
+        "~Bad", "APOGEE Sample", "K Detection", "In Gaia", "~No Metallicity"])
+
+    f, ax = plt.subplots(1, 1, figsize=(12, 12))
+    hr.absmag_teff_plot(
+        fullsamp["TEFF"], fullsamp["M_K"], color='black', marker=".", ls="",
+        axis=ax, label="Full Sample")
+    hr.absmag_teff_plot(
+        sample["TEFF"], sample["M_K"], color='red', marker=".", ls="", axis=ax,
+    label="Dwarf Sample")
+    sort_indices = np.argsort(sample["TEFF"])
+    hr.absmag_teff_plot(
+        sample["TEFF"][sort_indices], sample["MIST K"][sort_indices], 
+        color="blue", marker="", ls="-", axis=ax, label="MIST", lw=3)
+    ax.set_xlabel("Teff")
+    ax.set_ylabel("M_K")
+    ax.legend(loc="upper left")
+
+    f, ax = plt.subplots(1, 1, figsize=(12, 12))
+    hr.absmag_teff_plot(
+        fullsamp["TEFF"], fullsamp["H"], color='black', marker=".", ls="",
+        axis=ax)
+    hr.absmag_teff_plot(
+        sample["TEFF"], sample["H"], color='red', marker=".", ls="", axis=ax)
+    ax.set_xlabel("Teff")
+    ax.set_ylabel("H")
+
+    f, ax = plt.subplots(1, 1, figsize=(12, 12))
+    ax.hist(
+        [fullsamp["M_H"], sample["M_H"]], bins=30, color=['black', 'red'], 
+        alpha=0.3, histtype='stepfilled', label=["Full", "Sample"], 
+        normed=True)
+    ax.set_xlabel("[M/H]")
+    ax.set_ylabel("Normalized Count")
+
+    f, ax = plt.subplots(1, 1, figsize=(12, 12))
+    fullsamp_multivisit = fullsamp["NVISITS"] > 1
+    sample_multivisit = sample["NVISITS"] > 1
+    ax.hist(
+        [fullsamp["VSCATTER"], sample["VSCATTER"]], bins=1000, 
+        color=['black', 'red'], alpha=0.3, histtype='step', 
+        label=["Full", "Sample"], normed=True, cumulative=True, lw=3)
+    ax.set_xlabel("RV Scatter")
+    ax.set_ylabel("Cumulative Normalized Count")
+    ax.set_ylim(0.97, 1.0)
+    ax.legend(loc="lower right")
+
+    outsample = sample[["kepid", "APOGEE_ID", "TEFF", "M_H", "FE_H", "M_K", 
+                        "K Excess"]]
+
+    outsample.sort("kepid")
+
+    outsample.meta["comments"] = [
+        "Sample of APOGEE targets which fit the criteria of having a K Excess",
+        "of less than -0.3 for investigation into activity. Included columns",
+        "are:",
+        "kepid: The KIC value for the target.",
+        "APOGEE_ID: The APOGEE_ID of the target.",
+        "TEFF: The spectroscopically-determined temperature of the target.",
+        "M_H: The spectroscopic [Z/H] of the target.",
+        "FE_H: The spectroscopic [Fe/H] of the target (calculated by",
+        "      combining [M/H] and [Fe/M].",
+        "M_K: The absolute K-band magnitude of the target.",
+        "K Excess: The difference in K-band magnitude between the target and",
+        "          a 1 Gyr solar-metallicity MIST isochrone."]
+
+    
+    outsample.write(
+        str(paths.HEAD_DIR / "APOGEE_Activity_Targets.txt"), 
+        format="ascii.fixed_width", delimiter="|", overwrite=True)
+
+    
+
+    
 
 #################
 # Split Catalog #
@@ -548,6 +657,13 @@ def write_KIC_to_Gaia_Archive_upload_list(kics, outputpath):
     kic_table = Table([kic_column], names=["KIC"])
     kic_table.write(str(outputpath), format="ascii.no_header", overwrite=True, 
                     delimiter=",")
+
+def write_APOGEE_to_Gaia_Archive_upload_list(apogee_id, outputpath):
+    '''Write a list of APOGEE IDs to be uploaded to the Gaia archive.'''
+    twomass_column = npstr.replace(apogee_id, "2M", "")
+    gaia_table = Table([twomass_column], names=["2MASS ID"])
+    gaia_table.write(
+        str(outputpath), format="ascii.no_header", overwrite=True, delimiter=",")
 
 def write_SIMBAD_identifier_list(
     identifiers, outputfile, outputpath=paths.HEAD_DIR):
@@ -1842,6 +1958,32 @@ def combined_huber_apogee_table():
             "FE_H", "FE_H_ERR", "J", "H", "K","ASPCAPFLAGS", "Huber teff", 
             "teff_err1", "teff_err2", "Huber logg", "logg_err1", "logg_err2", 
             "teff_prov", "logg_prov"])
+
+def big_mcquillan_APOGEE_table():
+    '''Make a comprehensive table with McQuillan info.'''
+    kic = read_KIC_DR25_catalog()[[
+        "kepid", "tm_designation", "teff", "teff_err1", "teff_err2",
+        "teff_prov", "kepmag", "jmag", "jmag_err", "hmag", "hmag_err", "kmag",
+        "kmag_err"]]
+    mcq = read_McQuillan_catalog()[["KIC", "Prot", "e_Prot", "Rper"]]
+    gaia = read_Gaia_DR2_Kepler()[[
+        "KIC", "source_id", "ra", "ra_error", "dec", "dec_error", "parallax",
+        "parallax_error", "pmra", "pmra_error", "pmdec", "pmdec_error",
+        "ra_dec_corr", "ra_parallax_corr", "ra_pmra_corr", "ra_pmdec_corr",
+        "dec_parallax_corr", "dec_pmra_corr", "dec_pmdec_corr",
+        "parallax_pmra_corr", "parallax_pmdec_corr", "pmra_pmdec_corr",
+        "phot_g_mean_flux", "phot_g_mean_flux_error", "phot_bp_mean_flux",
+        "phot_bp_mean_flux_err", "phot_rp_mean_flux",
+        "phot_rp_mean_flux_error", "radial_velocity", "radial_velocity_error"]]
+    berger = read_Berger_DR2_Kepler()[[
+        "KIC", "Teff", "e_Teff", "R*", "e_R*", "E_R*", "AV"]]
+    apogee = catin.read_dr14_allStar()[[
+        "APOGEE_ID", "LOCATION_ID", "APOGEE_TARGET1", "APOGEE_TARGET2",
+        "APOGEE_TARGET3", "TARGFLAGS", "NVISITS", "STARFLAG", "STARFLAGS",
+        "VHELIO_AVG", "VSCATTER", "VERR", "APOGEE2_TARGET1", "APOGEE2_TARGET2",
+        "APOGEE2_TARGET3", "SNREV", "FPARAM", "FPARAM_COV", "TEFF", "TEFF_ERR",
+        "LOGG", "LOGG_ERR", "VSINI", "M_H", "M_H_ERR", "ALPHA_M",
+        "ALPHA_M_ERR", "ASPCAPFLAG", "ASPCAPFLAGS", "ASPCAP_CHI2", "FE_H"]]
 
 
 ###############################################################################

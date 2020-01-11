@@ -18,11 +18,13 @@ import dsep
 import hrplots as hr
 import biovis_colors as bc
 import models
+import sed
 
 band_translation = {
-    "B": "Bessell_B", "V": "Bessell_V", "R": "Bessell_R", "J": "2MASS_J", 
-    "H": "2MASS_H", "K": "2MASS_Ks", "Ks": "2MASS_Ks", "g": "SDSS_g", "r":
-    "SDSS_r", "i": "SDSS_i"}
+    "B": "Bessell_B", "V": "Bessell_V", "R": "Bessell_R", 
+    "J": "2MASS_J", "H": "2MASS_H", "K": "2MASS_Ks", "Ks": "2MASS_Ks", 
+    "g": "SDSS_g", "r": "SDSS_r", "i": "SDSS_i", 
+    "G": "Gaia_G_DR2Rev", "BP": "Gaia_BP_DR2Rev", "RP": "Gaia_RP_DR2Rev"}
 
 LATEST_MIST_VERSION = 1.2
 
@@ -37,10 +39,11 @@ class MISTIsochrone(models.StellarIsochrone):
     logL_col = "log_L"
     # Note that the radius is inferred, not directly interpolated.
     radius_col = "radius"
-    def __init__(self, feh, fulltable, alpha=0, Yinit=0.2703, Zinit=1.42857e-2, 
-                 vvcrit=0.00, AV=0.0, MIST_version=LATEST_MIST_VERSION, 
-                 MESA_version=7503, bandstr="UBVRIplus", make_rad_col=True, 
-                 bol_bands=[]):
+    def __init__(
+            self, feh, fulltable, alpha=0, Yinit=0.2703, Zinit=1.42857e-2, 
+            vvcrit=0.00, AV=0.0, MIST_version=LATEST_MIST_VERSION, 
+            MESA_version=7503, bandstr="UBVRIplus", make_rad_col=True, 
+            bol_bands=[], colors=[]):
 
         if make_rad_col:
             self._add_radius_column(fulltable, logg=False)
@@ -48,6 +51,9 @@ class MISTIsochrone(models.StellarIsochrone):
             colname = "BC {0}".format(bol)
             self._add_bolometric_correction(
                 fulltable, band_translation[bol], colname)
+        for color in colors:
+            self._add_color_column(
+                fulltable, color, colorcol=color)
         # This should make a dictionary which has age as a key and that
         # subtable as a value.
         fullgroups = fulltable.group_by(self.age_col)
@@ -61,13 +67,14 @@ class MISTIsochrone(models.StellarIsochrone):
         self.MESA_version=MESA_version
         self.phot_bands = list(set(band_translation.values()))
 
-        self.increasing_colnames = set(band_translation.values())
+        self.increasing_colnames = (
+            set(band_translation.values()) | set(colors))
         self.decreasing_colnames = set([self.mass_col, self.logteff_col,
                                         self.logL_col])
 
     def iso_table(self, age):
         '''Return the table corresponding to the isochrone at the given age.
-        The given age should be given in log10(yr).'''
+        The given age should be given in years.'''
         self.replace_with_tracks(age, transition_mass=0.88)
         fullagetable = self.iso_dict[age]
         # Sometimes there are EEPS which have almost the same mass, but other
@@ -80,11 +87,17 @@ class MISTIsochrone(models.StellarIsochrone):
 
     @classmethod
     def isochrone_from_file(
-        cls, feh, alpha=0.0, vvcrit=0.0, bandstr="UBVRIplus", 
-            bol_bands=["V", "K"], MIST_version=LATEST_MIST_VERSION, 
-            MIST_PATH=paths.MIST_PATH):
+            cls, feh, alpha=0.0, vvcrit=0.0, bandstr="UBVRIplus", 
+            bol_bands=["V", "K"], colors=["BP-RP"], 
+            MIST_version=LATEST_MIST_VERSION, MIST_PATH=paths.MIST_PATH,
+            abridged=True):
         '''Read in a MIST isochrone from a file.'''
-        iso_folder = isochrone_folder(MIST_version, vvcrit, bandstr)
+        if abridged:
+            iso_folder = abridged_isochrone_folder(
+                MIST_version, vvcrit, bandstr)
+        else:
+            iso_folder = full_isochrone_folder(
+                MIST_version, vvcrit, bandstr)
         filename = build_MIST_filename(
             feh, vvcrit=vvcrit, alpha=alpha, bandstr=bandstr,
             MIST_version=MIST_version)
@@ -94,7 +107,8 @@ class MISTIsochrone(models.StellarIsochrone):
             data_start=0)
         mist = cls(
             feh, MIST_table, alpha=alpha, vvcrit=vvcrit, 
-            MIST_version=MIST_version, bandstr=bandstr, bol_bands=bol_bands)
+            MIST_version=MIST_version, bandstr=bandstr, bol_bands=bol_bands,
+            colors=colors)
         return mist
 
     def replace_with_tracks(self, age, transition_mass=1.0):
@@ -165,6 +179,10 @@ class MISTIsochrone(models.StellarIsochrone):
             newtable["BC K"] = (
                 -2.5 * newtable[self.logL_col] + 4.75 -
                 newtable[band_translation["K"]])
+        if "BP-RP" in met_table.colnames:
+            newtable["BP-RP"] = (
+                newtable[band_translation["BP"]] -
+                newtable[band_translation["RP"]])
         combined_table = vstack([
             newtable, met_table[isochrone_highmass_indices]])
         self.iso_dict[age] = combined_table
@@ -191,11 +209,34 @@ class MISTIsochrone(models.StellarIsochrone):
         mbol = -2.5 * fulltable[self.logL_col] + 4.75
         fulltable[bccol] = mbol - fulltable[band]
 
+    def _add_color_column(self, fulltable, color, colorcol=""):
+        '''Add a column representing a color.'''
+        if not colorcol:
+            colorcol = color
+        blue, red = sed.split_color(color)
+        fulltable[colorcol] = (
+            fulltable[band_translation[blue]] -
+            fulltable[band_translation[red]])
+
 class MISTEvolutionaryTrack(models.StellarEvolutionaryTrack):
     '''A model of the MIST Evolutionary Tracks.'''
     age_col = "star_age"
     logteff_col = "log_Teff"
     logg_col = "log_g"
+    logL_col = "log_L"
+    # Note that the radius is inferred, not directly interpolated.
+    radius_col = "radius"
+    masses = np.arange(0.1, 2.0+0.02, 0.02)
+
+    def __init__(self, fulltable, mass, feh, alpha, make_rad_col=True):
+        '''Set up a MIST Evolutionary Track.
+
+        In order to do so, there needs to be a table which corresponds to a
+        timeseries which is specified by mass, iron and alpha abundance.'''
+        super().__init__(fulltable, self.age_col, mass, feh, alpha)
+        if make_rad_col:
+            self._add_radius_column(fulltable, logg=False)
+
 
     @classmethod
     def track_from_file(
@@ -212,9 +253,21 @@ class MISTEvolutionaryTrack(models.StellarEvolutionaryTrack):
 #       cleaned_table = models.bin_nearby_table_values(
 #           MIST_table, "star_age", 2)
         cleaned_table = MIST_table
-        mist = cls(cleaned_table, "star_age", mass, feh, 0.0)
+        mist = cls(cleaned_table, mass, feh, 0.0)
         mist.MIST_version = MIST_version
         return mist
+
+    @classmethod
+    def nearest_mass(cls, mass):
+        '''Return the mass of the track with the nearest mass to the given mass.
+
+        Rounds the given mass to the track with the closest mass to the given
+        mass. Since the tracks come in 0.05 mass intervals, this will handle
+        rounding to the nearest 0.05.'''
+        interval = 0.05
+        newmass = np.around(mass / interval) * interval
+        return newmass
+
 
     def restrict_phase(self, phasenums):
         '''Restrict the evolutionary track to a given phase.
@@ -241,11 +294,77 @@ class MISTEvolutionaryTrack(models.StellarEvolutionaryTrack):
         self.tracktable = vstack(tables)
         self.tracktable.sort(self.age_col)
 
+    def _add_radius_column(self, fulltable, radcol=radius_col, logg=False):
+        '''Add a radius column to this Isochrone's table.
+
+        The column will be defined by the keywrod argument radcol. If the logg
+        keyword is true, the radius will be defined using Mass and log(g). If
+        the keyword is false, then the radius will be defined using Lbol and
+        Teff.'''
+        if logg:
+            fulltable[radcol] = np.sqrt(
+                fulltable[self.mass_col] / 10**(fulltable[self.logg_col] - 4.44))
+        else:
+            fulltable[radcol] = 10**(0.5*(
+                fulltable[self.logL_col] - 4*(
+                    fulltable[self.logteff_col] - np.log10(5777))))
+
+    def age_at_radius(self, radius):
+        '''Interpolate the age of the star when it becomes a certain radius.'''
+        ind = bisect.bisect_left(self.tracktable[self.radius_col], radius)
+        if ind == len(self.tracktable):
+            raise ValueError("Track does not reach desired age.")
+        rad1 = self.tracktable[self.radius_col][ind]
+        rad2 = self.tracktable[self.radius_col][ind+1]
+        age1 = self.tracktable[self.age_col][ind]
+        age2 = self.tracktable[self.age_col][ind+1]
+        newage = (age2 + (age2 - age1) / (rad2 - rad1) * (radius - rad2))
+        return newage
+
+class MISTIsoTemp(object):
+    '''A series of subgiant datapoints at fixed temperature.'''
+    age_col = "star_age"
+    mass_col = "Mass"
+    logg_col = "log_g"
+    logL_col = "log_L"
+    # Note that the radius is inferred, not directly interpolated.
+    radius_col = "radius"
+
+    def __init__(
+            self, teff, startmass=1.0, endmass=2.0, step=0.02, feh=0.0,
+            phases=[0, 2]):
+        '''Make a sequence of mass at fixed teff.'''
+
+        isotemp_list = []
+        masses = []
+
+        for m in np.arange(startmass, endmass, step):
+            track = MISTEvolutionaryTrack.track_from_file(m, feh)
+            track.restrict_phase(phases)
+            # Get the age of the track when it is on the subgiant branch.
+            try:
+                ref_track_age = track.age_at_col(
+                    track.logteff_col, np.log10(teff), col_increases=False)
+            except IndexError:
+                # If the track doesn't hit the given teff, ignore.
+                continue
+            interp_track = track.interpolate_at_age(ref_track_age)
+            isotemp_list.append(interp_track)
+            masses.append(m)
+
+        isotemp_table = vstack(isotemp_list)
+        isotemp_table[self.mass_col] = masses
+        self.tracktab = isotemp_table
+
 
 def download_MIST_isochrone(
         MIST_version, vvcrit, age_scale, age_list, feh, bandstr,
         folder=paths.MIST_PATH):
-    '''Download the MIST isochrone for a specific [Fe/H].'''
+    '''Download the MIST isochrone for a specific [Fe/H].
+    
+    The MIST version must be 1.2 (as of June 2019). vvcrit must be either 0.0
+    or 0.4. The age_scale denotes whether you want to specify age as a linear
+    or log value. It should either have the value of "linear" or "log10".'''
     if MIST_version != 1.2:
         raise ValueError("Only MIST version {0:.1f} is available.".format(
             MIST_version))
@@ -298,7 +417,8 @@ def download_MIST_isochrone(
 
     file_stream = io.BytesIO(r_file.content)
 
-    input_folder = folder / isochrone_folder(MIST_version, vvcrit, bandstr)
+    input_folder = (
+        folder / abridged_isochrone_folder(MIST_version, vvcrit, bandstr))
     input_folder.mkdir(exist_ok=True)
     # Zipfile only takes path-like objects in versions greater than 3.6.2
     with zipfile.ZipFile(file_stream, 'r') as mist_zip:
@@ -406,17 +526,27 @@ def name_track_folder(MIST_version, vvcrit, bandstr, feh):
 
 def name_track_file(mass):
     '''Name a MIST track file. This specifies a mass within the track folder.'''
-    massformat = int(np.round(mass, 4) * 10000)
+    # Adding 0.5 because occasionally the value will be 13999.9999 instead of
+    # 14.0.
+    massformat = int(np.round(mass, 4) * 10000 + 0.5)
     templatestr = "{0:07d}M.track.eep.cmd"
     newstr = templatestr.format(massformat)
     return newstr
 
-def isochrone_folder(MIST_version, vvcrit, bandstr):
-    '''Name of the folder that contains the isochrones.
+def abridged_isochrone_folder(MIST_version, vvcrit, bandstr):
+    '''Name of the folder that contains abridged isochrones.
 
     This is a custom folder which only holds the isochrones for desired
     ages.'''
     templatestr = "MIST_v{0:.1f}_abridged_vvcrit{1:.1f}_{2}"
+    newstr = templatestr.format(MIST_version, vvcrit, bandstr)
+    return newstr
+
+def full_isochrone_folder(MIST_version, vvcrit, bandstr):
+    '''Name of the folder that contains the fullisochrones.
+
+    This folder holds the full grid of isochrones..'''
+    templatestr = "MIST_v{0:.1f}_vvcrit{1:.1f}_{2}"
     newstr = templatestr.format(MIST_version, vvcrit, bandstr)
     return newstr
 

@@ -62,6 +62,39 @@ class StellarEvolutionaryTrack(object):
             newtab = Table(rows=[rowdict])
             return newtab
 
+    def age_at_col(self, col, colval, col_increases=True):
+        '''Interpolate the age of the star when a parameter first hits a value.
+        
+        Be cautious using this method for double-valued columns. It's highly
+        recommended the restrict the phase first when using this method.
+        
+        The col_increases attribute is for double-valued columns. It will
+        determine whether the slope should be increasing or decreasing as it 
+        passes through the point.'''
+        # Find the indices where the column goes from being below to above
+        # colval.
+        change_indices = np.argwhere(find_signchange(
+            self.tracktable[col] - colval)).flatten()
+        ind = change_indices[0]
+        colval1 = self.tracktable[col][ind-1]
+        colval2 = self.tracktable[col][ind]
+        # If this isn't the solution i want, take the next solution.
+        # If there is no next solution, I guess raise an error.
+        if ((col_increases and colval2 < colval1) or 
+                (not col_increases and colval2 > colval1)):
+            ind = change_indices[1]
+        age1 = self.tracktable[self.age_col][ind-1]
+        age2 = self.tracktable[self.age_col][ind]
+        newage = (age2 + (age2 - age1) / (colval2 - colval1) * (colval - colval2))
+        return newage
+
+    def plot_columns(self, xcol, ycol):
+        '''Plot the internal columns between xcol and ycol'''
+        plt.plot(self.tracktable[xcol], self.tracktable[ycol], color='k', ls="--",
+                 marker="o")
+        plt.xlabel(xcol)
+        plt.ylabel(ycol)
+
 class StellarIsochrone(object):
     '''A generic class for Stellar Isochrones.
     
@@ -167,7 +200,7 @@ class StellarIsochrone(object):
         plt.xlabel(xcol)
         plt.ylabel(ycol)
 
-    def make_color_col(self, band1, band2):
+    def make_color_col(self, band1, band2, colorcol):
         '''Combine two bands to make a color column.
         
         Note that the function assumes, but does not enforce, that band1 is
@@ -180,8 +213,7 @@ class StellarIsochrone(object):
             raise ValueError("Two bands must be distinct.")
 
         for v in self.iso_dict.values():
-            color = "-".join([band1, band2])
-            v[color] = v[band1] - v[band2]
+            v[colorcol] = v[band1] - v[band2]
 
 def bin_nearby_table_values(table, bin_col, decimals):
     '''Bin the table according to values nearby in bin_col.
@@ -214,7 +246,7 @@ def fix_duplicate_array_values(xvals, yvals):
     # the answers. As a result, quantities that should be identical can be
     # scattered above or below what they are.
     dupmask = np.abs(np.diff(xvals)) > 1.01e-5
-    valarray = np.vstack([xvals, yvals])
+    valarray = np.ma.vstack([xvals, yvals])
     # If the cases of duplication are isolated:
     if np.all(np.logical_or(dupmask[1:], dupmask[:-1])):
         meanvals = np.mean([
@@ -331,3 +363,17 @@ def ensure_array_increasing(xvals, yvals):
     assert abs(min(xdiffs)) <= 1*min(xdiffs[xdiffs > 0])
 
     return sorted_xvals, sorted_yvals
+
+def find_signchange(arr):
+    '''Return indices that show when an array undergoes a sign change.
+
+    Ex: array([1, 1, -1, -2, -4, 5, 6])
+    Returns array([0, 0, 1, 0, 0, 1, 0])
+    '''
+    signs = np.sign(arr)
+    signchange = ((np.roll(signs, 1) - signs) != 0).astype(int)
+    # If the beginning and end are different signs, this could lead to the
+    # first element being called a signchange. We don't want this for our
+    # purposes.
+    signchange[0] = 0
+    return signchange

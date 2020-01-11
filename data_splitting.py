@@ -8,6 +8,7 @@ import numpy.core.defchararray as npstr
 from astropy.table import vstack, Table
 import matplotlib.pyplot as plt
 import scipy
+from scipy.interpolate import interp1d
 
 import read_catalog as catin
 import catalog
@@ -17,6 +18,7 @@ import hrplots as hr
 import rotation_consistency as rot
 import eclipsing_binaries as ebs
 import path_config as paths
+import jenboundary as jen
 
 
 class DataSplitter:
@@ -413,22 +415,112 @@ def _check_namelist_for_tildes(namelist):
                 "{0} cannot be a name that starts with a tilde (~)".format(
                     name))
 
+class GaiaSplitter(DataSplitter):
+    '''Split dataset with Gaia information.'''
 
-class KeplerSplitter(DataSplitter):
+    def __init__(self, data, splitgroups=None, indices=None,
+                 gaia_index="source_id"):
+        '''Initialize the splitter for a Gaia-containig dataset.
+
+        Set up the splitter with the given data. The splitter is indexed by the
+        gaia_index, which should be specified in the parameter "gaia_index".'''
+        super().__init__(data, splitgroups=splitgroups, indices=indices)
+        self.gaia_index = gaia_index
+
+    def split_parallax_quality(
+            self, parallax_col="parallax", parallax_err_col="parallax_error", 
+            frac_err=0.05, splitnames=(
+                "Good parallax", "Bad parallax", "No parallax"), 
+            crit="Gaia DR2 parallax"):
+        '''Split the sample based on the quality of the parallax.
+
+        The value and error of parallax must be given in parallax_col and
+        parallax_err_col. Splitnames should be a 3-tuple containing the names
+        of categories for those objects with good parallax, bad parallax, and
+        no parallax.
+        
+        Only the targets with fractional parallax error will be accepted as
+        having good parallax. Targets with fractional parallax error higher
+        than frac_error, or those with negative parallaxes, will be removed.
+        Objects with no Gaia parallaxes at all are categorized under the no
+        parallax name.'''
+        parallax_ratio = self.data[parallax_col] / self.data[parallax_err_col]
+
+        no_parallax_indices = self.data[parallax_col].mask
+        good_indices = np.logical_and(
+            parallax_ratio >= 1/frac_err, np.logical_not(no_parallax_indices))
+        bad_indices = np.logical_and(
+            parallax_ratio < 1/frac_err, np.logical_not(no_parallax_indices))
+
+        indexarr = [good_indices, bad_indices, no_parallax_indices]
+        self._setup_indices(splitnames, indexarr, crit)
+
+    def split_evstates(
+            self, splitnames=(
+                "Cool Dwarfs", "Hot Dwarfs", "Subgiants", 
+                "Luminous Subgiants", "RGB Base", "Giants", "No Class"), 
+            evcrit="EV Bins", teff_col="teff", kcol="K Excess"):
+        '''Split the sample into multiple binned regions in HR space.
+        
+        The current iteration is to split between hot and cool. The cool stars
+        will be split into cool dwarfs and giants. The hot stars will be split
+        between dwarfs, subgiants, and luminous subgiants. For targets either
+        without K Excesses or Teffs, they will be categorized as not having a
+        class.'''
+        noclass = np.logical_or(self.data[teff_col].mask, self.data[kcol].mask)
+
+        cool = np.logical_and(
+            self.data[teff_col] <= 5250, np.logical_not(noclass))
+        hot = np.logical_and(
+            self.data[teff_col] > 5250, np.logical_not(noclass))
+        subgiant_hot = np.logical_and(
+            self.data[teff_col] > 5250, np.logical_not(noclass))
+        luminous_hot = np.logical_and(
+            self.data[teff_col] > 5250, np.logical_not(noclass))
+
+        dwarf = np.logical_and(
+            self.data[kcol] >= -1.3, np.logical_not(noclass))
+        subgiant = np.logical_and(
+            np.logical_and(self.data[kcol] < -1.3, self.data[kcol] >= -2.2), 
+            np.logical_not(noclass))
+        lum_sub = np.logical_and(
+            np.logical_and(self.data[kcol] < -2.2, self.data[kcol] >= -4.75), 
+            np.logical_not(noclass))
+
+        cool_dwarfs = np.logical_and(cool, dwarf)
+        hot_dwarfs = np.logical_and(hot, dwarf)
+        hot_subgiants = np.logical_and(subgiant_hot, subgiant)
+        luminous_subgiants = np.logical_and(luminous_hot, lum_sub)
+        rgb_base = np.logical_and(cool, np.logical_or(subgiant, lum_sub))
+
+        giants = au.multi_logical_and(
+            np.logical_not(cool_dwarfs), np.logical_not(hot_dwarfs),
+            np.logical_not(hot_subgiants), np.logical_not(luminous_subgiants),
+            np.logical_not(rgb_base), np.logical_not(noclass))
+
+        indexarr = [cool_dwarfs, hot_dwarfs, hot_subgiants,
+                    luminous_subgiants, rgb_base, giants, noclass]
+
+        self._setup_indices(splitnames, indexarr, evcrit)
+
+
+class KeplerSplitter(GaiaSplitter):
     '''Split dataset with Kepler stellar properties.
 
     Current stellar properties are: Teff and Log(g).'''
 
     def __init__(
             self, data, splitgroups=None, indices=None, kic_col="kepid", 
-            tm_col="tm_designation"):
+            tm_col="tm_designation", gaia_index="source_id"):
         '''Initialize the splitter for a dataset specifying the index columns.
 
         Set up the Splitter with the given data. The splitter is also indexed
         both by KIC IDs as well as 2MASS IDs. The columns specifying those
         should be given in kic_col and tm_col. They'll be available as
         self.kic_col and self.tm_col.'''
-        super().__init__(data, splitgroups=splitgroups, indices=indices)
+        super().__init__(
+            data, splitgroups=splitgroups, indices=indices,
+            gaia_index=gaia_index)
         self.kic_col = kic_col
         self.tm_col = tm_col
 
@@ -727,13 +819,14 @@ class McQuillanSplitter(KeplerSplitter):
     '''Keep an organized database of various cuts on McQuillan data.'''
 
     def __init__(self, data=None, splitgroups=None, indices=None, 
-                 kic_col="kepid", tm_col="tm_designation"):
+                 kic_col="kepid", tm_col="tm_designation",
+                 gaia_index="source_id"):
         '''Initialize a splitter of McQuillan data.'''
         if not data:
             data = catin.mcquillan_with_stelparms()
         super().__init__(
             data, splitgroups=splitgroups, indices=indices, kic_col=kic_col, 
-            tm_col=tm_col)
+            tm_col=tm_col, gaia_index=gaia_index)
 
     def split_period(self, splitvalues, splitnames, pcol="Prot", 
                      period_crit="period", invert_inequality=False):
@@ -751,53 +844,29 @@ class McQuillanSplitter(KeplerSplitter):
         self.split_by_col(pcol, splitvalues, splitnames, period_crit, 
                           invert_inequality=invert_inequality)
 
-class GaiaSplitter(KeplerSplitter):
-    '''Split dataset with Gaia information.'''
+    def split_veq(self, splitvalues, splitnames, pcol="Prot", rcol="Gaia R",
+                  vel_crit="Equatorial Velocity", invert_inequality=False):
+        '''Split the data by equatorial velocity.
 
-    def __init__(self, data, splitgroups=None, indices=None,
-                 gaia_index="source_id", kic_col="kepid", tm_col="APOGEE_ID"):
-        '''Initialize the splitter for a Gaia-containig dataset.
+        This function determine the equatorial velocity from the period given
+        in pcol and the radius given in rcol. The class of velocity measurement
+        should be given in vel_crit.'''
+        vels = rot.period_to_velocities(self.data[pcol], self.data[rcol])
 
-        Set up the splitter with the given data. The splitter is indexed by the
-        gaia_index, which should be specified in the parameter "gaia_index".'''
-        super().__init__(data, splitgroups=splitgroups, indices=indices,
-                         kic_col=kic_col, tm_col=tm_col)
-        self.gaia_index = gaia_index
-
-    def split_parallax_quality(
-            self, parallax_col="parallax", parallax_err_col="parallax_error", 
-            frac_err=0.05, splitnames=(
-                "Good parallax", "Bad parallax", "No parallax"), 
-            crit="Gaia DR2 parallax"):
-        '''Split the sample based on the quality of the parallax.
-
-        The value and error of parallax must be given in parallax_col and
-        parallax_err_col. Splitnames should be a 3-tuple containing the names
-        of categories for those objects with good parallax, bad parallax, and
-        no parallax.
-        
-        Only the targets with fractional parallax error will be accepted as
-        having good parallax. Targets with fractional parallax error higher
-        than frac_error, or those with negative parallaxes, will be removed.
-        Objects with no Gaia parallaxes at all are categorized under the no
-        parallax name.'''
-        parallax_ratio = self.data[parallax_col] / self.data[parallax_err_col]
-
-        no_parallax_indices = self.data[parallax_col].mask
-        good_indices = np.logical_and(
-            parallax_ratio >= 1/frac_err, np.logical_not(no_parallax_indices))
-        bad_indices = np.logical_and(
-            parallax_ratio < 1/frac_err, np.logical_not(no_parallax_indices))
-
-        indexarr = [good_indices, bad_indices, no_parallax_indices]
-        self._setup_indices(splitnames, indexarr, crit)
-
+        tempvelcol = "tempvel"
+        self.data[tempvelcol] = vels
+        try:
+            self.split_by_col(
+                tempvelcol, splitvalues, splitnames, vel_crit,
+                invert_inequality=invert_inequality)
+        finally:
+            del(self.data[tempvelcol])
 
 class APOGEESplitter(KeplerSplitter):
     '''Keep an organized database of various cuts on APOGEE data.'''
 
     def __init__(self, data=None, splitgroups=None, indices=None, 
-                 kic_col="kepid", tm_col="APOGEE_ID"):
+                 kic_col="kepid", tm_col="APOGEE_ID", gaia_index="source_id"):
         '''Initialize a splitter of APOGEE data.
         
         If the data parameter is passed, then it will be set to the full data
@@ -806,7 +875,7 @@ class APOGEESplitter(KeplerSplitter):
             data = catin.dr14_with_KIC_stelparms()
             data["ALPHA_FE"] = data["ALPHA_M"] + data["M_H"] - data["FE_H"]
         super().__init__(data, splitgroups=splitgroups, indices=indices, 
-                         kic_col=kic_col, tm_col=tm_col)
+                         kic_col=kic_col, tm_col=tm_col, gaia_index=gaia_index)
 
     def split_vscatter(self, splitvalues, splitnames, col="VSCATTER",
                        vscatter_crit="VSCATTER", invert_inequality=True):
@@ -944,7 +1013,8 @@ class APOGEESplitter(KeplerSplitter):
         determinations of the asteroseismic dwarfs can be specified in
         astero_crit.'''
         apokasc = catin.read_APOKASC_catalog()[["2MASS_ID", "RADIUS_DW"]]
-        ast_dwarf = catalog.filter_invalid_APOGEE_entries(apokasc, "RADIUS_DW")
+        ast_dwarf = catalog.filter_invalid_APOGEE_entries(
+            apokasc, "RADIUS_DW", -9999.0)
         astero_indices = au.mark_selections_in_columns(
             self.data[apid_col], ast_dwarf["2MASS_ID"])
         self._setup_complement_index(splitnames, astero_indices, astero_crit)
@@ -970,6 +1040,33 @@ class APOGEESplitter(KeplerSplitter):
             mcq_period, mcq_noperiod))
         indexarr = [mcq_period, mcq_noperiod, no_mcq]
         self._setup_indices(mcq_names, indexarr, mcq_crit)
+
+    def split_Garcia_periods(
+            self, garcia_names=(
+                "Garcia", "No Garcia", "Not Garcia Asteroseismic"),
+            kiccol="KIC", garcia_crit="Garcia", apid_col="APOGEE_ID"):
+        '''Separate the sample based on Garcia et al periods.
+
+        Splits the dataset three ways. It assumes all asteroseismic dwarfs were
+        analyzed by Garcia et al (2014). Ones without reported rotation periods
+        would be those that weren't detected. Stars that aren't asteroseismic
+        dwarfs at all would be classified as such, so Garcia wouldn't have
+        analyzed them.'''
+        apokasc = catin.read_APOKASC_catalog()[["2MASS_ID", "RADIUS_DW"]]
+        ast_dwarf = catalog.filter_invalid_APOGEE_entries(
+            apokasc, "RADIUS_DW", -9999.0)
+        astero_indices = au.mark_selections_in_columns(
+            self.data[apid_col], ast_dwarf["2MASS_ID"])
+        not_astero = np.logical_not(astero_indices)
+
+        garcia = catin.read_Garcia_periods()
+        garcia_period = np.logical_and(au.mark_selections_in_columns(
+            self.data[kiccol], garcia["KIC"]), astero_indices)
+        garcia_nondet = np.logical_not(
+            au.multi_logical_or(garcia_period, not_astero))
+
+        indexarr = [garcia_period, garcia_nondet, not_astero]
+        self._setup_indices(garcia_names, indexarr, garcia_crit)
 
     def split_Kounkel_SB2(
             self, sb2_names=("Kounkel SB2", "Not Kounkel SB2"), 
@@ -1137,9 +1234,10 @@ class APOGEESplitter(KeplerSplitter):
 
     def split_APOGEE_evstates(
             self, splitnames=(
-                "Cool Dwarfs", "Giants", "Hot Dwarfs", "Subgiants", 
-                "Luminous Subgiants", "No Class"), evcrit="EV Bins",
-            teff_col="TEFF", kcol="K Excess"):
+                "Giants", "Blue Stragglers", "Red Stragglers", "Cool Singles",
+                "Photometric Binaries", "Subsubgiants", "Fast Subgiants", 
+                "Slow Subgiants", "Slow Dwarfs", "No Class"),
+            evcrit="EV Bins", teff_col="TEFF"):
         '''Split the sample into multiple binned regions in HR space.
         
         The current iteration is to split between hot and cool. The cool stars
@@ -1147,34 +1245,104 @@ class APOGEESplitter(KeplerSplitter):
         between dwarfs, subgiants, and luminous subgiants. For targets either
         without K Excesses or Teffs, they will be categorized as not having a
         class.'''
-        noclass = np.logical_or(self.data[teff_col].mask, self.data[kcol].mask)
+        noclass = np.logical_or(
+            self.data[teff_col].mask, self.data["K Excess"].mask)
+
+        mk_giant_boundary = self.data["M_K"] < -0.45
+        mk_nongiant_boundary = self.data["M_K"] >= -0.45
+
+        mk_dwarf_boundary = self.data["M_K"] >= 2
+        mk_nondwarf_boundary = np.logical_and(
+            mk_nongiant_boundary, self.data["M_K"] < 2)
+
+        singles = self.data["K Excess"] > -0.3
+        photbins = np.logical_and(
+            self.data["K Excess"] <= -0.3, 
+            self.data["K Excess"] > -2.5 * np.log10(3))
+        ssgs = self.data["K Excess"] <= -2.5 * np.log10(3)
 
         cool = np.logical_and(
             self.data[teff_col] <= 5250, np.logical_not(noclass))
         hot = np.logical_and(
             self.data[teff_col] > 5250, np.logical_not(noclass))
 
-        dwarf = np.logical_and(
-            self.data[kcol] >= -1.3, np.logical_not(noclass))
-        subgiant = np.logical_and(
-            np.logical_and(self.data[kcol] < -1.3, self.data[kcol] >= -2.2), 
-            np.logical_not(noclass))
-        lum_sub = np.logical_and(
-            np.logical_and(self.data[kcol] < -2.2, self.data[kcol] >= -4.75), 
-            np.logical_not(noclass))
+        cooler_than_giant = self.data[teff_col] < 4575
+        hotter_than_giant = self.data[teff_col] >= 4575
 
-        cool_dwarfs = np.logical_and(cool, dwarf)
-        hot_dwarfs = np.logical_and(hot, dwarf)
-        hot_subgiants = np.logical_and(hot, subgiant)
-        luminous_subgiants = np.logical_and(hot, lum_sub)
+        cool_speed_boundary = self.data[teff_col] < 5500
+        hot_speed_boundary = self.data[teff_col] >= 5500
 
-        giants = au.multi_logical_and(
-            np.logical_not(cool_dwarfs), np.logical_not(hot_dwarfs),
-            np.logical_not(hot_subgiants), np.logical_not(luminous_subgiants),
-            np.logical_not(noclass))
+        # Now Jen's boundary.
+        jen_fast = jen.jen_fast_boundary()
+        jen_fast_teff = jen_fast[jen.format_Jen_column(0.0, 10, "Teff")]
+        jen_fast_M_K = jen_fast[jen.format_Jen_column(0.0, 10, "M_K")]
+        jen_fast_interp = interp1d(
+            jen_fast_M_K[~jen_fast_M_K.mask],
+            jen_fast_teff[~jen_fast_teff.mask], bounds_error=False)
+        jen_min_M_K = np.ma.max(jen_fast_M_K)
+        jen_max_M_K = np.ma.min(jen_fast_M_K)
+        jen_max_teff = np.ma.max(jen_fast_teff)
+        bottom_point = (6150, 3.15)
 
-        indexarr = [cool_dwarfs, giants, hot_dwarfs, hot_subgiants,
-                    luminous_subgiants, noclass]
+        boundary = np.zeros(len(self.data))
+
+        MK_out_of_range = self.data["M_K"] < jen_max_M_K
+        MK_boundary_jen = np.logical_and(
+            self.data["M_K"] < jen_min_M_K, self.data["M_K"] >= jen_max_M_K)
+        MK_boundary_linear = self.data["M_K"] >= jen_min_M_K
+
+        boundary[MK_boundary_jen] = (
+            jen_fast_interp(np.ma.filled(self.data["M_K"][MK_boundary_jen])))
+        slope =  (jen_max_teff - bottom_point[0]) / (
+            jen_min_M_K - bottom_point[1])
+        boundary[MK_boundary_linear] = (
+            bottom_point[0] + slope * (
+                self.data["M_K"][MK_boundary_linear] - bottom_point[1]))
+
+        bound_disp = 150
+        hot_single_rotators = np.logical_and(
+            np.logical_not(MK_out_of_range), 
+            self.data["TEFF"] >= boundary - bound_disp)
+        no_single_rotators = np.logical_and(
+            np.logical_not(MK_out_of_range), 
+            self.data["TEFF"] < boundary - bound_disp)
+     
+
+        # Here is the giant class
+        giants = np.logical_and(mk_giant_boundary, cool)
+        # Here is the blue straggler class.
+        blue_stragglers = np.logical_and(mk_giant_boundary, hot)
+        # Here is the red straggler class
+        red_stragglers = np.logical_and(
+            cooler_than_giant, mk_nondwarf_boundary)
+        # Single stars
+        single_stars = np.logical_and(
+            np.logical_and(singles, mk_dwarf_boundary), cool)
+        # Photometric Binaries
+        photometric_binaries = np.logical_and(
+            np.logical_and(photbins, mk_dwarf_boundary), cool)
+        # Subsubgiants
+        subsubgiants = np.logical_and(
+            np.logical_and(ssgs, mk_dwarf_boundary), cool)
+        # Fast hot dwarfs
+        fast_subgiants = np.logical_and(
+            hot_single_rotators, mk_nongiant_boundary)
+        # Slow subgiants
+        slow_subgiants = np.logical_and(
+            mk_nondwarf_boundary, np.logical_and(
+                np.logical_and(no_single_rotators, cool_speed_boundary), 
+                hotter_than_giant))
+        # Slow dwarfs
+        slow_dwarfs = np.logical_or(
+            np.logical_and(mk_dwarf_boundary, np.logical_and(
+                hot, no_single_rotators)),
+            np.logical_and(no_single_rotators, hot_speed_boundary))
+
+
+        indexarr = [
+            giants, blue_stragglers, red_stragglers, single_stars,
+            photometric_binaries, subsubgiants, fast_subgiants, slow_subgiants,
+            slow_dwarfs, noclass]
 
         self._setup_indices(splitnames, indexarr, evcrit)
 
@@ -1275,7 +1443,7 @@ class APOKASCSplitter(APOGEESplitter):
         for objects that have been run through the dwarf pipeline, and null for
         objects that don't.'''
         invalid = catalog.invalid_indices(
-            self.data, dwarfcol, maskvalue=-9999.0)
+            self.data, dwarfcol, maskvalue=np.ma.masked)
         self._setup_complement_index(splitnames, invalid, apodwarf_crit)
 
     def split_Jen_targets(
@@ -1399,13 +1567,15 @@ def initialize_full_APOGEE(aposplit):
     aposplit.split_mag(
         "H", [7, 12.3], ("H Bright", "H APOGEE", "H Faint", "No H"), mag_crit="H",
         null_value=np.ma.masked)
+#   aposplit.split_logg("LOGG_FIT", 3.5, ("Logg Giant", "Logg Dwarf"))
     aposplit.split_combined_targeting(
-        ["APOGEE_KEPLER_COOLDWARF", "APOGEE2_APOKASC", "APOGEE_KEPLER_EB",
+        ["APOGEE_KEPLER_COOLDWARF", "APOGEE2_APOKASC", 
          "APOGEE2_KOI", "APOGEE2_KOI_CONTROL", "APOGEE_KEPLER_SEISMO",
-         "APOGEE_RV_MONITOR_KEPLER", "APOGEE2_EB", "APOGEE_KEPLER_HOST"],
+         "APOGEE_RV_MONITOR_KEPLER", "APOGEE_KEPLER_HOST"],
         ("Targeted", "Not Targeted"), "Targeting")
 
     aposplit.split_McQuillan_periods(kiccol="kepid")
+    aposplit.split_Garcia_periods(kiccol="kepid")
 
     aposplit.split_El_Badry_targets()
 
@@ -1413,7 +1583,9 @@ def initialize_full_APOGEE(aposplit):
         "r_Teff", ["PHO54"], splitnames=(
             "Huber Photometry", "Other Teffs", "Not in Huber"), 
         prov_crit="Huber Photometry", null_value=np.ma.masked)
-    
+
+    aposplit.split_asteroseismic_dwarfs()
+
 def general_to_hot_kic_sample(apogeesplitter):
     '''Get the subset of the hot sample that has KIC parameters.'''
     hot_kic = apogeesplitter.split_subsample([

@@ -12,6 +12,7 @@ DSEP_OUTPUT = HEAD_DIR / "DSEP"
 
 DSEP_PATH = HOME_DIR / "DSep"
 DSEP_ISOCHRONES= DSEP_PATH / "isochrones"
+DSEP_TRACKS = DSEP_PATH / "Tracks"
 DSEP_INTERPOLATOR_EXECUTABLE = DSEP_PATH / "iso_interp_feh"
 DSEP_SPLITTER_EXECUTABLE = DSEP_PATH / "isolf_split"
 
@@ -19,11 +20,14 @@ MIST_PATH = HEAD_DIR / "MIST"
 # Because I don't need the full grid of ages, the abridged directory just has
 # the ages for immediate use. Flip back to the old grid if interpolation over
 # age needs to be done.
-MIST_ISOCHRONES = MIST_PATH / "MIST_v1.1_abridged_vvcrit0.0_UBVRIplus"
+MIST_ISOCHRONES = MIST_PATH / "MIST_v1.2_abridged_vvcrit0.0_UBVRIplus"
 
 BARAFFE_PATH = HEAD_DIR / "Baraffe"
 
 YREC_PATH = HEAD_DIR / "YREC"
+
+JEN_FAST_LAUNCH_SGB_PATH = HEAD_DIR / "simonian_sgb_fast_launch.dat"
+JEN_SLOW_LAUNCH_SGB_PATH = HEAD_DIR / "simonian_sgb_slow_launch.dat"
 
 CLUSTER_PATH = HEAD_DIR / "Clusters"
 PLEIADES_PATH = CLUSTER_PATH / "Pleiades"
@@ -112,7 +116,7 @@ SODERBLOM_LICK_TABLE_1 = HEAD_DIR / "Soderblom_1993b_Table_1.txt"
 SODERBLOM_ADDITIONAL_TABLE_6 = HEAD_DIR / "Soderblom_1993b_Table_6.txt"
 JACKSON_PLEIADES_PATH = HEAD_DIR / "MN_17_3616_MJ_Table4.csv"
 ODELL_TABLE_3_PATH = HEAD_DIR / "Odell_Table_3.txt"
-PLEIADES_GAIA_TARGETS = HEAD_DIR / "Pleiades_Gaia.vot"
+PLEIADES_GAIA_TARGETS = HEAD_DIR / "Pleiades_Gaia.vot.gz"
 
 MERMILLIOD_CLUSTER_TABLE_11 = HEAD_DIR / "Mermilliod_2009_Table_11.fits"
 CUMMINGS_HYADES_TABLE = HEAD_DIR / "Cummings_Hyades_Table_6.fits"
