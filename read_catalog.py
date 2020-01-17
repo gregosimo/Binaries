@@ -1,6 +1,10 @@
+import tempfile
+
 from astropy.table import Table, vstack, Column
+from astropy.coordinates import SkyCoord, FK5
 import astropy.units as u
 from astropy.io import fits
+from astroquery.gaia import Gaia
 from scipy.io import readsav
 import numpy as np
 import numpy.core.defchararray as npstr
@@ -9,19 +13,20 @@ import statop as stat
 
 import path_config as paths
 import catalog
+import sample_characterization as samp
 
 ###############################################################################
 # Reading Kepler/APOGEE catalogs #
 ###############################################################################
 
-@au.memoized
+#@au.memoized
 def read_APOKASC_catalog(
     filepath=paths.APOKASC_PATH):
     '''Reads in the APOKASC catalog.
 
     The catalog should be located at filepath.
     '''
-    apocat = Table.read(filepath, format="fits")
+    apocat = Table.read(filepath, format="fits", character_as_bytes=False)
     return apocat
 
 def read_EHK_catalog(filepath=paths.EHK_PATH):
@@ -31,14 +36,21 @@ def read_EHK_catalog(filepath=paths.EHK_PATH):
         names=["RA", "Dec", "U", "U_err", "B", "B_err", "V", "V_err"] )
     return cat
 
-@au.memoized
+#@au.memoized
 def read_McQuillan_catalog(filepath=paths.MCQUILLAN_CATALOG):
     '''Reads in the McQuillan catalog.
 
-    The catalog shoul be located at filepath.
+    The catalog should be located at filepath.
     '''
     mcquillancat = Table.read(filepath, format="fits")
     return mcquillancat
+
+def read_McQuillan_nondetections(filepath=paths.MCQUILLAN_NONDETECTIONS):
+    '''Read in the Mcquillan nondetection table.
+
+    The catalog should be located at filepath.'''
+    nondets = Table.read(filepath, format="fits")
+    return nondets
 
 def read_original_KIC_catalog(filepath=paths.ORIG_KIC):
     '''Read in the original KIC catalog.'''
@@ -52,10 +64,34 @@ def read_Huber_KIC_catalog(huberpath=paths.HUBER_CATALOG):
 
 def read_KIC_DR25_catalog(kicpath=paths.KIC_CATALOG):
     '''Read the KIC DR25 Stellar Parameter catalog.'''
-    kiccat = Table.read(str(kicpath), format="ascii.ipac")
+    desired_cols = [
+        "kepid", "tm_designation", "teff", "teff_err1", "teff_err2", "logg", 
+        "logg_err1", "logg_err2", "feh", "feh_err1", "feh_err2", "mass", 
+        "mass_err1", "mass_err2", "radius", "radius_err1", "radius_err2", 
+        "kepmag", "dist", "dist_err1", "dist_err2", "ra", "dec", "st_quarters", 
+        "teff_prov", "logg_prov", "feh_prov", "jmag", "jmag_err", "hmag", 
+        "hmag_err", "kmag", "kmag_err", "av", "av_err1", "av_err2"]
+    kiccat = Table.read(
+        str(kicpath), format="ascii.ipac", include_names=desired_cols)
     fix_table_coordinates_units(kiccat, "ra", "dec")
+    # This was necessary because of a bug in astropy where "dex" isn't
+    # considered a valid flux unit.
+    # https://github.com/astropy/astropy/issues/7279
+    kiccat["feh"].unit = "Dex"
+    kiccat["feh_err1"].unit = "Dex"
+    kiccat["feh_err2"].unit = "Dex"
+    au.set_numeric_fill_values(kiccat, -9999)
     return kiccat
 
+def read_Pinsonneault_2012_catalog(pinpath=paths.PINSONNEAULT_CORRECTIONS):
+    '''Read the corrected catalog from Pinsonneault et al (2012).'''
+    desired_cols = [
+        "KIC", "SDSS-Teff", "e_SDSS-Teff", "E_SDSS-Teff", "K-Teff", "Flag"]
+    pincat = Table.read(
+        str(pinpath), format="ascii.cds", include_names=desired_cols,
+        fill_values=('-9999', '0'))
+    au.set_numeric_fill_values(pincat, -9999)
+    return pincat
 
 def read_van_Saders_file(vspath=paths.VAN_SADERS_SDSS):
     '''Read the APOGEE dwarf targets from Jen's catalog.'''
@@ -73,6 +109,15 @@ def read_van_Saders_file(vspath=paths.VAN_SADERS_SDSS):
             datafile[name] = np.reshape(data_array, len(data_array))
     datafile["COMMENTS"] = vsidl["comments"]
     return datafile
+
+def read_van_Saders_missing_targets(targpath=paths.VAN_SADERS_MISSING):
+    '''Read the missing targets in Jen's sample.
+    
+    These objects were not observed in APOGEE 1. Maybe they were observed in
+    APOGEE2?'''
+    missing_table = Table.read(targpath, format="ascii.basic", names=(
+        "Plate", "KIC", "RA", "DEC", "H", "nExp", "SNR"))
+    return missing_table
 
 def read_van_Saders_Kepler(vspath=paths.VAN_SADERS_MAST):
     '''Read MAST output for Jen's sample.'''
@@ -113,6 +158,14 @@ def read_APOGEE_dwarfs(apopath=paths.APOGEE_DWARF_PATH):
     np.ma.masked_equal(dwarfs["vrelerr"], -9999)
     return dwarfs
 
+def read_Kepler_UCAC4(upath=paths.UCAC_KEPLER_PATH):
+    '''Reads the UCAC4 Table for the full Kepler field.
+    
+    The UCAC-4 table was obtained from the CDS XMatch service.'''
+    pm_table = Table.read(
+        str(upath), format="ascii.csv", include_names=("ID", "pmRA", "pmDE"))
+    pm_table.rename_column("ID", "kepid")
+    return pm_table
 
 def read_UCAC4_Mcquillan_Tidsync(
     upath=paths.UCAC_TIDSYNC_PATH, kic_col="KIC"):
@@ -128,6 +181,20 @@ def read_UCAC4_Mcquillan_Tidsync(
     for grp in pm_groups.groups:
         matched_rows.append(grp[np.argmin(grp["_r"])])
     UCAC_table = Table(rows=matched_rows, names=pm_table.colnames)
+    kic_numbers = npstr.replace(UCAC_table["_1"], "KIC ", "")
+    kic_ints = Column(kic_numbers, name=kic_col, dtype=np.int)
+    del(UCAC_table["_1"])
+    UCAC_table.add_column(kic_ints, index=0)
+    return UCAC_table
+
+def read_UCAC4_EB_Tidsync(
+        upath=paths.UCAC_EB_TIDSYNC_PATH, kic_col="KIC"):
+    '''Reads the UCAC4 table for tidally-synchronized eclipsing binaries.
+
+    The UCAC-4 table was obtained from Vizier
+    (http://cdsbib.u-strasbg.fr/cgi-bin/cdsbib?2012yCat.1322....0Z).'''
+    UCAC_table = Table.read(str(upath), format="ascii.basic", delimiter=";",
+                          data_start=3, header_start=0)
     kic_numbers = npstr.replace(UCAC_table["_1"], "KIC ", "")
     kic_ints = Column(kic_numbers, name=kic_col, dtype=np.int)
     del(UCAC_table["_1"])
@@ -154,6 +221,139 @@ def read_UCAC4_Rafa_Tidsync(
     UCAC_table.add_column(kic_ints, index=0)
     return UCAC_table
 
+def read_TGAS_Kepler(tgas_kep_path=paths.TGAS_KEPLER_OVERLAP):
+    '''Read the TGAS table for stars overlapping with Kepler.
+
+    If this file doesn't exist, use the astroquery package to get it from
+    the Vizier xMatch service.'''
+    desired_cols = ["kepid", "ra_ep2000", "dec_ep2000", "parallax",
+                    "parallax_error", "pmra", "pmra_error", "pmdec",
+                    "pmdec_error"]
+    try:
+        tgas = Table.read(tgas_kep_path, format="ascii.csv",
+                          include_names=desired_cols)
+    except FileNotFoundError:
+        tgas = XMatch.query(cat1="J/ApJS/229/30/catalog", cat2="GAIA DR1 TGAS")
+        tgas.write(str(tgas_kep_path), format="ascii.csv")
+
+    return tgas
+
+def read_Gaia_DR2_Kepler(
+        gaia_dr2_kep_path=paths.GAIA_BERGER_OVERLAP, rewrite=False,
+        username="gsimonia"):
+    '''Read the Gaia DR2 table of stars overlapping with Kepler.
+
+    If this file doesn't exist, use the astroquery package to get it from the
+    Vizier xMatch service.'''
+    if rewrite:
+        # Instead I want to upload this file to the Gaia archive.
+        berger = read_Berger_DR2_Kepler()
+
+        berger.rename_column("R*", "rad")
+        berger.rename_column("e_R*", "rad_down")
+        berger.rename_column("E_R*", "rad_up")
+        berger.rename_column("e_D", "D_down")
+        berger.rename_column("E_D", "D_up")
+
+        bergerpath = paths.HEAD_DIR / "Berger_temp.vo"
+        berger.write(str(bergerpath), format="votable", overwrite=True)
+        print("Please upload file at {0} to Gaia Archive.".format(bergerpath))
+        tablename = input("Enter the table name on the Gaia Archive: ")
+        # Then perform a join operation
+        joinstr = """
+SELECT g.source_id, g.ra, g.ra_error, g.dec, g.dec_error, g.parallax, 
+    g.parallax_error, g.pmra, g.pmra_error, g.pmdec, g.pmdec_error,
+    g.ra_dec_corr, g.ra_parallax_corr, g.ra_pmra_corr,
+    g.ra_pmdec_corr, g.dec_parallax_corr, g.dec_pmra_corr,
+    g.dec_pmdec_corr, g.parallax_pmra_corr, g.parallax_pmdec_corr,
+    g.pmra_pmdec_corr, g.astrometric_n_obs_al,
+    g.astrometric_n_obs_ac, g.astrometric_n_good_obs_al,
+    g.astrometric_n_bad_obs_al, g.astrometric_gof_al,
+    g.astrometric_chi2_al, g.astrometric_excess_noise,
+    g.astrometric_excess_noise_sig, g.astrometric_params_solved,
+    g.astrometric_primary_flag, g.astrometric_weight_al,
+    g.astrometric_matched_observations, g.visibility_periods_used,
+    g.matched_observations, g.duplicated_source, b.KIC, b.D,
+    b.D_down, b.D_up, b.rad, b.rad_down, b.rad_up, b.AV, 
+    g.phot_g_n_obs, g.phot_g_mean_flux, g.phot_g_mean_flux_error,
+    g.phot_g_mean_mag, g.phot_bp_n_obs, g.phot_bp_mean_flux,
+    g.phot_bp_mean_flux_error, g.phot_bp_mean_mag, g.phot_rp_n_obs,
+    g.phot_rp_mean_flux, g.phot_rp_mean_flux_error,
+    g.phot_rp_mean_mag, g.phot_bp_rp_excess_factor,
+    g.phot_proc_mode, g.radial_velocity, g.radial_velocity_error,
+    g.rv_nb_transits, g.phot_variable_flag, g.a_g_val,
+    g.a_g_percentile_lower, g.a_g_percentile_upper,
+    g.e_bp_min_rp_val, g.e_bp_min_rp_percentile_lower,
+    g.e_bp_min_rp_percentile_upper, 
+    g.lum_val, g.lum_percentile_lower, g.lum_percentile_upper
+FROM gaiadr2.gaia_source as g
+RIGHT OUTER JOIN user_{0}.{1} AS b
+ON g.source_id = b.GAIA
+ORDER BY KIC DESC;
+            """.format(username, tablename)
+        print("Please run the following command")
+        print(joinstr)
+        gaia_newtablename  = input(
+              "Please enter the name of the saved table: ")
+        # Then *automatically* download it from my local cache.
+        Gaia.login_gui()
+
+        downloadstr = "SELECT * FROM user_{0}.{1}".format(
+            username, gaia_newtablename)
+
+        print("Running query '{0}'...".format(downloadstr))
+        job = Gaia.launch_job_async(
+            downloadstr, output_file=str(gaia_dr2_kep_path), output_format="votable",
+            dump_to_file=True)
+        print("Query finished. Downloading...")
+
+        dr2 = job.get_results()
+        print("Download finished")
+    else:
+        dr2 = Table.read(gaia_dr2_kep_path, format="votable")
+        # Rename these to be uppercase.
+        dr2.rename_column("kic", "KIC")
+        dr2.rename_column("d", "D")
+        dr2.rename_column("d_down", "D_down")
+        dr2.rename_column("d_up", "D_up")
+        dr2.rename_column("av", "AV")
+        dr2.replace_column(
+            "phot_variable_flag", np.asarray(
+                dr2["phot_variable_flag"], np.unicode_))
+    return dr2
+
+def read_Berger_DR2_Kepler_old(berger_dr2_kep=paths.BERGER_DR2_KEPLER):
+    '''Read in the Gaia parameters in Berger et al (2018).'''
+    desired_cols = [
+        "KIC", "source_id", "dis", "disep", "disem", "rad", "radep", "radem", 
+        "class\\\\"]
+    berger = Table.read(berger_dr2_kep, format="ascii.csv",
+                        include_names=desired_cols, delimiter="&")
+    berger.rename_column("class\\\\", "class")
+    au.set_numeric_fill_values(berger, -9999)
+    berger["class"] = np.asarray(npstr.replace(berger["class"], "\\\\", ""),
+                                 dtype=np.int)
+    return berger
+
+def read_Berger_DR2_Kepler(berger_dr2_kep=paths.BERGER_DR2_KEPLER):
+    '''Read in the Gaia parameters in Berger et al (2018).'''
+    desired_cols = [
+        "KIC", "Gaia", "Teff", "e_Teff", "D", "E_D", "e_D", "R*", "E_R*", 
+        "e_R*", "AV", "Evol", "Bin"]
+    berger = Table.read(berger_dr2_kep, format="ascii.cds",
+                        include_names=desired_cols)
+    return berger
+
+def APOGEE_TGAS(tgas_kep_path=paths.TGAS_KEPLER_OVERLAP,
+                apopath=paths.DR14_ALLSTAR_PATH):
+    '''Read in stars observed in both APOGEE and TGAS.'''
+    apo = dr14_with_KIC_stelparms()
+    tgas = read_TGAS_Kepler()
+    
+    apo_tgas = au.join_by_id(apo, tgas, "kepid", "kepid")
+    return apo_tgas
+
+
 def read_TGAS_McQuillan_APOGEE_overlap_tidsync(
     path=paths.TGAS_MCQUILLAN_APOGEE_TIDSYNC_PATH):
     '''Read the TGAS information for McQuillan/APOGEE targets.
@@ -162,6 +362,17 @@ def read_TGAS_McQuillan_APOGEE_overlap_tidsync(
     targets which overlap between McQuillan and APOGEE.'''
     tgas_table = Table.read(str(path), format="fits")
     return tgas_table
+
+def read_Mermilliod_Open_Cluster_Table_11(
+        path=paths.MERMILLIOD_CLUSTER_TABLE_11):
+    '''Read the Mermilliod RV and rotation data.'''
+    mermilliod_table = Table.read(str(path), format="fits")
+    return mermilliod_table
+
+def read_Cummings_Table_6(path=paths.CUMMINGS_HYADES_TABLE):
+    '''Read in the Cummings Hyades table.'''
+    cummings_table = Table.read(str(path), format="fits")
+    return cummings_table
 
 def read_dr14_allVisit(allvisitpath=paths.DR14_ALLVISIT_PATH, opt="kepler"):
     '''Read the DR14 allVisit file.
@@ -214,6 +425,17 @@ def read_dr14_allStar(allstarpath=paths.DR14_ALLSTAR_PATH, opt="kepler"):
     WARNING: If opt is set to "", then full table will take 
     several hours to fit into memory.
     '''
+    desired_cols = [
+        "APOGEE_ID", "LOCATION_ID", "J", "J_ERR", "H", "H_ERR", "K", "K_ERR",
+        "RA", "DEC", "APOGEE_TARGET1", "APOGEE_TARGET2", "APOGEE_TARGET3",
+        "TARGFLAGS", "NVISITS", "STARFLAG", "STARFLAGS", "ANDFLAG", "ANDFLAGS",
+        "VHELIO_AVG", "VSCATTER", "VERR", "VERR_MED", "APOGEE2_TARGET1",
+        "APOGEE2_TARGET2", "APOGEE2_TARGET3", "SNREV", "MIN_H", "MAX_H",
+        "MIN_JK", "MAX_JK", "FPARAM", "FPARAM_COV", "TEFF", "TEFF_ERR", "LOGG", "LOGG_ERR",
+        "VMICRO", "VMACRO", "VSINI", "M_H", "M_H_ERR", "ALPHA_M",
+        "ALPHA_M_ERR", "MG_FE", "MG_FE_ERR", "ASPCAPFLAG", "ASPCAPFLAGS", 
+        "ASPCAP_CHI2", "FELEM", "STABLERV_RCHI2", "FE_H", "PMRA", "PMDEC",
+        "PM_SRC", "ALL_VISITS", "VISITS"]
     if opt:
             allstar_hdus = fits.open(str(allstarpath), memmap=True)
             allstar_indices = allstar_hdus[2]
@@ -223,6 +445,12 @@ def read_dr14_allStar(allstarpath=paths.DR14_ALLSTAR_PATH, opt="kepler"):
             elif opt.lower() == "pleiades":
                 index_start = allstar_indices.data[55]
                 index_end = allstar_indices.data[58]
+            elif opt.lower() == "m67":
+                index_start = allstar_indices.data[131]
+                index_end = allstar_indices.data[134]
+            elif opt.lower() == "hyades":
+                index_start = allstar_indices.data[48]
+                index_end = allstar_indices.data[77]
             else:
                 raise ValueError(
                     "Don't understand optmization: {0}".format(opt))
@@ -232,8 +460,17 @@ def read_dr14_allStar(allstarpath=paths.DR14_ALLSTAR_PATH, opt="kepler"):
             # Convert from recarray to Table
             allstar = Table(allstar_kepler)
     else:
-        allstar = Table.read(str(allstarpath), format="fits")
-    return allstar
+        allstar = Table.read(
+            str(allstarpath), format="fits", character_as_bytes=False)
+
+    short_allstar = allstar[desired_cols]
+    short_allstar["LOGG_FIT"] = allstar["FPARAM"][:,1]
+    short_allstar["VSINI_ERR"] = (
+        np.sqrt(allstar["FPARAM_COV"][:, 7, 7]) * allstar["VSINI"] * np.log(10))
+
+    au.mask_numeric_fill_values(short_allstar, -9999)
+    au.mask_numeric_fill_values(short_allstar, -9999.99)
+    return short_allstar
 
 def read_Rafa_rotation(rottable=paths.RAFA_SAVITA_PERIODS):
     '''Reads in the rotation periods as determined by Rafa's pipeline.
@@ -260,6 +497,211 @@ def read_flicker_loggs(loggpath=paths.FLICKER_LOGG):
     flicker_loggs = Table.read(loggpath, format="ascii.cds")
     return flicker_loggs
 
+def read_Garcia_periods(rottable=paths.GARCIA_PERIODS):
+    '''Reads in the rotation information from Garcia et al (2014).
+
+    This table will have KICs, rotation periods, and other assorted
+    information.'''
+    rafapers = Table.read(rottable, format="fits")
+    return rafapers
+
+def read_Garcia_prevsample(
+    chap_sdss=paths.CHAPLIN_DWARFS_SDSS, chap_irfm=paths.CHAPLIN_DWARFS_IRFM,
+    chap_bruntt=paths.CHAPLIN_DWARFS_BRUNTT, 
+        chap_input=paths.CHAPLIN_DWARFS_INPUT):
+    '''Reads in the Chaplin sample.
+
+    Garcia claims to have run their period algorithm on a set of 540 targets.
+    However, when checking the Chaplin et al (2014) sample, there are only 518
+    targets, which implies that there were additional stars analyzed by Garcia
+    et al (2014) not listed in Chaplin.
+
+    Garcia et al (2014) note in Fig 3 that only 297 have both rotation periods 
+    and asteroseismic spacings, which is what we get when we cross-match the
+    Chaplin sample with the Garcia et al (2014) sample. So I don't know where
+    the additional stars came from.'''
+    inputtab = Table.read(chap_input, format="ascii.cds")
+
+    return inputtab
+
+def read_DR14_original_KIC(kicpath=paths.DR14_ORIG_KIC):
+    '''Reads in the original KIC for DR14 targets.
+
+    This table will have original KIC parameters for objects observed with
+    DR14.'''
+    kictable = read_MAST_file(kicpath)
+    return kictable
+
+def read_abridged_original_KIC(kicpath=paths.ORIG_KIC_ABRIDGED):
+    '''Read in the original KIC for Kepler targets.
+
+    This table will read in the original KIC parameters for all Kepler
+    targets.'''
+    desired_cols = ["Kepler ID", "Teff (deg K)", "Log G (cm/s/s)"]
+    kictable = read_MAST_file(kicpath)
+    kictable = kictable[desired_cols]
+    au.set_numeric_fill_values(kictable, -9999)
+    return kictable
+
+def read_Dressing_Charbonneau_table(dcpath=paths.DRESSING_CHARBONNEAU_PROPS):
+    '''Read in the cool stellar table of Dressing and Charbonneau (2013).
+
+    This table contains revised Teff and log(g)s of a set of Kepler stars
+    analyzed in Dressing and Charbonneau (2013).
+    '''
+    dctable = Table.read(dcpath, format="fits")
+    return dctable
+
+def read_El_Badry_Single_Stars(elb_single_path=paths.EL_BADRY_SINGLE):
+    '''Read in the single stars from the APOGEE binary analysis.
+
+    This table contains the 2MASS IDs for the stars which were determined to be
+    single from the spectral analysis.'''
+    singletable = Table.read(
+        elb_single_path, format="ascii.csv", data_start=0, names=["APOGEE_ID"])
+    return singletable
+
+def read_El_Badry_SB1(elb_sb1=paths.EL_BADRY_SB1):
+    '''Read in the SB1s from the APOGEE binary analysis.
+
+    This table contains the 2MASS IDs for the stars which were determined to be
+    single-lined spectroscopic binaries from the spectral analysis.'''
+    sb1table = Table.read(elb_sb1, format="ascii.csv")
+    return sb1table
+
+def read_El_Badry_SB2(elb_sb2=paths.EL_BADRY_SB2):
+    '''Read in the SB2s from the APOGEE binary analysis.
+
+    This table contains the 2MASS IDs for the stars which were determined to be
+    double-lined spectroscopic binaries from the spectral analysis.'''
+    sb2table = Table.read(elb_sb2, format="ascii.csv")
+    return sb2table
+
+def read_El_Badry_hidden_triples(elb_hidden_trip=paths.EL_BADRY_HIDDEN_TRIPLE):
+    '''Read in the SB2s with hidden triples from the APOGEE binary analysis.
+
+    This table contains the 2MASS IDs for the stars which were determined to be
+    double-lined spectroscopic binaries with RV trends indicating a hidden
+    third component from the spectral analysis.'''
+    triptable = Table.read(elb_hidden_trip, format="ascii.csv")
+    return triptable
+
+def read_El_Badry_SB3(elb_sb3=paths.EL_BADRY_SB3):
+    '''Read in the SB3s from the APOGEE binary analysis.
+
+    This table contains the 2MASS IDs for the stars which were determined to be
+    triple-lined spectroscopic binaries from the spectral analysis.'''
+    sb3table = Table.read(elb_sb3, format="ascii.csv")
+    return sb3table
+
+def combined_El_Badry_multiplicity(
+        elb_single_path=paths.EL_BADRY_SINGLE, elb_sb1=paths.EL_BADRY_SB1,
+        elb_sb2=paths.EL_BADRY_SB2,
+        elb_hidden_trip=paths.EL_BADRY_HIDDEN_TRIPLE,
+         elb_sb3=paths.EL_BADRY_SB3, binaritycol="Binarity"):
+    '''Combine stellar parameters from all multiple El Badry papers.
+
+    The new table will have revised APOGEE IDs, Teffs, log(g), and [Fe/H].'''
+    wantedcols = ["APOGEE_ID", "T_eff [K]", "log g [dex]", "[Fe/H] [dex]"]
+    sb1s = read_El_Badry_SB1()[wantedcols]
+    sb1s[binaritycol] = "SB1   "
+    sb2s = read_El_Badry_SB2()[wantedcols]
+    sb2s[binaritycol] = "SB2   "
+    hidden_triples = read_El_Badry_hidden_triples()[wantedcols]
+    hidden_triples[binaritycol] = "Triple"
+    sb3s = read_El_Badry_SB3()[wantedcols]
+    sb3s[binaritycol] = "SB3   "
+
+    combotable = vstack([sb1s, sb2s, hidden_triples, sb3s])
+    return combotable
+
+def read_California_Kepler_Spectroscopy(
+    cks=paths.CALIFORNIA_KEPLER_SPECTROSCOPY):
+    '''Read in the data from the California Kepler Survey.
+
+    This table contains spectroscopic parameters from the California Kepler
+    Survey. Essentially has Teff, logg, [Fe/H] and vsini from two different
+    pipelines.'''
+    ckstable = Table.read(cks, format="ascii.cds")
+    return ckstable
+
+def read_Kepler_names(names=paths.KEPLER_NAMES):
+    '''Read in a file of Kepler names.
+
+    This file cross-matches between KOI numbers and Kepler Input Catalog
+    IDs.'''
+    nametable = Table.read(names, format="ascii.csv", comment="#")
+    return nametable
+
+def read_Geller_M67(geller=paths.HEAD_DIR / "aj518354t2_mrt.txt"):
+    '''Read in the M67 WOCS data.'''
+    fulldata = Table.read(geller, format="ascii.cds")
+    # I want to have regular RA/Dec columns.
+    coords = SkyCoord(
+        ra=fulldata["RAh"]+fulldata["RAm"]/60+fulldata["RAs"]/60/60,
+        dec=fulldata["DEd"] + fulldata["DEm"]/60 + fulldata["DEs"]/60/60,
+        unit=(u.hourangle, u.degree))
+    fulldata["RA"] = coords.ra
+    fulldata["DEC"] = coords.dec
+    return fulldata
+
+def read_Kounkel_spec_binary_catalog(sbpath=paths.KOUNKEL_SB2_PATH):
+    '''Read in the list of spectroscopic binaries found by Kounkel.'''
+    ids = Table.read(sbpath, format="ascii.no_header", names=["APOGEE_ID"])
+    return ids
+
+def read_Rebull_Pleiades_Periods(filepath=paths.REBULL_PLEIADES_PERIOD_PATH):
+    '''Read in the Table of periods reported by Rebull et al.'''
+    tab = Table.read(str(filepath), format="ascii.cds")
+    return tab
+
+def read_Rebull_Pleiades_Multiperiods(
+        filepath=paths.REBULL_PLEIADES_MULTIPERIOD_PATH):
+    '''Read in the table flagging stars with light curve morphologies.'''
+    tab = Table.read(str(filepath), format="ascii.cds")
+    return tab
+
+def read_Rebull_Praesepe_Periods(filepath=paths.REBULL_PRAESEPE_PERIOD_PATH):
+    '''Read in the Table of periods reported by Rebull et al. for M37'''
+    tab = Table.read(str(filepath), format="ascii.cds")
+    return tab
+
+def read_Rebull_EPIC_table(filepath=paths.REBULL_EPIC_PATH):
+    '''Read in the EPIC entries for the full Rebull et al (2016) sample.'''
+    tab = Table.read(str(filepath), format="ascii.basic", delimiter="|",
+                     data_start=2)
+    return tab
+
+def read_Radick_87_Periods(filepath=paths.RADICK_HYADES_PATH):
+    '''Read in the Hyades periods from Radick et al (1987).'''
+    tab = Table.read(str(filepath), format="ascii.fixed_width", delimiter=" ")
+    return tab
+
+def read_Meibom_M34_periods(filepath=paths.MEIBOM_M34_PERIODS):
+    '''Read in the periods for M34 from Meibom et al (2011)'''
+    tab = Table.read(str(filepath), format="ascii.cds")
+    return tab
+
+def read_Lurie_periods(filepath=paths.LURIE_PERIOD_PATH):
+    '''Read in the periods from Kepler Eclipsing Binaries.'''
+    tab = Table.read(str(filepath), format="ascii.cds")
+    return tab
+
+def read_Raghavan_sample(filepath=paths.RAGHAVAN_TABLE_13):
+    '''Read in the survey information about the full Raghavan sample.'''
+    tab = Table.read(str(filepath), format="ascii.cds")
+    return tab
+
+def read_Raghavan_primaries(filepath=paths.RAGHAVAN_TABLE_17):
+    '''Read in primary star info from Raghavan et al (2010).'''
+    tab = Table.read(str(filepath), format="ascii.cds")
+    return tab
+
+def read_Raghavan_companions(filepath=paths.RAGHAVAN_TABLE_18):
+    '''Read in Companion info from Raghavan et al (2010).'''
+    tab = Table.read(str(filepath), format="ascii.cds")
+    return tab
+
 
 ###############################################################################
 # Joined catalogs #
@@ -271,17 +713,44 @@ def read_flicker_loggs(loggpath=paths.FLICKER_LOGG):
 
 @au.shortcut_file(paths.SHORTCUT_MCQUILLAN_STELLPARM)
 def mcquillan_with_stelparms(
-    mcq_path=paths.MCQUILLAN_CATALOG, kic_path=paths.KIC_CATALOG):
+    mcq_path=paths.MCQUILLAN_CATALOG, kic_path=paths.KIC_CATALOG,
+        gaia_path=paths.GAIA_DR2_KEPLER_OVERLAP,
+        origpath=paths.ORIG_KIC_ABRIDGED,
+        pinpath=paths.PINSONNEAULT_CORRECTIONS):
     '''Read McQuillan catalog with full KIC stellar parameters.
 
     Read in the McQuillan detections along with the KIC DR25 stellar
     parameters.
     '''
     mcq = read_McQuillan_catalog(mcq_path)
-    stellcat = read_KIC_DR25_catalog(kic_path)
+    stellcat = stelparms_triple_KIC(origpath, pinpath, kic_path)
+    del(stellcat["kic"])
+    del(stellcat["KIC"])
     mcquillancat = au.join_by_id(
         mcq, stellcat, "KIC", "kepid", join_type="left")
-    mcquillancat.remove_columns(["Teff", "log_g_", "Mass", "_RA", "_DE", "Ref"])
+    trim_McQuillan_catalog(mcquillancat)
+    return mcquillancat
+
+@au.shortcut_file(paths.SHORTCUT_MCQUILLAN_NONDET_STELLPARM)
+def mcquillan_nondetections_with_stelparms(
+    mcq_path=paths.MCQUILLAN_NONDETECTIONS, kic_path=paths.KIC_CATALOG,
+        gaia_path=paths.GAIA_DR2_KEPLER_OVERLAP):
+    '''Read the McQuillan nondetections with full KIC stellar parameters.
+
+    Read in the McQuillan nondetections along with the KIC DR25 stellar
+    parameters.
+    '''
+    mcq = read_McQuillan_nondetections(mcq_path)
+    stellcat = stelparms_triple_KIC()
+    del(stellcat["kic"])
+    del(stellcat["KIC"])
+    mcquillancat = au.join_by_id(
+        mcq, stellcat, "KIC", "kepid", join_type="left")
+    mcquillancat["teff"][mcquillancat["teff"].mask] = mcquillancat["Teff"][
+        mcquillancat["teff"].mask]
+    mcquillancat["logg"][mcquillancat["logg"].mask] = mcquillancat["log_g_"][
+        mcquillancat["logg"].mask]
+    trim_McQuillan_catalog(mcquillancat)
     return mcquillancat
 
 @au.shortcut_file(paths.SHORTCUT_MCQUILLAN_FLICKER)
@@ -294,7 +763,6 @@ def mcquillan_flicker_loggs(
     mcq_flicker.remove_columns(["kepmag", "Teff"])
     return mcq_flicker
 
-@au.shortcut_file(paths.SHORTCUT_MCQUILLAN_APOKASC)
 def create_joined_APOKASC_McQuillan_catalog(
         apofile=paths.APOKASC_PATH, mcquillanfile=paths.MCQUILLAN_CATALOG):
     '''Creates a joint APOKASC/McQuillan catalog.
@@ -310,6 +778,42 @@ def create_joined_APOKASC_McQuillan_catalog(
 
     combocat = au.join_by_id(apocat, mcquillancat, "KEPLER_INT", "KIC")
     return combocat
+
+def APOKASC_Huber_KIC(
+    apofile=paths.APOKASC_PATH, huberfile=paths.KIC_CATALOG):
+    '''Create a joined catalog with APOKASC and McQuillan.'''
+    apocat = read_APOKASC_catalog(apofile)
+    kics = read_KIC_DR25_catalog(huberfile)
+    apokic = au.join_by_id(
+        apocat, kics, "KEPLER_INT", "kepid", join_type="left")
+    return apokic
+
+@au.shortcut_file(paths.SHORTCUT_MCQUILLAN_APOKASC)
+def APOKASC_with_McQuillan_KIC(
+    apofile=paths.APOKASC_PATH, huberfile=paths.KIC_CATALOG,
+    mcquillanfile=paths.MCQUILLAN_CATALOG):
+    '''Join the APOKASC catalog with McQuillan periods.
+
+    This function will also have the Huber KIC stellar parameters.'''
+    apocat = APOKASC_Huber_KIC(apofile, huberfile)
+    mcq = read_McQuillan_catalog(mcquillanfile).copy()
+    trim_McQuillan_catalog(mcq)
+    combined_table = au.join_by_id(
+        apocat, mcq, "KEPLER_INT", "KIC", join_type="left")
+
+    return combined_table
+
+def garcia_dr14(
+    apofile=paths.DR14_ALLSTAR_PATH, kicfile=paths.KIC_CATALOG, 
+    garciafile=paths.GARCIA_PERIODS):
+    '''Created a joined Garcia/Huber/DR14 sample.
+
+    All those objects which were observed by Garcia et al (2014) will also have
+    APOGEE DR14 parameters as well as Huber et al (2014) stellar parameters.'''
+    apokic = dr14_with_KIC_stelparms(apofile, kicfile)
+    garcia = read_Garcia_periods(garciafile)
+    garcia_apo = au.join_by_id(garcia, apokic, "KIC", "kepid")
+    return garcia_apo
 
 @au.shortcut_file(paths.SHORTCUT_MCQUILLAN_DR14)
 def mcquillan_dr14_overlap(
@@ -372,6 +876,7 @@ def mcquillan_ebs(
     mcq_ebs = au.join_by_id(ebs, mcq, "KIC", "KIC")
     return mcq_ebs
 
+@au.shortcut_file(paths.SHORTCUT_PLEIADES_APOGEE)
 def Stauffer_APOGEE_overlap(
     stauffer_path=paths.STAUFFER_VSINI_PATH, apopath=paths.DR14_ALLSTAR_PATH):
     '''Read targets observed by both Stauffer & Hartmann (1987) and APOGEE.'''
@@ -389,24 +894,213 @@ def Stauffer_APOGEE_overlap(
     return joined_table
 
 @au.shortcut_file(paths.SHORTCUT_APOGEE_KIC)
-def dr14_with_KIC_stelparms(apopath=paths.DR14_ALLSTAR_PATH,
-                            kicpath=paths.KIC_CATALOG):
+def dr14_with_KIC_stelparms(
+    apopath=paths.DR14_ALLSTAR_PATH, kicpath=paths.KIC_CATALOG,
+    origpath=paths.ORIG_KIC_ABRIDGED, pinpath=paths.PINSONNEAULT_CORRECTIONS):
     '''Read in Kepler DR14 targets with Huber stellar parameters.'''
-    apo = read_dr14_allStar(apopath, opt="kepler")
-    kiccat = read_KIC_DR25_catalog(kicpath)
+    # Note that this table is fully cross-matched with Gaia!
+    # There are no targets without matching Gaia detections.
+    apo = dr14_with_ElBadry()
+    kiccat = stelparms_triple_KIC(origpath, pinpath, kicpath)
     apokic = catalog.join_by_2MASS_key(
-        apo, kiccat, "APOGEE_ID", "tm_designation")
+        apo, kiccat, "APOGEE_ID", "tm_designation", join_type="inner")
     return apokic
 
-#@au.shortcut_file(paths.SHORTCUT_APOKASC_KIC)
-@au.memoized
-def APOKASC_with_KIC_stelparms(apopath=paths.APOKASC_PATH,
-                               kicpath=paths.KIC_CATALOG):
+@au.shortcut_file(paths.SHORTCUT_APOKASC_KIC)
+def APOKASC_with_KIC_stelparms(
+    apopath=paths.APOKASC_PATH, kicpath=paths.KIC_CATALOG,
+    origpath=paths.ORIG_KIC_ABRIDGED):
     '''Read in the latest APOKASC catalog with Huber stellar parameters.'''
     apo = read_APOKASC_catalog(apopath)
-    kiccat = read_KIC_DR25_catalog(kicpath)
+    kiccat = stelparms_with_original_KIC(kicpath, origpath)
     apokic = au.join_by_id(apo, kiccat, "KEPLER_INT", "kepid")
     return apokic
+
+def stelparms_with_original_KIC(
+        parmpath=paths.KIC_CATALOG, kicpath=paths.ORIG_KIC_ABRIDGED,
+        huberpath=paths.HUBER_CATALOG):
+    '''Read in the Huber and original KIC stellar parameters.'''
+    kiccat = stelparms_with_Gaia(parmpath)
+    origcat = read_abridged_original_KIC(kicpath)
+    orig_subtable = Table([
+        origcat["Kepler ID"], origcat["Teff (deg K)"], 
+        origcat["Log G (cm/s/s)"]], names=(
+            "kepid", "KIC Teff", "KIC logg"))
+    newcat = au.join_by_id(kiccat, orig_subtable, "kepid", "kepid",
+                           join_type="left")
+    del(newcat["KIC"])
+    hubercat = read_Huber_KIC_catalog()[
+        ["KIC", "Teff", "E_Teff", "e_Teff", "r_Teff", "log(g)", "e_log(g)",
+         "E_log(g)", "r_log(g)", "R", "e_R", "E_R"]]
+    combocat = au.join_by_id(
+        newcat, hubercat, "kepid", "KIC", join_type="left")
+    return combocat
+
+def stelparms_triple_KIC(
+    origpath=paths.ORIG_KIC_ABRIDGED, pinpath=paths.PINSONNEAULT_CORRECTIONS,
+    huberpath=paths.KIC_CATALOG):
+    '''Create a table with the original, Pinsonneault, and Huber parameters.
+
+    The original KIC parameters came from the analysis in Brown et al (2011).
+    The Pinsonneault et al (2012) analysis corrected the effective temperatures
+    to put them on the SDSS system. Finally Huber et al (2014) reanalyzed the
+    whole KIC to use the best available data and fit the parameters as well as
+    uncertainties using DSEP isochrones.'''
+    hubercat = stelparms_with_original_KIC(huberpath)
+    pinsonneaultcat = read_Pinsonneault_2012_catalog(pinpath)
+    joinedcat = au.join_by_id(
+        hubercat, pinsonneaultcat, "kepid", "KIC", join_type="left")
+    return joinedcat
+
+def ebs_with_stelparms(ebpath=paths.EB_PATH, kic_path=paths.KIC_CATALOG,
+                       gaia_path=paths.GAIA_DR2_KEPLER_OVERLAP):
+    '''Read in Eclipsing Binaries with full stellar parameters.'''
+    ebs = read_villanova_EBs(ebpath)
+    ebs.remove_columns(["kmag", "Teff"])
+    stellcat = stelparms_triple_KIC(kic_path)
+    ebcat = au.join_by_id(
+        ebs, stellcat, "KIC", "kepid", join_type="left")
+    return ebcat
+
+@au.shortcut_file(paths.SHORTCUT_GAIA_KEPLER)
+def stelparms_with_Gaia(
+        parmpath=paths.KIC_CATALOG, gaiapath=paths.GAIA_DR2_KEPLER_OVERLAP):
+    kiccat = read_KIC_DR25_catalog(parmpath)
+    gaiacat = read_Gaia_DR2_Kepler()
+
+    joinedcat = au.join_by_id(kiccat, gaiacat, "kepid", "KIC", join_type="left")
+    catalog.generate_abs_mag_column_with_errors(
+        joinedcat, "kmag", "kmag_err", "M_K", "M_K_err1", "M_K_err2",
+        samp.AV_to_AK, samp.AV_err_to_AK_err, parallaxcol="parallax",
+        parallax_err_col="parallax_error", parallax_offset=0.05, fullgaia=False)
+    return joinedcat
+
+def dr14_with_ElBadry(binaritycol="Binarity"):
+    '''Add in El Badry parameters to the DR14 allStar table.'''
+    apogee = read_dr14_allStar()
+    wantedcols = ["APOGEE_ID", "T_eff [K]", "log g [dex]", "[Fe/H] [dex]"]
+    elbadry = combined_El_Badry_multiplicity(binaritycol=binaritycol)
+    singles = read_El_Badry_Single_Stars()
+    singles_apo = au.extract_subtable_from_column(
+        apogee, "APOGEE_ID", singles["APOGEE_ID"])
+    singles_params = Table(
+        singles_apo[["APOGEE_ID", "TEFF", "LOGG_FIT", "FE_H"]],
+                    names=wantedcols)
+    singles_params[binaritycol] = "Single"
+    full_elbadry = vstack([singles_params, elbadry])
+
+    combotab = catalog.join_by_2MASS_key(
+        apogee, full_elbadry, "APOGEE_ID", "APOGEE_ID", join_type="left")
+
+    return combotab
+
+def Rebull_Pleiades_Periods(
+        rebull_path=paths.REBULL_PLEIADES_PERIOD_PATH,
+        cross_path=paths.REBULL_CROSSID_PATH, dr14path=paths.DR14_ALLSTAR_PATH,
+        stauffer_path=paths.STAUFFER_PLEIADES_MASSES,
+        gaia_path=paths.PLEIADES_GAIA_TARGETS,
+        multipath=paths.REBULL_PLEIADES_MULTIPERIOD_PATH):
+    '''A combined table with the Rebull periods and EPIC parameters.'''
+    period_table = read_Rebull_Pleiades_Periods(rebull_path)
+    multi_table = read_Rebull_Pleiades_Multiperiods(multipath)
+    multi_combo = au.join_by_id(
+        period_table, multi_table, "EPIC", "EPIC", conflict_suffixes=(
+            "_RE", "_MU"), join_type="left")
+
+    stauffer_table = read_Stauffer_Pleiades_Properties(stauffer_path)
+    stauffer_combo = au.join_by_id(
+        multi_combo, stauffer_table, "EPIC", "EPIC", conflict_suffixes=(
+            "_RE", "_ST"), join_type="left")
+
+    cross_table = read_Rebull_cross_ids(cross_path)
+    period_combo = au.join_by_id(
+        stauffer_combo, cross_table, "EPIC", "EPIC", conflict_suffixes=(
+        "_REST", "_CROS"), join_type="left")
+    gaia_table = read_Pleiades_Gaia_Targets(gaia_path)
+    gaia_combo = au.join_by_id(
+        period_combo, gaia_table, "2MASS", "twomass_id",
+        conflict_suffixes=("_Gaia", ""), join_type="left")
+    dr14 = read_dr14_allStar(opt="Pleiades")
+    apo_combo = catalog.join_by_2MASS_key(
+        dr14, gaia_combo, "APOGEE_ID", "2MASS", conflict_suffixes=(
+        "_APO", "_REB"), join_type="inner")
+
+    return apo_combo
+
+def read_Pleiades_Gaia_Targets(tabpath=paths.PLEIADES_GAIA_TARGETS):
+    '''Read the Gaia targets for the Pleiades.
+
+    The full target list is from Rebull et al (2017).'''
+    tab = Table.read(tabpath, format="votable")
+    # For some reason the 2MASS id is an object array, not a string. So convert
+    # it.
+    twomassid = tab["twomass_id"]
+    del(tab["twomass_id"])
+    tab["twomass_id"] = np.array(twomassid, dtype=np.str_)
+    return tab
+
+def Hyades_DR14(
+        hyades_path=paths.MERMILLIOD_CLUSTER_TABLE_11,
+        dr14path=paths.DR14_ALLSTAR_PATH):
+    '''A combined table with the Hyades spectroscopic targets and APOGEE DR14.'''
+    mermilliod = read_Mermilliod_Open_Cluster_Table_11()
+    hyades_m = mermilliod[mermilliod["Cluster"] == "Hyades   "]
+
+    cummings = read_Cummings_Table_6()
+    hyades_cm = au.join_by_ra_dec(
+        cummings, hyades_m, "_RA", "_DE", "RAJ2000", "DEJ2000",
+        join_type="outer", conflict_suffixes=("_CUMMINGS", "_MERMILLIOD"))
+
+    dr14 = read_dr14_allStar(opt="Hyades")
+    dr14_hyades = au.join_by_ra_dec(
+        hyades_cm, dr14, "_RAJ2000", "_DEJ2000", "RA", "DEC", join_type="inner")
+
+    return dr14_hyades
+    
+
+def read_Stauffer_Pleiades_Properties(
+        stauffer_path=paths.STAUFFER_PLEIADES_MASSES):
+    fill_values = [
+        ("-9.99", "0", "Mass", "Delmag"), ("-9.00", "0", "MBol", "Radius"), 
+        ("-9", "0", "Teff")]
+    stauffer_table = Table.read(
+        stauffer_path, format="ascii.cds", fill_values=fill_values)
+    return stauffer_table
+
+def read_Rebull_cross_ids(
+        rebull_path=paths.REBULL_CROSSID_PATH):
+    '''Read the Cross-ID Table for Pleiades Targets'''
+    rebull_table = Table.read(rebull_path, format="ascii.cds")
+    return rebull_table
+
+@au.memoized
+def McQuillan_EHK():
+    '''Return a table which has the EHK catalog appended to Mcquillan.
+    
+    This is useful for getting Johnson photometry for the McQuillan targets.'''
+    mcq = mcquillan_with_stelparms()
+    mcqcombo = catalog.add_Everett_photometry(mcq, "ra", "dec")
+    mcqcombo["B-V"] = mcqcombo["B"] - mcqcombo["V"]
+    mcqcombo["B-V_err"] = np.sqrt(mcqcombo["B_err"]**2 + mcqcombo["V_err"]**2)
+    catalog.generate_abs_mag_column_with_errors(
+        mcqcombo, "V", "V_err", "M_V", "M_V_err1", "M_V_err2",
+        lambda x: x, lambda x, y: y, parallaxcol="parallax",
+        parallax_err_col="parallax_error", parallax_offset=0.05, fullgaia=False)
+    return mcqcombo
+
+
+###########
+# Helpers #
+###########
+
+def trim_McQuillan_catalog(cat):
+    '''Limit McQuillan catatalog to just period information.
+
+    Remove the KIC parameters and other not-as-important parameters from the
+    McQuillan catalog. Useful if supplementing an existing table with the
+    McQuillan periods.'''
+    cat.remove_columns(["Teff", "log_g_", "Mass", "_RA", "_DE", "Ref"])
+    
 
 
 ################################################################################
@@ -470,6 +1164,7 @@ def read_villanova_EBs(EBpath=paths.EB_PATH):
     '''Reads in the Villanova Keler EB catalog.'''
     ebcat = Table.read(EBpath, format="ascii.commented_header",
                        header_start=-1)
+    ebcat.remove_column("col11")
     return ebcat
 
 def read_synchronized_EB_details(syncpath=paths.SYNC_EB_PATH):
@@ -500,7 +1195,7 @@ def read_synchronized_EB_details(syncpath=paths.SYNC_EB_PATH):
 
 # KOIs
 
-def read_KOI_list_Mcquillan(koipath=paths.KOI_PATH):
+def read_KOI_list(koipath=paths.KOI_PATH):
     '''Read the list of KOIs as of Feb 16, 2017.'''
     kois = Table.read(koipath, format="ascii.csv", data_start=1, data_end=4800, comment="#")
     return kois
@@ -537,6 +1232,121 @@ def read_Stauffer_Pleiades(vsini_file=paths.STAUFFER_VSINI_PATH):
     separate_limit(tbl, ["vsini"], eqdelim="")
     return tbl
 
+# Stauffer et al (1984)
+
+def read_Stauffer_84(vsini_file=paths.STAUFFER_1984_VSINI):
+    '''Read the vsinis from Table 2 of Stauffer et al (1984).'''
+
+    tbl = Table.read(
+        str(vsini_file), format="ascii.fixed_width", col_starts=[0, 8],
+        col_ends=[7, 13], fill_values=[("--", "0"), ("", "0")])
+    separate_limit(tbl, limcols=["vsini"], eqdelim="")
+    return tbl
+
+# Terndrup et al (2000)
+
+def read_Terndrup_Pleiades_KPNO(vsini_file=paths.TERNDRUP_VSINI_KPNO_PATH):
+    '''Read in Table 1 of Terndrup et al (2000)'''
+    tbl = Table.read(
+        str(vsini_file), format="ascii.no_header", guess=False,
+        fill_values=[(r'\ldots', "0"), ('', '0')], delimiter="\t",
+        names=(
+            "HCG", "V-IC", "vsini", "vr", "W(Ha)", "T", "SK", "HHJ", "Other"))
+    separate_limit(tbl, limcols=["vsini"], eqdelim="")
+    return tbl
+
+def read_Terndrup_Pleiades_Keck(vsini_file=paths.TERNDRUP_VSINI_KECK_PATH):
+    '''Read in Table 2 of Terndrup et al (2000)'''
+    tbl = Table.read(
+        str(vsini_file), format="ascii.no_header", guess=False,
+        fill_values=[(r'\ldots', "0"), ('', '0')], delimiter="\t",
+        names=(
+            "HHJ", "V-IC", "vsini", "vr", "W(Ha)", "Other", "Note"))
+    separate_limit(tbl, limcols=["vsini"], eqdelim="")
+    return tbl
+
+# Queloz et al (1998)
+
+def read_Queloz_Pleiades(vsini_file=paths.QUELOZ_PLEIADES_PATH):
+    '''Read in the main Pleiades targets from Queloz (1998).'''
+    tbl = Table.read(str(vsini_file), format="fits")
+    return tbl
+
+def read_Queloz_Corona(vsini_file=paths.QUELOZ_CORONA_PATH):
+    '''Read in the observations of Pleiades corona targets'''
+    tbl = Table.read(str(vsini_file), format="fits", character_as_bytes=False)
+    return tbl
+
+# Soderblom et al (1993b)
+def read_Soderblom_1993b_vsini(vsini_file=paths.SODERBLOM_LICK_TABLE_1):
+    '''Read in HII and vsini for objects in Soderblom et al (1993).
+    
+    Because the data was not accessible in an electronic format, I manually
+    typed out just the HII and vsini for these objects.'''
+    tbl = Table.read(
+        str(vsini_file), format="ascii.fixed_width", col_starts=[0, 8],
+        col_ends=[7, 13], fill_values=[("--", "0"), ("", "0")])
+    separate_limit(tbl, limcols=["vsini"], eqdelim="")
+    return tbl
+
+def read_Soderblom_1993b_additional_vsini(
+        vsini_file=paths.SODERBLOM_ADDITIONAL_TABLE_6):
+    '''Read in HII and vsini for partial objects in Soderblom et al (1993).
+
+    Because the data was not accessible in an electronic format, I manually
+    typed out just the HII and vsini for these objects. Since I'm frustrated, I
+    stopped at the point where I knew I included a point I was missing.'''
+    tbl = Table.read(
+        str(vsini_file), format="ascii.fixed_width", col_starts=[0, 8],
+        col_ends=[7, 13], fill_values=[("--", "0"), ("", "0")])
+    separate_limit(tbl, limcols=["vsini"], eqdelim="")
+    return tbl
+
+# Jackson et al (2017)
+
+def read_Jackson_2017_vsini_Table(
+        vsini_file=paths.JACKSON_PLEIADES_PATH):
+    '''Read in the list of targets observed by Jackson et al (2017) for vsini.'''
+    tbl = Table.read(str(vsini_file), format="ascii.commented_header",
+                     delimiter=",", fill_values=[("", "0"), ("---", "0")])
+    separate_limit(tbl, limcols=["VSINI", "Rsini"], eqdelim="")
+    return tbl
+
+# Stauffer (1982)
+
+def read_Stauffer_1982_photometry(photfile=paths.STAUFFER_1982_TABLE1_PATH):
+    '''Read the photometry table from Stauffer (1982).'''
+    tbl = Table.read(
+        str(photfile), format="ascii.no_header", guess=False, 
+        fill_values=[("---", "0"), ("", "0")]) 
+
+    staufftable = Table([
+        npstr.add(tbl["col1"], tbl["col2"]), tbl["col3"],
+        npstr.strip(tbl["col4"], "()").astype(np.float), tbl["col5"], 
+        npstr.strip(tbl["col6"], "()").astype(np.float), tbl["col7"], 
+        npstr.strip(tbl["col8"], "()").astype(np.float), tbl["col9"], 
+        npstr.strip(tbl["col10"], "()").astype(np.float), tbl["col11"]], names=[
+            "Star", "V", "Verr", "B-V", "B-Verr", "V-R", "V-Rerr",
+            "R-I", "R-Ierr", "V-I"], masked=True)
+
+    for initcol, stauffcol in zip(tbl.colnames[2:], staufftable.colnames[1:]):
+        staufftable[stauffcol].mask = tbl[initcol].mask
+
+    return staufftable
+
+
+def read_Stauffer_Pleiades_photometry(photfile=paths.STAUFFER_PHOT_FILE):
+    '''Read the photometry table for Pleiades members.
+
+    This table was not published, but is a table maintained by John Stauffer
+    with photometry.'''
+    tbl = Table.read(
+        str(photfile), format="ascii.fixed_width", 
+        col_starts=(0, 10, 20, 28, 36, 44, 52, 60, 68),
+        col_ends=(9, 19, 27, 35, 43, 51, 59, 67, 79), 
+        names=("ra", "dec", "V", "B-V", "V-Ic", "J", "H", "K", "name"))
+    return tbl
+
 #################
 # Service Files #
 #################
@@ -552,8 +1362,47 @@ def read_SIMBAD_file(simbadfile, output_path=paths.HEAD_DIR):
 
 def read_UKIRT_file(resultfile):
     '''Reads in a file from UKIRT.'''
-    results = read_split_file(resultfile, "ascii.commented_header")
+    results = read_split_file(resultfile, format="ascii.commented_header")
     return results
+
+def read_MAST_file(resultfile):
+    '''Reads in a file from MAST.'''
+    results = read_split_file(resultfile, format="ascii.csv", data_start=2)
+    return results
+
+# WEBDA
+
+def read_Pleiades_WEBDA_UBV_photometry(
+        photfile=paths.WEBDA_PLEIADES_UBV_PHOTOMETRY):
+    '''Read in the UBV photometry archived on WEBDA for the Pleiades.'''
+    tbl = Table.read(str(photfile), format="ascii.tab", data_start=2)
+    return tbl
+
+def read_Pleiades_WEBDA_VRIk_photometry(
+        photfile=paths.WEBDA_PLEIADES_VRIk_PHOTOMETRY):
+    '''Read in the VRIk photometry archived on WEBDA for the Pleiades.'''
+    tbl = Table.read(str(photfile), format="ascii.tab", data_start=2)
+    return tbl
+
+def read_Pleiades_WEBDA_vsini(
+        vsinifile=paths.WEBDA_PLEIADES_VSINI):
+    '''Read in the vsini table archived on WEBDA for the Pleiades.'''
+    tbl = Table.read(str(vsinifile), format="ascii.tab", data_start=2)
+    return tbl
+
+def read_Pleiades_WEBDA_coordinates(
+        coofile=paths.WEBDA_PLEIADES_COORDINATES):
+    '''Read in the table of Pleiades coordinates on WEBDA.'''
+    tbl = Table.read(str(coofile), format="ascii.tab", data_start=2)
+    coords = SkyCoord(tbl["RA"], tbl["Dec"], unit=(u.hourangle, u.degree),
+                      frame="fk4", equinox="B1950")
+    del(tbl["RA"])
+    del(tbl["Dec"])
+    modern_frame = FK5(equinox="J2000")
+    modern_coords = coords.transform_to(modern_frame)
+    tbl["RA"] = modern_coords.ra
+    tbl["Dec"] = modern_coords.dec
+    return tbl
 
 ###############################################################################
 # Utilities #
@@ -586,7 +1435,7 @@ def split_limit_col(initcol, updelim="<", lowdelim=">", eqdelim="=",
     one with a limit representation, another with the numerical values.
     '''
     # If the column was not read as a string, then just return it.
-    oldmask = initcol.mask
+    oldmask = np.ma.getmask(initcol)
     limcol = stat.generate_limit(None, len(initcol))
     try:
         upperindices = np.where(npstr.startswith(initcol, updelim))
@@ -630,7 +1479,7 @@ def fix_table_coordinates_units(tbl, ra_col, dec_col):
 
 # Split files for large online database queries
 
-def read_split_file(filepath, table_format):
+def read_split_file(filepath, **kwargs):
     '''Reads a file that has been split into multiple parts.
 
     This function essentially re-reads a table which has been split according
@@ -642,14 +1491,17 @@ def read_split_file(filepath, table_format):
 
     Since the input table isn't used, this means that when writing split files,
     care has to be taken to delete all previous queries made with them.
+
+    Keyword arguments to be passed to the underlying Table.read function should
+    be supplied in kwargs.
     '''
     try:
-        inputtable = Table.read(str(filepath), format=table_format)
+        inputtable = Table.read(str(filepath), **kwargs)
     except FileNotFoundError as f:
         inputfiles = find_split_files(filepath)
         table_pieces = []
         for inputfile in inputfiles:
-            table_piece = Table.read(inputfile, format=table_format)
+            table_piece = Table.read(inputfile, **kwargs)
             table_pieces.append(table_piece)
         try:
             inputtable = vstack(table_pieces)
@@ -669,7 +1521,7 @@ def find_split_files(filepath):
     '''
     folder = filepath.parent
     filename = filepath.name
-    base, ext = split_filename(filename)
-    glob_pattern = format_split_filename(base, "*", ext)
+    base, ext = catalog.split_filename(filename)
+    glob_pattern = catalog.format_split_filename(base, "*", ext)
     files = folder.glob(glob_pattern)
     return files

@@ -34,16 +34,21 @@ write_APOGEE_proposal_table
     Write the proposed observing sample in machine-readable format.
 
 '''
+import random
+
 import numpy as np
 import scipy
 import numpy.core.defchararray as npstr
-from astropy.table import unique, Table
+import numpy.random
+from astropy.table import unique, Table, vstack
 from astropy.coordinates import SkyCoord
+from astropy.io import ascii
 import astropy.units as u
 import astropy_util as au
 
 import read_catalog as catin
 import catalog
+import path_config as paths
 
 ###############################################################################
 # Get the Ancillary sample #
@@ -250,6 +255,86 @@ def vrel_snr_plot(apodwarfs):
     plt.figure()
     plt.plot(apodwarfs[good_dwarfs]["mjd"], vel_err[good_dwarfs], "b*")
 
+###############################################################################
+# Table manipulation #
+###############################################################################
+
+def mcq_table():
+    '''Get the target list from the McQuillan table.
+    
+    This is a table which requires the APOGEE field, 2MASS designation column,
+    RA column, Dec column, coordinate source, H-mag, H-mag source, proper
+    motion in RA, proper motion in dec,, proper motion source, number of
+    visits, and desired signal-to-noise.'''
+    mcq = catin.mcquillan_with_stelparms()
+    tidsync = catalog.select_tidally_synchronized_binaries(
+        mcq, pcut=5, lowperiod=1, teffcol="teff")
+    ancillary_fields = ["K18_070+14", "K19_076+07"]
+    fieldtargs = targets_in_APOGEE_fields(ancillary_fields, tidsync)
+
+    # Remove objects with > 4 APOGEE observations already.
+    apo = catin.dr14_with_KIC_stelparms()
+    joined_apo = au.join_by_id(fieldtargs, apo, "kepid", "kepid")
+    unnecessary_obs = joined_apo[joined_apo["NVISITS"] >= 4]
+    fieldtargs = au.filter_column_from_subtable(
+        fieldtargs, "kepid", unnecessary_obs["kepid"])
+    print("Removed {0:d} redundant rapid rotators".format(
+        len(unnecessary_obs)))
+
+    ucactable = catin.read_Kepler_UCAC4()
+    mcq_ucac = au.join_by_id(fieldtargs, ucactable, "KIC", "kepid",
+                             join_type="left")
+    shared_kic_set = set(mcq_ucac["KIC"])
+    full_ucac_set = set(ucactable["kepid"])
+    if shared_kic_set <= full_ucac_set:
+        for kepid in shared_kic_set - full_ucac_set:
+            print("KIC {0:d} not in UCAC-4.")
+    return mcq_ucac
+
+def eb_table():
+    '''Get the control list of eclipsing binaries.'''
+    ebs = catin.read_villanova_EBs()
+    stelparms = catin.read_KIC_DR25_catalog()
+    ebs_parms = au.join_by_id(ebs, stelparms, "KIC", "kepid")
+    tidsync = catalog.select_tidally_synchronized_binaries(
+        ebs_parms, pcut=5, lowperiod=1, teffcol="teff", pcol="period")
+    ancillary_fields = ["K18_070+14", "K19_076+07"]
+    fieldtargs = targets_in_APOGEE_fields(ancillary_fields, tidsync)
+
+    # Remove objects with > 4 APOGEE observations already.
+    apo = catin.dr14_with_KIC_stelparms()
+    joined_apo = au.join_by_id(fieldtargs, apo, "kepid", "kepid")
+    unnecessary_obs = joined_apo[joined_apo["NVISITS"] >= 4]
+    fieldtargs = au.filter_column_from_subtable(
+        fieldtargs, "kepid", unnecessary_obs["kepid"])
+    print("Removed {0:d} redundant Eclipsing Binaries".format(
+        len(unnecessary_obs)))
+
+    ucactable = catin.read_Kepler_UCAC4()
+    eb_ucac = au.join_by_id(fieldtargs, ucactable, "KIC", "kepid",
+                            join_type="left")
+    shared_kic_set = set(eb_ucac["KIC"])
+    full_ucac_set = set(ucactable["kepid"])
+    if shared_kic_set <= full_ucac_set:
+        for kepid in shared_kic_set - full_ucac_set:
+            print("KIC {0:d} not in UCAC-4.")
+    return eb_ucac
+
+def apogee_table():
+    '''Get the list of spectroscopic rapid rotators'''
+    apo = catin.dr14_with_KIC_stelparms()
+    tidsync = catalog.select_tidally_synchronized_binaries(
+        apo, pcut=2000, lowperiod=10, teffcol="teff", pcol="VSINI")
+    ancillary_fields = ["K18_070+14", "K19_076+07"]
+    fieldtargs = targets_in_APOGEE_fields(ancillary_fields, tidsync)
+    fieldtargs.rename_column("PMRA", "pmRA")
+    fieldtargs.rename_column("PMDEC", "pmDE")
+    apo_notrapid = catalog.perform_vscatter_cut(fieldtargs, highv=1)
+    apo_needsrv = catalog.perform_cut(apo_notrapid, "NVISITS", highval=4)
+    nodlsb = catalog.filter_double_lined_spectroscopic_binaries(apo_needsrv)
+    return nodlsb
+
+
 ################################################################################
 # Write the Ancillary Table #
 ################################################################################
@@ -262,14 +347,49 @@ def APOGEE_Ancillary_table(outputpath=paths.APOGEE_ANCILLARY_TARGETS_TABLE):
     Get PM information from UCAC-4.
     Write out all of the necessary information to the file.
     '''
-    mcq = catin.mcquillan_with_stelparms()
-    tidsync = catalog.select_tidally_synchronized_binaries(
-        mcq, pcut=5, lowperiod=1, teffcol="teff")
-    ancillary_fields = ["K04_083+13", "K06_078+16", "K07_075+17"]
-    fieldtargs = targets_in_APOGEE_fields(ancillary_fields, tidsync)
-    ucactable = catin.read_UCAC4_Mcquillan_Tidsync()
-    mcq_ucac = au.join_by_id(fieldtargs, ucactable, "KIC", "KIC")
-    write_APOGEE_proposal_table(mcq_ucac)
+    mcq = mcq_table()
+    # Remove RV variable targets from MDM
+    mdmtargs = [11819949, 12736892, 3248885]
+    nonobs = au.filter_column_from_subtable(mcq, "KIC", mdmtargs)
+    mcq_writetable = nonobs[[
+        "APOGEE_Field", "tm_designation", "ra", "dec", "hmag", "pmRA", "pmDE"]]
+    mcq_writetable["Order"] = 1
+    mcq_writetable["Source"] = "McQuillan"
+                            
+    # Add spectroscopic rapid rotators.
+    apo = apogee_table()
+    apo_writetable = apo[[
+        "APOGEE_Field", "tm_designation", "ra", "dec", "hmag", "pmRA", "pmDE"]]
+    apo_writetable["Order"] = 2
+    apo_writetable["Source"] = "APOGEE"
+
+    # Control sample.
+    ebs = eb_table()
+    # Remove the faint/bright control targets.
+    ebs = ebs[np.logical_and(ebs["hmag"] > min(mcq["hmag"]), 
+                             ebs["hmag"] < max(mcq["hmag"]))]
+    # Select 2 from each field.
+    eb_groups = ebs.group_by("APOGEE_Field")
+    random.seed("EB CONTROL")
+    tablerows = []
+    for grp in eb_groups.groups:
+        bright_ebs = grp[grp["hmag"] <= 11.8]
+        faint_ebs = grp[grp["hmag"] > 11.8]
+        brightindex = random.randint(0, len(bright_ebs)-1)
+        faintindex = random.randint(0, len(faint_ebs)-1)
+        tablerows.append(bright_ebs[brightindex])
+        tablerows.append(faint_ebs[faintindex])
+    ebs_selected = Table(rows=tablerows, names=ebs.colnames)
+    eb_writetable = ebs_selected[[
+        "APOGEE_Field", "tm_designation", "ra", "dec", "hmag", "pmRA", "pmDE"]]
+    eb_writetable["Order"] = 3
+    eb_writetable["Source"] = "EB"
+
+    fulltable = vstack([mcq_writetable, apo_writetable, eb_writetable],
+                       join_type="exact")
+    fulltable.sort(["APOGEE_Field", "Order"])
+#    return fulltable
+    write_target_field_files(fulltable)
 
 def write_APOGEE_proposal_table(
     field_targets, outputpath=paths.APOGEE_ANCILLARY_TARGETS_TABLE, 
@@ -338,7 +458,7 @@ def write_APOGEE_proposal_table(
         apogee_field_col, twomass_col, "Coords", hmag_col, 
         r"$\mu_\alpha \cos \delta$", r"$\mu_\delta$", 
         "Min. visits", "Req. S/N"]]
-    ordered_output.sort(apogee_field_col)
+#    ordered_output.sort(apogee_field_col)
 
     # Comments about the dataset.
     ordered_output.meta["comments"] = [
@@ -352,4 +472,85 @@ def write_APOGEE_proposal_table(
     # Therefore, I want to write the file to a StringIO object and replace the
     # instances of tabular with those of longtable.
     ordered_output.write(
-        str(outputpath), format="ascii.fixed_width", names=names)
+        str(outputpath), format="ascii.fixed_width", names=names,
+        overwrite=True, formats={"PM_RA": ".1f", "PM_DE": ".1f"},
+        fill_values=[(ascii.masked, "0.0")], 
+        fill_include_names=["PM_RA", "PM_DE"])
+
+def write_target_field_files(
+        field_targets, outputfolder=paths.PROPOSAL_PATH,
+        apogee_field_col="APOGEE_Field", twomass_col="tm_designation", 
+        ra_col="ra", dec_col="dec", epoch="2000.0", hmag_col="hmag", 
+        hmag_source="2MASS", pmra_col="pmRA", pm_cosdec_applied=True, 
+        pmdec_col="pmDE", pm_source="UCAC-4"):
+    '''Write the target field files to be sent for targeting.
+
+    Necessary information is the priority, 2MASS ID, RA, DEC, epoch, H mag,
+    the photometry source, the RA and DEC proper motion, the catalog from the
+    RA and DEC, the source type, and lastly notes.
+
+    The priority should be to pick one of the EBs as priority 1, put half of
+    the sample, place the second EB as priority 2, and then the rest.'''
+    field_targets["Epoch"] = epoch
+    field_targets["Hsrc"] = hmag_source
+    field_targets["PMsrc"] = pm_source
+    field_targets["Type"] = "star"
+    field_targets[twomass_col] = npstr.replace(
+        field_targets[twomass_col], "2MASS ", "") 
+    grouped_targets = field_targets.group_by(apogee_field_col)
+    np.random.seed(5082018)
+    for field_group in grouped_targets.groups:
+
+        ebs = field_group[field_group["Source"] == "EB"]
+        print(ebs)
+        nonebs = field_group[field_group["Source"] != "EB"]
+        # New plan. Split into bright and faint samples, with the bright sample
+        # more highly prioritized for better characterization.
+        bright_eb = ebs[np.argmin(ebs[hmag_col])]
+        faint_eb = ebs[np.argmax(ebs[hmag_col])]
+        bright_nonebs = nonebs[nonebs[hmag_col] <= 11.8]
+        faint_nonebs = nonebs[nonebs[hmag_col] > 11.8]
+        shuffled_bright_nonebs = Table(np.random.permutation(bright_nonebs))
+        shuffled_bright_nonebs.add_row(bright_eb)
+        shuffled_bright_nonebs.reverse()
+        shuffled_faint_nonebs = Table(np.random.permutation(faint_nonebs))
+        shuffled_faint_nonebs.add_row(faint_eb)
+        shuffled_faint_nonebs.reverse()
+        fulltable = vstack([shuffled_bright_nonebs, shuffled_faint_nonebs])
+        fulltable["Priority"] = range(1, len(fulltable)+1)
+
+        fulltable.sort("Priority")
+        outputtable = fulltable[[
+            "Priority", twomass_col, ra_col, dec_col, "Epoch", hmag_col,
+            "Hsrc", pmra_col, pmdec_col, "PMsrc", "Type", "Source"]]
+
+        filename = "{0}_AncillaryTargets_Simonian.txt".format(
+            fulltable[apogee_field_col][0])
+
+        # Comments
+        outputtable.meta["comments"] = [
+            "file: {0}".format(filename),
+            "Please prioritize getting at least 4 (minimum 3) observations ",
+            "over different nights for as many targets as possible. Targets", 
+            "with < 3 observations have a significantly reduced scientific", 
+            "value. Observations over sequential nights should preferably be", 
+            "taken at different times of the night to avoid 24-hour aliaing.",
+            "",
+            "Sample is broken into a bright, high-priority group which should",
+            "reach SNR >= 100 in 4 visits to be characterized, and a fainter,",
+            "low-priority group for which full characterization would be",
+            "useful, but not necessary. The beginning of each group is",
+            "marked by an EB control of known binarity. Please put highest",
+            "priority in making sure the EB control has as many observations",
+            "as the science targets before moving to additional",
+            "lower-priority targets."]
+
+        outputpath = outputfolder / filename
+        names = ["Priority", "2MASS ID", "RA", "Dec", "Epoch", "H (mag)", 
+                 "H source", "pmRA", "pmDec", "PM source", "Type", "Notes"]
+        outputtable.write(
+            str(outputpath), format="ascii.fixed_width", names=names,
+            overwrite=True, formats={
+                "RA": ".6f", "Dec": ".6f", "pmRA": ".1f", "pmDec": ".1f"},
+            fill_values=[(ascii.masked, "0.0")], 
+            fill_include_names=["PM_RA", "PM_DE"])

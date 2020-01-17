@@ -78,6 +78,26 @@ def McQuillan_standout_plot(
     plt.title("Jen van Saders-cut sample (Multiepoch)")
     plt.legend(loc="lower left")
 
+def HR_standout_plot(
+    fullsample, rv_nonvar, rv_var, Teff_colname="TEFF_FIT",
+    logg_colname="LOGG_FIT"):
+    '''Creates an HR diagram with RV samples.
+
+    Takes the full APOKASC sample and overplots the RV-variable and
+    RV-nonvariable samples on top in red and blue.
+    '''
+    hr.logg_teff_plot(
+        fullsample[Teff_colname], fullsample[logg_colname], label="APOKASC")
+    hr.logg_teff_plot(
+        rv_var[Teff_colname], rv_var[logg_colname], 'r*', ms=12, 
+        label="RV Variable")
+    hr.logg_teff_plot(
+        rv_nonvar[Teff_colname], rv_nonvar[logg_colname], 'b*', ms=12,
+        label="RV Non-variable")
+    plt.xlabel("Teff (K)")
+    plt.ylabel("log g (cm/s^2)")
+    plt.legend(loc="upper left")
+
 def VIM_effect_on_McQuillan_standout_plot(
     fullsample, rv_nonvar, rv_var, minvim=3, Teff_colname="TEFF_FIT",
     Prot_colname="Prot", KIC_colname="KEPLER_INT"):
@@ -116,3 +136,26 @@ def VIM_effect_on_McQuillan_standout_plot(
         plt.legend(loc="lower left")
         plt.title("Vim cutoff {0:n} Quarters".format(q))
         return vims
+
+def radial_velocity_tides_contour(combined_mass, tidal_limit=5*u.day):
+    '''Contour of RVs for given mass ratio and period.
+
+    A combined mass has to be given as an astropy mass unit. After that, a
+    contour plot will be made indicating the radial velocities corresponding to
+    each pair of mass ratio and period.
+    '''
+    periodrange = np.linspace(0.01, 10, 100)*u.day
+    ratiorange = np.linspace(0.01, 1, 100)
+
+    velocities = bc.calc_velocity_of_binary(
+        combined_mass, periodrange, ratiorange[:,np.newaxis])
+
+    plt.figure()
+    contourlevels = [5, 10, 25, 50, 75, 100]
+    CS = plt.contour(periodrange.to(u.day).value, ratiorange,
+                     velocities.to(u.km/u.s).value, levels=contourlevels,
+                     colors="k")
+    plt.clabel(CS, inline=1, fontsize=13)
+    plt.xlabel("Period (day)")
+    plt.ylabel("Mass ratio")
+    plt.title("Velocities for combined mass of {0}".format(combined_mass))

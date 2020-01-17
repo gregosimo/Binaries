@@ -13,6 +13,7 @@ import read_catalog as catin
 import sed
 import path_config as paths
 import hrplots as hr
+import eclipsing_binaries as ebs
 
 
 @au.shortcut_file(paths.SHORTCUT_MDM_NOMAGCUT)
@@ -73,7 +74,7 @@ def select_targets_before_magcut():
 
     print(len(mcq_observing))
     # Also remove eclipsing binaries.
-    mcq_observing = catalog.remove_Kepler_EBs(mcq_observing, mainkiccol="kepid")
+    mcq_observing = ebs.remove_Kepler_EBs(mcq_observing, mainkiccol="kepid")
     print(len(mcq_observing))
 
     return mcq_observing
@@ -400,13 +401,19 @@ def select_RV_variable_targets():
     mcq_observing["VSCATTER"] = mcq_observing["VSCATTER"].filled(-9999.0)
     mcq_observing = catalog.perform_vscatter_cut(
         mcq_observing, lowv=1, vcol="VSCATTER")
-    mcq_observing["VSCATTER"] = np.ma.masked_values(mcq_observing["VSCATTER"],
-                                                 -9999.0)
+    mcq_observing["VSCATTER"] = np.ma.masked_values(
+        mcq_observing["VSCATTER"], -9999.0)
+    # Workaround for a bug in astropy.join.
+    # np.ma.masked_values simply assigns mask=False if there are no masked
+    # values in the column.
+    if not mcq_observing["VSCATTER"].mask:
+        mcq_observing["VSCATTER"].mask = np.zeros(
+            len(mcq_observing), dtype=bool)
     giants_removed = len(mcq_observing)
     print("Sample after removing APOGEE giants: " + str(giants_removed))
     
     # Also remove eclipsing binaries.
-    mcq_observing = catalog.remove_Kepler_EBs(mcq_observing, mainkiccol="kepid")
+    mcq_observing = ebs.remove_Kepler_EBs(mcq_observing, mainkiccol="kepid")
     print(len(mcq_observing))
 
     # Perform a magnitude cut.
@@ -470,7 +477,7 @@ def select_RV_nonvariable_targets():
     mcq_observing["NVISITS"] = np.ma.masked_values(mcq_observing["NVISITS"], 0)
     
     # Also remove eclipsing binaries.
-    mcq_observing = catalog.remove_Kepler_EBs(mcq_observing, mainkiccol="kepid")
+    mcq_observing = ebs.remove_Kepler_EBs(mcq_observing, mainkiccol="kepid")
     print(len(mcq_observing))
 
     # Perform a magnitude cut.

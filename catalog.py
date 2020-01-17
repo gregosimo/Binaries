@@ -23,6 +23,8 @@ from astropy.convolution import convolve, Gaussian1DKernel
 from bs4 import BeautifulSoup
 import requests
 # from apogee.tools import bitmask
+import pyrallaxes
+
 
 import astropy_util as au
 import statop as stat
@@ -32,16 +34,16 @@ import path_config as paths
 import sed
 import browse_APOGEE_spectra as browse
 import read_catalog as catin
-import rotation_consistency as rot
+import data_splitting as dsplit
+import sample_characterization as samp
 
 SDSS3_URL = "http://data.sdss3.org"
 
 NUM_KEPLER_QUARTERS = 17
 
-APOGEE_NULL = -9999.0
+DLSB_PATH = paths.DLSB_DB
+NON_DLSB_PATH = paths.NODL_DB
 
-DLSB_PATH = browse.DEFAULT_DLSB_DB
-NON_DLSB_PATH = browse.DEFAULT_NULL_DB
 
 ################################################################################
 # Online catalog interactions #
@@ -66,6 +68,8 @@ def join_by_2MASS_key(tbl1, tbl2, tm1, tm2, join_type="inner",
     '''
     kic_prefix = "2MASS J"
     apogee_prefix = "2M"
+    jackson_prefix = "J"
+    epic_prefix = ""
 
     try:
         tbl1 = tbl1[~tbl1[tm1].mask]
@@ -78,20 +82,30 @@ def join_by_2MASS_key(tbl1, tbl2, tm1, tm2, join_type="inner",
         pass
 
     if np.any(npstr.startswith(tbl1[tm1], kic_prefix)):
-        tbl1_type = "KIC"
+        tbl1_prefix = kic_prefix
     elif np.any(npstr.startswith(tbl1[tm1], apogee_prefix)):
-        tbl1_type = "APOGEE"
+        tbl1_prefix = apogee_prefix
+    elif np.any(npstr.startswith(tbl1[tm1], jackson_prefix)):
+        tbl1_prefix = jackson_prefix
+    elif np.any(npstr.startswith(tbl1[tm1], epic_prefix)):
+        tbl1_prefix = epic_prefix
+    # Given the EPIC key, I think this is redundant. But if I decide to
+    # implement this differently, it may still be important.
     else:
         raise ValueError("Don't recognize 2MASS key: " + tbl1[tm1][0])
 
     if np.any(npstr.startswith(tbl2[tm2], kic_prefix)):
-        tbl2_type = "KIC"
+        tbl2_prefix = kic_prefix
     elif np.any(npstr.startswith(tbl2[tm2], apogee_prefix)):
-        tbl2_type = "APOGEE"
+        tbl2_prefix = apogee_prefix
+    elif np.any(npstr.startswith(tbl2[tm2], jackson_prefix)):
+        tbl2_prefix = jackson_prefix
+    elif np.any(npstr.startswith(tbl2[tm2], epic_prefix)):
+        tbl2_prefix = epic_prefix
     else:
         raise ValueError("Don't recognize 2MASS key: " + tbl2[tm2][0])
 
-    if tbl1_type == tbl2_type:
+    if tbl1_prefix == tbl2_prefix:
         new_table = au.join_by_id(
             tbl1, tbl2, tm1, tm2, join_type=join_type, idproc=npstr.strip, 
             conflict_suffixes=conflict_suffixes)
@@ -99,10 +113,12 @@ def join_by_2MASS_key(tbl1, tbl2, tm1, tm2, join_type="inner",
     else:
         print("Types different")
         def transform(oldcol):
-            if tbl1_type == "KIC" and tbl2_type == "APOGEE":
-                newcol = npstr.replace(oldcol, apogee_prefix, kic_prefix)
-            elif tbl1_type == "APOGEE" and tbl2_type == "KIC":
-                newcol = npstr.replace(oldcol, kic_prefix, apogee_prefix)
+            # The epic prefix is special because I can't search and replace an
+            # empty string.
+            if tbl2_prefix == epic_prefix:
+                newcol = npstr.add(tbl1_prefix, oldcol)
+            else:
+                newcol = npstr.replace(oldcol, tbl2_prefix, tbl1_prefix)
             return newcol
         tbl2_oldcol = tbl2[tm2]
         random_colname = au.generate_random_string(12)
@@ -132,6 +148,39 @@ def KIC_to_APOGEE_2MASS_designation(kic_desig):
     ones are 2M##########.'''
     apo_desig = npstr.replace(kic_desig, "2MASS J", "2M")
     return apo_desig
+
+###################################
+# Dressing and Charbonneau (2013) #
+###################################
+
+def replace_Dressing_Charbonneau_params(
+    kictable, kiccol="kepid", oldteffcol="KIC Teff", newteffcol="DC Teff",
+    oldloggcol="KIC logg", newloggcol="DC logg"):
+    '''Replace the Teff and logg parameters with Dressing & Charbonneau.
+
+    For the Kepler IDs which have KIC entries in the Dressing and Charbonneau
+    (2013) table, replace the temperatures and loggs in oldteffcol and
+    oldloggcol with the DC13 temperatures. The new parameters are placed in the
+    newteffcol and new loggcol columns.
+    '''
+    dctable = catin.read_Dressing_Charbonneau_table()
+    kictable[newteffcol] = np.array(kictable[oldteffcol])
+    kictable[newloggcol] = np.array(kictable[oldloggcol])
+    fulltable = au.join_by_id(kictable, dctable, kiccol, "KIC",
+                              join_type="left")
+    try:
+        unchangedindices = fulltable["Teff"].mask
+    except KeyError:
+        unchangedindices = fulltable["Teff_A"].mask
+
+    kictable[newteffcol][~unchangedindices] = fulltable["Teff"][
+        ~unchangedindices]
+    try:
+        kictable[newloggcol][~unchangedindices] = fulltable["logg"][
+            ~unchangedindices]
+    except KeyError:
+        kictable[newloggcol][~unchangedindices] = fulltable["logg_A"][
+            ~unchangedindices]
 
 #####################
 # Kepler Photometry #
@@ -190,6 +239,113 @@ def select_tidally_synchronized_binaries(
     loggcut = perform_logg_cut(temp_cut, lowlogg=logg, loggcol=loggcol)
 
     return loggcut
+
+def select_APOGEE_dwarfs(apotargs):
+    '''Select APOGEE dwarfs for activity relations.'''
+    dsplit.initialize_clean_APOGEE(apotargs)
+
+    apotargs.split_teff(
+        "TEFF", 7700, ("APOGEE Sample", "APOGEE Telluric", "No APOGEE Teff"),
+        null_value=np.ma.masked, teff_crit="APOGEE Teff Sample")
+    apotargs.split_metallicity(
+        -1, ("Low Metallicity", "Normal Metallicity", "No Metallicity"),
+        col="FE_H", null_value=np.ma.masked)
+
+    cleantargs = apotargs.split_subsample([
+        "~Bad", "APOGEE Sample", "K Detection", "In Gaia", "~No Metallicity"])
+
+    cleantargs.data["MIST K"] = samp.calc_model_mag_fixed_age_feh_alpha(
+        cleantargs.data["TEFF"], 0.0, "Ks", age=1e9,
+        model="MIST v1.2")
+
+    cleantargs.data["K Excess"] = (
+        cleantargs.data["M_K"] - cleantargs.data["MIST K"])
+    cleantargs.split_mag(
+        "K Excess", [-0.3], splitnames=(
+            "Photometric Binaries", "Photometric Singles", "No K Diff"), 
+        mag_crit="photbin", null_value=np.ma.masked)
+
+    targs = cleantargs.subsample(["Photometric Singles"])
+    return targs
+
+def write_APOGEE_dwarfs():
+    '''Plot the APOGEE dwarfs selected for activity relations.'''
+    apotargs = dsplit.APOGEESplitter()
+    sample = select_APOGEE_dwarfs(apotargs)
+    fullsamp = apotargs.subsample([
+        "~Bad", "APOGEE Sample", "K Detection", "In Gaia", "~No Metallicity"])
+
+    f, ax = plt.subplots(1, 1, figsize=(12, 12))
+    hr.absmag_teff_plot(
+        fullsamp["TEFF"], fullsamp["M_K"], color='black', marker=".", ls="",
+        axis=ax, label="Full Sample")
+    hr.absmag_teff_plot(
+        sample["TEFF"], sample["M_K"], color='red', marker=".", ls="", axis=ax,
+    label="Dwarf Sample")
+    sort_indices = np.argsort(sample["TEFF"])
+    hr.absmag_teff_plot(
+        sample["TEFF"][sort_indices], sample["MIST K"][sort_indices], 
+        color="blue", marker="", ls="-", axis=ax, label="MIST", lw=3)
+    ax.set_xlabel("Teff")
+    ax.set_ylabel("M_K")
+    ax.legend(loc="upper left")
+
+    f, ax = plt.subplots(1, 1, figsize=(12, 12))
+    hr.absmag_teff_plot(
+        fullsamp["TEFF"], fullsamp["H"], color='black', marker=".", ls="",
+        axis=ax)
+    hr.absmag_teff_plot(
+        sample["TEFF"], sample["H"], color='red', marker=".", ls="", axis=ax)
+    ax.set_xlabel("Teff")
+    ax.set_ylabel("H")
+
+    f, ax = plt.subplots(1, 1, figsize=(12, 12))
+    ax.hist(
+        [fullsamp["M_H"], sample["M_H"]], bins=30, color=['black', 'red'], 
+        alpha=0.3, histtype='stepfilled', label=["Full", "Sample"], 
+        normed=True)
+    ax.set_xlabel("[M/H]")
+    ax.set_ylabel("Normalized Count")
+
+    f, ax = plt.subplots(1, 1, figsize=(12, 12))
+    fullsamp_multivisit = fullsamp["NVISITS"] > 1
+    sample_multivisit = sample["NVISITS"] > 1
+    ax.hist(
+        [fullsamp["VSCATTER"], sample["VSCATTER"]], bins=1000, 
+        color=['black', 'red'], alpha=0.3, histtype='step', 
+        label=["Full", "Sample"], normed=True, cumulative=True, lw=3)
+    ax.set_xlabel("RV Scatter")
+    ax.set_ylabel("Cumulative Normalized Count")
+    ax.set_ylim(0.97, 1.0)
+    ax.legend(loc="lower right")
+
+    outsample = sample[["kepid", "APOGEE_ID", "TEFF", "M_H", "FE_H", "M_K", 
+                        "K Excess"]]
+
+    outsample.sort("kepid")
+
+    outsample.meta["comments"] = [
+        "Sample of APOGEE targets which fit the criteria of having a K Excess",
+        "of less than -0.3 for investigation into activity. Included columns",
+        "are:",
+        "kepid: The KIC value for the target.",
+        "APOGEE_ID: The APOGEE_ID of the target.",
+        "TEFF: The spectroscopically-determined temperature of the target.",
+        "M_H: The spectroscopic [Z/H] of the target.",
+        "FE_H: The spectroscopic [Fe/H] of the target (calculated by",
+        "      combining [M/H] and [Fe/M].",
+        "M_K: The absolute K-band magnitude of the target.",
+        "K Excess: The difference in K-band magnitude between the target and",
+        "          a 1 Gyr solar-metallicity MIST isochrone."]
+
+    
+    outsample.write(
+        str(paths.HEAD_DIR / "APOGEE_Activity_Targets.txt"), 
+        format="ascii.fixed_width", delimiter="|", overwrite=True)
+
+    
+
+    
 
 #################
 # Split Catalog #
@@ -315,13 +471,20 @@ def split_McQuillan_periods(fullsamp, kiccol):
 # APOGEE filters #
 ##################
 
-def filter_invalid_APOGEE_entries(apotable, colname, maskvalue=APOGEE_NULL):
+def invalid_indices(apotable, colname, maskvalue=np.ma.masked):
+    '''Mark the indices where the column values are mask values.'''
+    badindices = au.mark_selections_in_columns(apotable[colname], [maskvalue])
+
+    return badindices
+
+def filter_invalid_APOGEE_entries(apotable, colname, maskvalue=np.ma.masked):
     '''Remove rows from apotable where column values are the mask values.
 
     This will filter apotable where only the rows that do not have the mask
     value in the column will be returned.'''
-    filtered_table = au.filter_column_from_subtable(apotable, colname, 
-                                                    [maskvalue])
+    badindices = invalid_indices(apotable, colname, maskvalue=maskvalue)
+    filtered_table = apotable[~badindices]
+                                         
     add_cut_metadata(filtered_table,
         "Removed masked entries in {0}".format(colname))
     return filtered_table
@@ -353,7 +516,7 @@ def delete_split_files(filename, outputpath):
     splitting filename and deletes them all.'''
     # Delete old split files before making new ones.
     singlefile = outputpath / filename
-    previous_files = find_split_files(singlefile)
+    previous_files = catin.find_split_files(singlefile)
     for oldfile in previous_files:
         oldfile.unlink()
 
@@ -414,8 +577,65 @@ def write_columns_for_input(outputtable, filename, maxlen, table_format,
         startind = maxlen * i
         endind = min(maxlen * (i+1), len(outputtable))
         outputsegment = outputtable[startind:endind]
-        outputsegment.write(str(outputpath / outputfile), format=table_format,
-                            include_names=output_columns)
+        outputsegment.write(
+            str(outputpath / outputfile), format=table_format, 
+            include_names=output_columns, comment=False, overwrite=True)
+
+def write_Kepler_field_Vizier_upload_list(
+        outputfile=paths.VIZIER_KEPLER_INPUT):
+    '''Write a file resolved by Vizier with the full Kepler field.'''
+    fullkepler = catin.read_KIC_DR25_catalog()
+    write_KIC_Vizier_upload_list(
+        fullkepler["kepid"], outputfile.name, outputpath=outputfile.parent)
+
+def write_xMatch_upload_list(
+        ra, dec, outputfile, ids=None, outputpath=paths.HEAD_DIR):
+    '''Write the upload list suitable for sending to xMatch.
+    
+    The RA and Dec should be given in J2000 coordinates. If a set of IDs are
+    associated with each coordinate, those can also be given to this file, and
+    it will be added to the list. IDs are useful for identifying cases where
+    xMatch didn't find an associated source, or found multiple associated
+    sources.
+    
+    The file will be written in the directory outputpath to the file
+    outputfile.'''
+    xmatch_table = Table([ids, ra, dec], names=("ID", "RA", "DEC"))
+    xmatch_table.write(str(outputpath / outputfile), format="ascii.csv",
+                       comment=False)
+
+def clean_cross_matched_table(tbl, uniq_col="ID", dist_col="angDist"):
+    '''Ensure that a table has only one target associated with each ID.
+
+    If any of entries under tbl[uniq_col] are duplicated, only select the one
+    with the lowest value in tbl[dist_col].'''
+    keep_indices = np.zeros(len(tbl), dtype="bool")
+    for ident in tbl[uniq_col]:
+        ident_match = np.where(tbl[uniq_col] == ident)[0]
+        minval = np.argmin(tbl[dist_col][ident_match])
+        keep_indices[ident_match[minval]] = 1
+
+    return tbl[keep_indices]
+
+def write_TAP_table(table, outputfile, outputpath=paths.HEAD_DIR):
+    '''Write the table such that it can be uploaded through the TAP.
+    
+    This basically ensures that the table is written in a votable format.'''
+    table.write(str(outputpath / outputfile), format="votable")
+
+def clean_XMatch_file(tablepath, uniq_col="ID", tableformat="ascii.csv"):
+    '''Ensure XMatch file has only one target associated with each ID.
+
+    Go through the table located at tablepath (in the format specified in
+    tableformat and ensure that all
+    identifications in uniq_col are unique. If there are duplicates, chose the
+    one with the lowest value in dist_col.'''
+    tbl = Table.read(tablepath, format=tableformat)
+
+    newtbl = clean_cross_matched_table(
+        tbl, uniq_col=uniq_col, dist_col="angDist")
+
+    newtbl.write(str(tablepath), format=tableformat, overwrite=True)
 
 def write_KIC_Vizier_upload_list(kics, outputfile, outputpath=paths.HEAD_DIR):
     '''Write a file to be uploaded to Vizier. 
@@ -429,7 +649,21 @@ def write_KIC_Vizier_upload_list(kics, outputfile, outputpath=paths.HEAD_DIR):
     write_columns_for_input(
         kic_table, outputfile, 99999, "ascii.no_header", output_columns=["KIC"], 
         outputpath=outputpath)
-    kic_table.write(str(outputpath / outputfile), format="ascii.no_header")
+
+def write_KIC_to_Gaia_Archive_upload_list(kics, outputpath):
+    '''Write a list of kics to be uploaded to the Gaia archive.'''
+    kicstr = kics.astype(np.str)
+    kic_column = npstr.add("KIC", kicstr)
+    kic_table = Table([kic_column], names=["KIC"])
+    kic_table.write(str(outputpath), format="ascii.no_header", overwrite=True, 
+                    delimiter=",")
+
+def write_APOGEE_to_Gaia_Archive_upload_list(apogee_id, outputpath):
+    '''Write a list of APOGEE IDs to be uploaded to the Gaia archive.'''
+    twomass_column = npstr.replace(apogee_id, "2M", "")
+    gaia_table = Table([twomass_column], names=["2MASS ID"])
+    gaia_table.write(
+        str(outputpath), format="ascii.no_header", overwrite=True, delimiter=",")
 
 def write_SIMBAD_identifier_list(
     identifiers, outputfile, outputpath=paths.HEAD_DIR):
@@ -438,6 +672,26 @@ def write_SIMBAD_identifier_list(
     write_columns_for_input(
         ident_table, outputfile, 99999, "ascii.no_header",
         output_columns=["Ident"], outputpath=outputpath)
+
+def write_IPAC_identifier_list(identifiers, outputfile,
+                               outputpath=paths.HEAD_DIR):
+    '''Write a list to be uploaded to IPAC as a list of SIMBAD identifiers.'''
+    ident_table = Table([identifiers], names=["objstr"])
+    write_columns_for_input(
+        ident_table, outputfile, 99999, "ascii.ipac", output_columns=["objstr"],
+        outputpath=outputpath)
+
+def write_IPAC_coord_list(ras, decs, outputfile, outputpath=paths.HEAD_DIR):
+    '''Write a list to be uploaded to IPAC as a list of RA and DEC.
+    
+    This is preferred if RA and Dec are known because IRSA doesn't do this
+    automatically.'''
+    # There should be a way to validate that RA and DEC are in decimal degrees.
+    coord_table = Table([ras, decs], names=("ra", "dec"))
+    write_columns_for_input(
+        coord_table, outputfile, 99999, "ascii.ipac", output_columns=["ra",
+        "dec"], outputpath=outputpath)
+
 
 def write_MAST_files(outputtable, kiccol="KIC", outputpath=paths.HEAD_DIR,
                      output_filename="Kepler_MAST.txt"):
@@ -721,171 +975,6 @@ def extract_vrel(soup):
 
 # CLEANUP
 
-def teff_velocity_apogee(
-    teffs, vsinis, apogee_flags):
-    '''Plot the relationship between period & vsini for rapid rotators.
-
-    This will put the rapid rotators whic hhave been observed in APOGEE on a
-    plot relating teff and vsini. We'll see if the slowly-rotating objects are
-    cool. If so, it's possible they are significantly smaller.
-    '''
-    bad_indices = apogee_flags & 2**23 != 0
-    # The 2**14 is a flag called VSINI_WARN. It does not trigger the STAR_BAD
-    # or STAR_WARN flags.
-    warn_indices = np.logical_and(apogee_flags & (2**7+2**14) != 0,
-                                  np.logical_not(bad_indices))
-    good_indices = np.logical_not(np.logical_or(bad_indices, warn_indices))
-
-    plt.scatter(teffs[good_indices], vsinis[good_indices], s=50, c="g",
-                marker="o", label="good")
-    plt.scatter(teffs[warn_indices], vsinis[warn_indices], s=15, c="m",
-                marker="s", label="warn")
-    plt.scatter(teffs[bad_indices], vsinis[bad_indices], s=15, c="r",
-                marker="D", label="bad")
-    hr.invert_x_axis()
-
-    plt.xlabel("Teff (K)")
-    plt.ylabel("vsini (km/s)")
-    plt.ylim(0, 80)
-    plt.xlim(5700, 4000)
-    plt.legend(loc="upper right")
-
-def teff_radius_apogee(
-    teffs, vsinis, periods):
-    '''Plots the inferred radius vs teff for rapid rotators.
-
-    The inferred radius will basically be vsini * P. Typical bounds on sini
-    will also be displayed for clarity. If cool objects have a large radius,
-    then this may be indicative of subgiant contamination.'''
-    conv = 24*60*60*1e5/6.96e10/2/np.pi
-
-    good_indices = vsinis > 7
-    plt.scatter(
-        teffs[good_indices], vsinis[good_indices]*periods[good_indices]*conv, 
-        s=50, c="g", marker="o", label="good")
-    hr.invert_x_axis()
-
-    # Use the isochrones to determine the radius as a function of Teff.
-    isochrone = sed.read_DSEP_isochrone(0.0, 2)
-    isoteff = isochrone[np.where(np.logical_and(
-        isochrone["LogTeff"] > np.log10(4000), 
-        isochrone["EEP"] < 73))]
-    teffs = 10**isoteff["LogTeff"]
-    radii = 10**(isoteff["LogL/Lo"] / 2 - 
-                 2 * (isoteff["LogTeff"] - np.log10(5777)))
-
-    plt.plot(teffs, radii, 'k-', label="DSEP")
-    plt.plot(teffs, radii*0.5, 'k--', label="Min.")
-
-    plt.xlim(6600, 4000)
-    plt.ylim(0, 5)
-    plt.xlabel("Teff (K)")
-    plt.ylabel("vsini * P (Rsun)")
-
-def rotation_radius_comparison(
-    asteroseismic_radii, vsinis, periods):
-    '''Plots the asteroseismic radius vs R sini from rotation.
-
-    The inferred radius will basically be vsini * P.'''
-    good_indices = vsinis > 7
-    inferred_radii = rotation_radius(
-        vsinis[good_indices], periods[good_indices])
-    plt.plot(
-        asteroseismic_radii[good_indices], inferred_radii, c="g", marker="o",
-        ls="None")
-    plt.plot([0, 4], [0, 4], 'k-')
-    plt.xlabel("Asteroseismic Radius (Rsun)")
-    plt.ylabel("Inferred R sini (Rsun)")
-
-def compare_rotation_velocity_radius(
-    vsini, period, radii, raderr_below, raderr_above, subgiant_indices):
-    '''Evaluate rotation quality in velocity and radius space.
-
-    Create a double-paneled figure that plots the same data in velocity space
-    and radius space for clarity of understanding.'''
-    f, (ax1, ax2, ax3) = plt.subplots(1, 3)
-
-    valid_indices = vsini > 7
-    valid_vsini = vsini[valid_indices]
-    valid_period = period[valid_indices]
-    valid_radii = radii[valid_indices]
-    valid_raderr_above = raderr_above[valid_indices]
-    valid_raderr_below = raderr_below[valid_indices]
-    valid_subgiant_indices = subgiant_indices[valid_indices]
-    valid_dwarf_indices = au.get_complement_indices(
-        valid_subgiant_indices, len(valid_subgiant_indices))
-
-    downvel, infvel, upvel = period_to_velocities_uncertainties(
-        valid_period, valid_radii, valid_raderr_below, valid_raderr_above)
-
-    ax1.errorbar(
-        infvel[valid_subgiant_indices], valid_vsini[valid_subgiant_indices],
-        xerr=[-downvel[valid_subgiant_indices], upvel[valid_subgiant_indices]],
-        yerr=0.1*valid_vsini[valid_subgiant_indices], fmt='b*',
-        label="Subgiants")
-    ax1.errorbar(
-        infvel[valid_dwarf_indices], valid_vsini[valid_dwarf_indices],
-        xerr=[-downvel[valid_dwarf_indices], upvel[valid_dwarf_indices]],
-        yerr=0.1*valid_vsini[valid_dwarf_indices], fmt='ro', label="Dwarfs")
-    ax1.plot([0, 80], [0, 80], 'k-')
-    ax1.plot([0, 80], [7, 7], 'r--', label="Detection Limit")
-    plt.sca(ax1)
-#    plt.legend(loc="upper right")
-    ax1.set_xlabel("Inferred equatorial velocity (km/s)")
-    ax1.set_ylabel("V sini (km/s)")
-
-    inferred_radii = rotation_radius(valid_vsini, valid_period)
-    ax2.errorbar(
-        valid_radii[valid_subgiant_indices], 
-        inferred_radii[valid_subgiant_indices], 
-        yerr=0.1*inferred_radii[valid_subgiant_indices],
-        xerr=[-valid_raderr_below[valid_subgiant_indices],
-              valid_raderr_above[valid_subgiant_indices]], fmt='b*')
-    ax2.errorbar(
-        valid_radii[valid_dwarf_indices], 
-        inferred_radii[valid_dwarf_indices], 
-        yerr=0.1*inferred_radii[valid_dwarf_indices],
-        xerr=[-valid_raderr_below[valid_dwarf_indices],
-              valid_raderr_above[valid_dwarf_indices]], fmt='ro')
-    ax2.plot([0, 4.0], [0, 4.0], 'k-')
-    ax2.set_xlabel("Radius (Rsun)")
-    ax2.set_ylabel("Inferred R sini (Rsun)")
-
-    inferred_period = vsini_to_period(valid_vsini, valid_radii)[1]
-    # Dealing with errors is difficult because the vsini and radius errors have
-    # a unspecified interplay, especially since radius is asymmetric. Instead
-    # of trying to calculate some form, I'll take the maximum of either the
-    # vsini error or the radius error.
-    radius_fractional_errors = ((valid_raderr_above + valid_raderr_below) / 
-                                valid_radii)
-    vsini_fractional_errors = 0.1
-    inferred_period_err_up = np.where(
-        radius_fractional_errors >= vsini_fractional_errors, 
-        vsini_to_period(
-            valid_vsini, valid_radii + valid_raderr_above)[1] - inferred_period, 
-        vsini_to_period(
-            valid_vsini*(1-vsini_fractional_errors), valid_radii)[1] - inferred_period)
-    inferred_period_err_down = np.where(
-        radius_fractional_errors >= vsini_fractional_errors, 
-        vsini_to_period(
-            valid_vsini, valid_radii + valid_raderr_below)[1] - inferred_period, 
-        vsini_to_period(
-            valid_vsini*(1+vsini_fractional_errors), valid_radii)[1] - inferred_period)
-    ax3.errorbar(
-        valid_period[valid_subgiant_indices],
-        inferred_period[valid_subgiant_indices],
-        yerr=[-inferred_period_err_down[valid_subgiant_indices],
-              inferred_period_err_up[valid_subgiant_indices]], fmt='b*')
-    ax3.errorbar(
-        valid_period[valid_dwarf_indices],
-        inferred_period[valid_dwarf_indices],
-        yerr=[-inferred_period_err_down[valid_dwarf_indices],
-              inferred_period_err_up[valid_dwarf_indices]], fmt='ro')
-
-    ax3.plot([0, 15.0], [0, 15.0], 'k-')
-    ax3.set_xlabel("McQuillan Period (day)")
-    ax3.set_ylabel("Inferred P / sin(i) (day)")
-                                      
 
 def write_asteroseismic_rotation_table(
         table, output_filename, title,  apid_col="APOGEE_ID", KICcol="KIC", 
@@ -944,556 +1033,6 @@ def write_table_for_spec_people(tbl, outfile, outputpath=paths.HEAD_DIR):
     # STARFLAGS, McQuillan P, Equatorial V.
     output_table = tbl
     output_table.write(str(outputpath / outfile), format="ascii.basic")
-
-def rotation_teff_test(
-    vsini, period, teff, metallicity, alpha, apogee_flags, age=2.0):
-    '''Test the subgiant status using displacement in radius.
-
-    This will see if the subgiants with large radius displacments also have
-    lower logg, which correspond to the rotational modulation and period
-    matching the atmosphere.
-    '''
-    compare_rotation_DSEP_radius_ratio(
-        vsini, period, teff, metallicity, alpha, apogee_flags, teff, 
-        (6600, 4000))
-    plt.xlabel("Teff (K)")
-    plt.title("MS Displacement")
-
-def rotation_subgiant_test(
-    vsini, period, teff, logg, metallicity, alpha, apogee_flags, age=2.0):
-    '''Test the subgiant status using displacement in radius.
-
-    This will see if the subgiants with large radius displacments also have
-    lower logg, which correspond to the rotational modulation and period
-    matching the atmosphere.
-    '''
-    compare_rotation_DSEP_radius_ratio(
-        vsini, period, teff, metallicity, alpha, apogee_flags, logg, (2.9, 5.0))
-    plt.xlabel("log (g)")
-    plt.title("MS Displacement")
-
-def rotation_period_test(
-    vsini, period, teff, metallicity, alpha, apogee_flags, age=2.0):
-    '''Test the subgiant status using displacement in radius.
-
-    This will see if the subgiants with large radius displacments also have
-    lower logg, which correspond to the rotational modulation and period
-    matching the atmosphere.
-    '''
-    compare_rotation_DSEP_radius_ratio(
-        vsini, period, teff, metallicity, alpha, apogee_flags, period, (1, 5))
-    plt.xlabel("Period (day)")
-    plt.title("MS Displacement")
-
-def compare_rotation_DSEP_radius_ratio(
-    vsini, period, radii, apogee_flags, xvalue, xlimits):
-    '''Plot the dependence of rotation radius ratio to another value.
-
-    The rotation radius requires vsini, the radius and period.
-
-    The ratio of radii will be plotted against xvalue. The points with "good"
-    APOGEE flags will be plotted as large green circles while those with "warn"
-    will be lotted as magenta squares. Generally bad points will not have valid
-    Teff values and won't be visible, but if they are, they will be red
-    circles. A radius ratio of 1 is marked on the figure.'''
-
-    usable_indices = au.multi_logical_and(
-        vsini != APOGEE_NULL, teff != APOGEE_NULL, xvalue != APOGEE_NULL,
-        metallicity != APOGEE_NULL, alpha != APOGEE_NULL)
-    usable_flags = apogee_flags[usable_indices]
-    usable_vsini = vsini[usable_indices]
-    usable_period = period[usable_indices]
-    usable_xvalues = xvalue[usable_indices]
-    usable_radii = radii[usable_indices]
-
-
-    # This is the radius estimated by rotation.
-    min_rotation_radius = rotation_radius(usable_vsini, usable_period)
-    average_rotation_radius = 1.5 * max_rotation_radius
-    rotation_radius_range = 1 * max_rotation_radius
-
-    radius_displacement_fraction = (average_rotation_radius / radii)
-    displacement_range = rotation_radius_range / radii
-
-    plot_by_ASPCAP_quality(
-        usable_xvalues, radius_displacement_fraction, usable_flags,
-        yerr=displacement_range)
-    
-
-    plt.plot(list(xlimits), [1, 1], 'k-')
-    plt.ylabel("Rotation radius / MS radius")
-    plt.xlim(xlimits[0], xlimits[1])
-
-def compare_rapid_rotator_period_vsini(
-        vsini, period, radii, teff, xvalues, rapidperiod=5, apogee_ids=None, 
-        xlim=()):
-    '''Compare the expected period from vsini to the photometric period.
-
-    This plots the actual photometric period against the period expected for
-    the given vsini at the star's predicted DSEP radius. Radii are expected to
-    be given in solar radii. 
-    
-    It will also plot the objects which are not expected to be rapid rotators.
-
-    A list of apogee_ids will separate the double-lined spectroscopic binaries
-    to the non double-lined spectroscopic binaries.
-    '''
-    if apogee_ids is not None:
-        DLSB_indices = mark_DLSB_indices(apogee_ids)
-        valid_indices = au.get_complement_indices(
-            DLSB_indices, len(apogee_ids))
-
-        DLSB_vsini = vsini[DLSB_indices]
-        DLSB_period = period[DLSB_indices]
-        DLSB_radii = radii[DLSB_indices]
-        DLSB_teff = teff[DLSB_indices]
-        DLSB_xvalues = xvalues[DLSB_indices]
-        vsini = vsini[valid_indices]
-        period = period[valid_indices]
-        radii = radii[valid_indices]
-        teff = teff[valid_indices]
-        xvalues = xvalues[valid_indices]
-
-        DLSB_representative_vsini_period = representative_norm * (
-            2 * np.pi * DLSB_radii / (
-                DLSB_vsini * km_per_sec_to_solRad_per_day))
-        DLSB_period_ratio = DLSB_representative_vsini_period / DLSB_period
-        plt.plot(DLSB_xvalues, DLSB_period_ratio, 'mo', label="DLSBs")
-
-    definite_rapid_rotators = definite_rapid_rotator_vsini_indices(
-        vsini, radii, highperiod=rapidperiod)
-    possible_rapid_rotators = possible_rapid_rotator_vsini_indices(
-        vsini, radii, highperiod=rapidperiod)
-    non_rapid = np.logical_not(np.logical_or(definite_rapid_rotators,
-                                             possible_rapid_rotators))
-
-    max_vsini_period, rep_vsini_period, min_vsini_period = vsini_to_period(
-        vsini, radii)
-
-    max_period_ratio = max_vsini_period / period
-    period_ratio = rep_vsini_period / period
-    min_period_ratio = min_vsini_period / period
-
-    plt.errorbar(
-        xvalues[non_rapid], period_ratio[non_rapid], 
-        yerr=(max_period_ratio[non_rapid], 
-              min_period_ratio[non_rapid]), 
-        c="k", marker=".", ls="", label="Slow vsini rotators")
-    plt.errorbar(
-        xvalues[possible_rapid_rotators], period_ratio[possible_rapid_rotators], 
-        yerr=(max_period_ratio[possible_rapid_rotators], 
-              min_period_ratio[possible_rapid_rotators]), 
-        c='b', marker="o", ls="", label="Possible rapid vsini rotators")
-    plt.errorbar(
-        xvalues[definite_rapid_rotators], period_ratio[definite_rapid_rotators], 
-        yerr=(max_period_ratio[definite_rapid_rotators], 
-              min_period_ratio[definite_rapid_rotators]),  
-        c='r', marker="o", ls="", label="Definite rapid vsini rotators")
-    plt.ylabel("Vsini Period / Photometric Period")
-    plt.yscale("log")
-
-def plot_Stauffer_APOGEE_vsini_comparison():
-    '''Compare the vsini values from Stauffer & Hartmann to APOGEE.
-
-    The vsini values are from select targets from the Pleiades.'''
-    targets = catin.Stauffer_APOGEE_overlap()
-    good_targets = good_aspcap_fits(targets)
-    nondetections = np.logical_and(
-        good_targets["vsini lim"] == stat.LOWER, good_targets["VSINI"] < 7)
-    detected_targets = good_targets[~nondetections]
-
-    Stauffer_errors = (detected_targets["vsini"] / 2 / 
-                       (1 + detected_targets["R"])).filled(0)
-    apogee_errors = 0.1 * detected_targets["VSINI"]
-
-    plt.errorbar(detected_targets["vsini"], detected_targets["VSINI"],
-                 apogee_errors, Stauffer_errors, 'b*')
-    plt.plot([0, 25], [0, 25])
-    plt.plot([0, 10, 10], [7, 7, 0], 'r--')
-    plt.xlabel("Stauffer & Hartmann VSINI")
-    plt.ylabel("APOGEE VSINI")
-    plt.title("Good VSINI comparison")
-
-def rapid_rotation_vsini_comparison_histogram(
-        vsini, period, radii, xvalues, rapidperiod=5, xlim=None, nbins=10):
-    '''Make a histogram of how concordant vsinis and periods are distributed.
-
-    Creates a histogram which marks the percentage of consistent vsinis and
-    periods over the xvalues distribution.'''
-    assert(len(period) == len(xvalues))
-
-    high_period, rep_period, low_period = vsini_to_period(vsini, radii)
-
-    high_period_ratio = high_period / period
-    rep_period_ratio = rep_period / period
-    low_period_ratio = low_period / period
-
-    consistent_indices = np.where(np.logical_and(high_period_ratio > 1,
-                                                 low_period_ratio <= 1))
-    consistent_hist, bins = np.histogram(xvalues[consistent_indices], 
-                                         bins=nbins, range=xlim)
-    full_hist, bins = np.histogram(xvalues, bins=bins)
-
-    frac = np.nan_to_num(consistent_hist / full_hist)
-    plt.step(bins[:-1], frac, where="post")
-    plt.ylabel("Fraction of consistent rapid rotators")
-    plt.xlim(xlim)
-
-def vsini_to_period(vsini, radii):
-    '''Converts vsinis to predicted periods using radii.
-    
-    Returns a 3-tuple containing the high-limit to the period, the 
-    representative period, and the low-limit to the period.'''
-    km_per_sec_to_solRad_per_day = 1e5 / 7e10 *60*60*24
-    representative_norm = np.sin(np.pi/4)
-
-    max_vsini_period = 2 * np.pi * radii / (vsini  *
-                                            km_per_sec_to_solRad_per_day)
-    representative_vsini_period = representative_norm * max_vsini_period
-    vsini_period_range = 0.5 * max_vsini_period
-
-    return max_vsini_period, representative_vsini_period, vsini_period_range
-
-def period_to_velocities(period, radii):
-    '''Convert periods to predicted velocities.
-
-    Return the quantity 2 * pi * radii / period, but in units of km/s if period
-    and radii are given in days and solar radii.'''
-    solRad_per_day_to_km_per_sec = 7e10 / (1e5 * 60 * 60 * 24)
-    velocity = 2 * np.pi * radii / period * solRad_per_day_to_km_per_sec
-
-    return velocity
-
-def period_to_velocities_uncertainties(period, radii, radius_up, radius_down):
-    '''Convert periods to predicted velocities with uncertainties.
-
-    Return the quantity 2 * pi * radii / period in terms of km/s if period and
-    radii are given in days and solar radii. It also takes upper and lower
-    limits of the radii error bars. This will return a 3-tuple with the lower
-    limit, most probable value, and the upper value.'''
-    solRad_per_day_to_km_per_sec = 7e10 / (1e5 * 60 * 60 * 24)
-    velocity = 2 * np.pi * radii / period * solRad_per_day_to_km_per_sec
-    velocity_up = 2 * np.pi * (radii + radius_up) / period * solRad_per_day_to_km_per_sec
-    velocity_down = 2 * np.pi * (radii + radius_down) / period * solRad_per_day_to_km_per_sec
-    print(np.any(velocity_down < 0))
-
-    updiff = velocity_up - velocity
-    downdiff = velocity_down - velocity
-
-    return (downdiff, velocity, updiff)
-
-def plot_velocity_vsini(max_vel, vsini, xvalue, vsini_lim=7):
-    '''Plot the expected velocities and the measured vsini.
-
-    Plot the velocity expected from the radius and period of objects, along
-    with the measured vsini.'''
-    sub_vsini = vsini.copy()
-    sub_vsini[vsini < 0] = 0
-    vsini = sub_vsini
-    valid_vsini_indices = np.logical_or(
-        vsini >= vsini_lim, max_vel >= vsini_lim)
-    valid_vel = max_vel[np.where(valid_vsini_indices)]
-    valid_vsini = vsini[np.where(valid_vsini_indices)]
-    valid_xvalue = xvalue[np.where(valid_vsini_indices)]
-    num_invalid = len(vsini) - np.count_nonzero(valid_vsini_indices)
-    print("Invalid vsinis: {0:d}".format(num_invalid))
-
-    plt.plot(valid_xvalue, valid_vel, 'bo', ms=6, label="Predicted V")
-    plt.plot(valid_xvalue, valid_vsini, 'rd', label="V sin(i)", ms=4)
-    for i in range(len(valid_xvalue)):
-        if valid_vel[i] >= valid_vsini[i]:
-            lc='k'
-        else:
-            lc='r'
-        plt.plot([valid_xvalue[i]]*2, [valid_vel[i], valid_vsini[i]], ls='-', 
-                 c=lc)
-    plt.plot(plt.xlim(), [vsini_lim, vsini_lim], 'r--', 
-             label="Detection Threshold")
-    plt.ylabel("Rotational Velocity (km/s)")
-
-def plot_velocity_with_errorbars(vsini, lowdiff, medvels, highdiff):
-    '''Plot the predicted velocity against vsini.
-
-    This will have error bars for the vsinis as well as the predicted
-    velocities which should originate from the radii errors.'''
-    sub_vsini = vsini.copy()
-    sub_vsini[vsini < 0] = 0.0
-    vsini = sub_vsini
-    goodvels = np.logical_or(vsini > 7, medvels > 7)
-    
-    plt.errorbar(medvels[goodvels], vsini[goodvels], yerr=0.1*vsini[goodvels], 
-                 xerr=[-lowdiff[goodvels], highdiff[goodvels]], fmt="b*")
-    plt.plot([0, 80], [0, 80], 'k-', lw=3)
-    plt.plot([0, 7, 7], [7, 7, 0], 'r--')
-    plt.xlabel("Predicted velocity")
-    plt.ylabel("V sini")
-
-def rotation_radius(vsini, prot, vsini_mask=APOGEE_NULL):
-    '''Calculate the maximum radius of a star with rotation period and vsini.
-
-    This function will essentially calculate VSINI * Prot. It's assumed that
-    vsini is given in km/s and prot is given in days. For targets which do not
-    have a vsini value, this will recognize the APOGEE mask and propagate
-    it to the output.
-    '''
-    masked_vsini = np.ma.masked_equal(vsini, -9999.0)
-    conv = 24*60*60*1e5/6.96e10/2/np.pi
-
-    # This is the radius estimated by rotation.
-    rotation_radius = masked_vsini * prot* conv
-
-    filled_radii = rotation_radius.filled(-9999.0)
-
-    return filled_radii
-
-def DSEP_dwarf_radii(teffs, metallicities, alphas, age=2.0, lowTeff=3000,
-                     highTeff=7000):
-    '''Calculate MS radii predicted from DSEP.
-    
-    Using an isochrone of a given age, calculate the radius of a star given an
-    effective temperature, metallicity, and alpha abundance.'''
-    # This may be complicated, so I wanna take it slow.
-    masked_teffs = np.ma.masked_equal(teffs, APOGEE_NULL)
-    masked_metallicities = np.ma.masked_equal(metallicities, APOGEE_NULL)
-    masked_alphas = np.ma.masked_equal(alphas, APOGEE_NULL)
-    radius_mask = au.multi_logical_or(
-        masked_teffs.mask, masked_metallicities.mask, masked_alphas.mask)
-    model_radii = np.ma.zeros(len(masked_teffs))
-    model_radii.mask = radius_mask
-
-    # These are the alpha/Fe bins that will be fed into DSEP.
-    alpha_binedges = np.arange(-0.1, 0.9, 0.2)
-    # a/Fe < -0.1 corresponds to 1, and a/Fe > 0.7 corresponds to 6.
-    alpha_bins = np.digitize(masked_alphas, alpha_binedges)+1
-    # DSEP should crash or something if the metallicity and alpha enhancement
-    # are not compatible. In particular, high alpha enhancements are only
-    # available for low metallicity stars. I want to ensure that this will be
-    # the case before running into weird DSEP bugs.
-    assert(np.all(np.logical_or(alpha_bins < 4, np.logical_and(
-        alpha_bins >= 4, masked_metallicities <= 0.0))))
-
-    rounded_metallicities = np.around(masked_metallicities, 2)
-    for i in range(len(model_radii)):
-        if not model_radii.mask[i]:
-            interp = sed.teff_to_radius_DSEP_interpolator(
-                age=age, metallicity=rounded_metallicities[i], afe=alpha_bins[i],
-                lowT=lowTeff, highT=highTeff)
-            model_radii[i] = 10**interp(np.log10(masked_teffs[i]))
-
-    return model_radii
-
-def compare_DSEP_radii_to_KIC_radii(
-    kic_radii, DSEP_radii, kic_radii_err_high, kic_radii_err_low, teff):
-    '''Plot the fractional difference between DSEP radii and KIc radii.
-
-    Calculate the fractional difference between the radii of the KIC and that
-    calculated by DSEP. This will include the uncertainties of the KIC
-    radius.'''
-    frac = (kic_radii - DSEP_radii) / DSEP_radii
-    fracerrs = [kic_radii_err_low / DSEP_radii, 
-                kic_radii_err_high / DSEP_radii]
-
-    print(frac)
-    print(fracerrs)
-
-    plt.errorbar(teff, frac, yerr=fracerrs, marker='o', color="b", ls="")
-    hr.invert_x_axis()
-    plt.xlabel("APOGEE Teff (K)")
-    plt.ylabel("Fractional KIC - DSEP radius")
-
-def DSEP_logg(teffs, metallicities, alphas, age=2.0, lowTeff=3000,
-              highTeff=7000):
-    '''Calculate logg predicted from DSEP.
-
-    Using an isochrone of a given age, calculate the log(g) of a star given an
-    effective temperature, metallicity, and alpha abundance.'''
-    # This may be complicated, so I wanna take it slow.
-    masked_teffs = np.ma.masked_equal(teffs, APOGEE_NULL)
-    masked_metallicities = np.ma.masked_equal(metallicities, APOGEE_NULL)
-    masked_alphas = np.ma.masked_equal(alphas, APOGEE_NULL)
-    logg_mask = au.multi_logical_or(
-        masked_teffs.mask, masked_metallicities.mask, masked_alphas.mask)
-    model_logg = np.ma.zeros(len(masked_teffs))
-    model_logg.mask = logg_mask
-
-    # These are the alpha/Fe bins that will be fed into DSEP.
-    alpha_binedges = np.arange(-0.1, 0.9, 0.2)
-    # a/Fe < -0.1 corresponds to 1, and a/Fe > 0.7 corresponds to 6.
-    alpha_bins = np.digitize(masked_alphas, alpha_binedges)+1
-    # DSEP should crash or something if the metallicity and alpha enhancement
-    # are not compatible. In particular, high alpha enhancements are only
-    # available for low metallicity stars. I want to ensure that this will be
-    # the case before running into weird DSEP bugs.
-    assert(np.all(np.logical_or(alpha_bins < 4, np.logical_and(
-        alpha_bins >= 4, masked_metallicities <= 0.0))))
-
-    rounded_metallicities = np.around(masked_metallicities, 2)
-    for i in range(len(model_logg)):
-        if not model_logg.mask[i]:
-            interp = sed.teff_to_logg_dwarf_DSEP_interpolator(
-                age=age, metallicity=rounded_metallicities[i], afe=alpha_bins[i],
-                lowT=lowTeff, highT=highTeff)
-            model_logg[i] = interp(np.log10(masked_teffs[i]))
-
-    return model_logg
-
-def HR_standout_plot(
-    fullsample, rv_nonvar, rv_var, Teff_colname="TEFF_FIT",
-    logg_colname="LOGG_FIT"):
-    '''Creates an HR diagram with RV samples.
-
-    Takes the full APOKASC sample and overplots the RV-variable and
-    RV-nonvariable samples on top in red and blue.
-    '''
-    hr.logg_teff_plot(
-        fullsample[Teff_colname], fullsample[logg_colname], label="APOKASC")
-    hr.logg_teff_plot(
-        rv_var[Teff_colname], rv_var[logg_colname], 'r*', ms=12, 
-        label="RV Variable")
-    hr.logg_teff_plot(
-        rv_nonvar[Teff_colname], rv_nonvar[logg_colname], 'b*', ms=12,
-        label="RV Non-variable")
-    plt.xlabel("Teff (K)")
-    plt.ylabel("log g (cm/s^2)")
-    plt.legend(loc="upper left")
-
-def compare_Rafa_McQuillan_tidsync_params(
-    rafa_logg, rafa_teff, mcq_logg, mcq_teff):
-    '''Plot the HR diagram for both Rafa's and McQuillan's loggs.'''
-    plt.subplot(1, 2, 1)
-    hr.logg_teff_plot(rafa_teff, rafa_logg, 'r.')
-    plt.title("Rafa rapid rotators")
-    plt.xlim(7000, 3200)
-    plt.ylim(5.15, 3.5)
-    plt.subplot(1, 2, 2)
-    hr.logg_teff_plot(mcq_teff, mcq_logg, 'g.')
-    plt.ylabel("")
-    plt.title("McQuillan rapid rotators")
-    plt.xlim(7000, 3200)
-    plt.ylim(5.15, 3.5)
-
-def compare_Rafa_McQuillan_tidsync_params_to_APOGEE(
-    rafa_logg, rafa_teff, rafa_apo_logg, rafa_apo_teff, rafa_flags, mcq_logg, 
-    mcq_teff, mcq_apo_logg, mcq_apo_teff, mcq_flags):
-    '''Compare the Teff and log(g) for APOGEE targets.'''
-    rafa_logg_diff = rafa_logg - rafa_apo_logg
-    mcq_logg_diff = mcq_logg - mcq_apo_logg
-    rafa_teff_diff = rafa_teff - rafa_apo_teff
-    mcq_teff_diff = mcq_teff - mcq_apo_teff
-
-    plt.subplot(2, 2, 1)
-    plot_by_ASPCAP_quality(rafa_apo_teff, rafa_logg_diff, rafa_flags)
-    plt.ylabel("Log(g) diff (KIC - APOGEE)")
-    plt.xlim(7000, 3200)
-    plt.ylim(-1.0, 3.0)
-    plt.title("Rafa APOGEE observations")
-    plt.subplot(2, 2, 2)
-    plot_by_ASPCAP_quality(mcq_apo_teff, mcq_logg_diff, mcq_flags)
-    plt.ylabel("Log(g) diff (KIC - APOGEE)")
-    plt.xlim(7000, 3200)
-    plt.ylim(-1.0, 3.0)
-    plt.title("McQuillan APOGEE Observations")
-    plt.subplot(2, 2, 3)
-    plot_by_ASPCAP_quality(rafa_apo_teff, rafa_teff_diff, rafa_flags)
-    plt.ylabel("Teff diff (K) (KIC - APOGEE)")
-    plt.xlim(7000, 3200)
-    plt.ylim(-1000, 1000)
-    plt.xlabel("Teff (K) (APOGEE)")
-    plt.subplot(2, 2, 4)
-    plot_by_ASPCAP_quality(mcq_apo_teff, mcq_teff_diff, mcq_flags)
-    plt.ylabel("Teff diff (K) (KIC - APOGEE)")
-    plt.xlabel("Teff (K) (APOGEE)")
-    plt.xlim(7000, 3200)
-    plt.ylim(-1000, 1000)
-
-def rapid_rotator_vsini_indices(vsinis, radii, lowperiod=0, highperiod=np.inf):
-    '''Get indices with vsinis corresponding to photometric period range.
-
-    Given a set of vsinis and radii, select those which ought to show a
-    photometric period between lowperiod and highperiod. The radii should be
-    given in terms of solar radii.'''
-    # Convert solar radii / day to km/s
-    solRad_per_day_to_km_per_s = 7e10 / 1e5 / 24 / 60 / 60
-    highvel = 2 * np.pi * np.array(radii) / lowperiod * solRad_per_day_to_km_per_s
-    lowvel = np.pi * radii / highperiod * solRad_per_day_to_km_per_s
-    indices = np.where(np.logical_and(vsinis < highvel, vsinis > lowvel))
-
-    return indices
-
-def definite_rapid_rotator_vsini_indices(vsinis, radii, highperiod=np.inf):
-    '''Get indices of vsinis definitely corresponding to short periods.
-
-    Given a set of vsinis and radii, select those which definitely ought to 
-    show a photometric period less than highperiod. That's because vsini >
-    vcrit, which is the circular velocity of a spot on the surface of a star
-    rotating at highperiod.'''
-    solRad_per_day_to_km_per_s = 7e10 / 1e5 / 24 / 60 / 60
-    lowvel = (2 * np.pi * np.array(radii) / highperiod * 
-               solRad_per_day_to_km_per_s)
-    indices = vsinis >= lowvel
-    return indices
-
-def possible_rapid_rotator_vsini_indices(vsinis, radii, highperiod=np.inf):
-    '''Get indicies of vsinis possibly corresponding to short periods.
-
-    Select those vsinis where if the sin i is unfavorable, then the object could
-    possibly be a rapid rotator. Otherwise, it's likely a slow rotator with a
-    favorable inclination.'''
-    solRad_per_day_to_km_per_s = 7e10 / 1e5 / 24 / 60 / 60
-    highvel = (2 * np.pi * np.array(radii) / highperiod * 
-               solRad_per_day_to_km_per_s)
-    lowvel = (np.pi * np.array(radii) / highperiod * 
-              solRad_per_day_to_km_per_s)
-    indices = np.logical_and(vsinis > lowvel, vsinis <= highvel)
-    return indices
-
-    
-def plot_rapid_rotation_vsini(
-    vsinis, radii, teffs, highperiod=5, apogee_ids=None):
-    '''Select out the rapid rotators based on vsinis.
-
-    This will select out those objects with vsinis that can be a part of a
-    rapidly-rotating population, which is defined to be in the given period
-    range. The conversion between vsini and teff will be done using the radii
-    given.
-
-    If a list of apogee IDs is given, then the objects which are flagged as
-    double-lined spectroscopic binaries will be marked separately on the
-    figure.
-    '''
-    if apogee_ids is not None:
-        DLSB_indices = mark_DLSB_indices(apogee_ids)
-        valid_indices = au.get_complement_indices(
-            DLSB_indices, len(apogee_ids))
-
-        DLSB_vsinis = vsinis[DLSB_indices]
-        DLSB_radii = radii[DLSB_indices]
-        DLSB_teffs = teffs[DLSB_indices]
-        vsinis = vsinis[valid_indices]
-        radii = radii[valid_indices]
-        teffs = teffs[valid_indices]
-
-        plt.plot(DLSB_teffs, DLSB_vsinis, 'mo', label="DLSBs")
-
-    print(vsinis)
-    definite_rapid_rotators = definite_rapid_rotator_vsini_indices(
-        vsinis, radii, highperiod=highperiod)
-    possible_rapid_rotators = possible_rapid_rotator_vsini_indices(
-        vsinis, radii, highperiod=highperiod)
-    non_rapid = np.logical_not(np.logical_or(definite_rapid_rotators,
-                                             possible_rapid_rotators))
-
-    plt.plot(teffs[non_rapid], vsinis[non_rapid], 'k.', label="Non-rapid")
-    plt.plot(teffs[possible_rapid_rotators], vsinis[possible_rapid_rotators], 
-             'bo', label="Possible Rapid Rotators")
-    plt.plot(teffs[definite_rapid_rotators], vsinis[definite_rapid_rotators], 'ro', 
-        label="Definite Rapid Rotators")
-    hr.invert_x_axis()
-    plt.xlabel("Teff (K)")
-    plt.ylabel("V sin i (km/s)")
-    plt.ylim(0, 80)
-    plt.xlim(7000, 3200)
-
 
 def perform_cut(fullsample, col_label, lowval=None, highval=None,
                 invert_inequality=False):
@@ -1671,11 +1210,11 @@ def find_UKIRT_contaminants(
     if ukirt_file is None:
         ukirt_input_path = input(
             "Please input the output path for the upload file to WFCAM:")
-        write_UKIRT_file(bintable, ukirt_input_path)
-        ukirt_file = input(
+        write_UKIRT_file(bintable, output_filename=ukirt_input_path)
+        ukirt_file = paths.HEAD_DIR / input(
             "Please input the path to the WFCAM output file:")
 
-    ukirt_catalog = read_UKIRT_file(ukirt_file)
+    ukirt_catalog = catin.read_UKIRT_file(ukirt_file)
     ukirt_catalog = filter_good_UKIRT_observations(ukirt_catalog)
     ukirt_groups = ukirt_catalog.group_by("upload_ID")
 
@@ -1694,9 +1233,9 @@ def find_UKIRT_contaminants(
         kepler_contam_sources = contam_list[np.where(np.logical_and(
             offsets > apogee_window, offsets < kepler_window))]
 
-        target_ind = np.argmax(
+        target_ind = np.argmin(
             apogee_sources["jAperMag3"])
-        brightest_contam_ind = np.argmax(
+        brightest_contam_ind = np.argmin(
             kepler_contam_sources["jAperMag3"])
 
         magdiffs[i] = (
@@ -1805,856 +1344,6 @@ def find_UKIRT_target_object(ukirt_result):
     target_table = Table(rows=main_target_rows, names=ukirt_result.colnames)
     return target_table
 
-def generate_sini_distribution(npoints=10000):
-    '''Generate a distribution of sin(i)s from randomly inclined orbits.
-
-    Note that "randomly inclined" does not mean uniform in inclinations. It
-    turns out that the distribution of inclinations goes as sin(i). Oddly
-    enough, the distribution of sin(i)s seems to go as tan(i), which diverges
-    at edge-on inclinations, which makes no mathematical sense.
-
-    To get around the weird result, I will generate sin(i) distributions by
-    hand.'''
-    randvar = uniform.rvs(size=npoints)
-    incs = np.arccos(2 * randvar - 1)
-    sinincs = np.sin(incs)
-    return sinincs
-
-def vsini_convolution_table(velbins, binvalues, mcpoints=10000):
-    '''Create a table allowing velocities to be convolved on a grid.
-
-    Generate a single table that holds the sin(i) convolution of each velocity
-    bin. In particular, the [i,:]th entry of the table contains the
-    vsini distribution of objects with true velocity velbins[i].
-    '''
-    sini_points = generate_sini_distribution(npoints=mcpoints)
-    vsini_weights = binvalues[:,np.newaxis] * sini_points
-    fullhist = np.zeros(shape=(len(binvalues), len(binvalues)))
-    for i in range(len(binvalues)):
-        hist, bins = np.histogram(vsini_weights[i,:], bins=velbins)
-        fullhist[i,:] = hist / mcpoints
-    return fullhist
-
-def error_convolution_table(velbins, fractional_uncert=0.1):
-    '''Creates an error convolution table.
-
-    In particular, this creates a square where row i is the a Gaussian profile 
-    with center of (velbins[i+1] + velbins[i])/2 and dispersion of 
-    fractional_uncert * (velbins[i+1] + velbins[i])/2. 
-
-    The Gaussian will be truncated at cutoff, and all probability less than the
-    cutoff value will be distributed as uniform. Right now, cutoff needs to
-    coincide with a value in velbins.
-    '''
-    dv = velbins[1] - velbins[0]
-    centers = (velbins[:-1] + velbins[1:])/2
-    disp = fractional_uncert * centers
-
-    # I don't want things to be approximate for the uncertainties. So I'll use
-    # a more accurate expression for the area between the bins.
-    normalized_bins = (velbins - centers[:,np.newaxis]) / (
-        np.sqrt(2) * disp[:,np.newaxis])
-    erfs = erf(normalized_bins)
-    gaussian_table = (erfs[:,1:] - erfs[:,:-1])/2
-
-    return gaussian_table
-
-
-    
-def vsini_convolution_table_test(velbins, velocities):
-    '''Create a table allowing velocities to be convolved on a grid.
-
-    Generate a single table that holds the sin(i) convolution of each velocity
-    bin. In particular, the [i,:]th entry of the table contains the
-    vsini distribution of objects with true velocity velbins[i].
-    '''
-    # Since the pdf is actually analytically integrable, we'll make the
-    # histogram by simply integrating in each bin.
-    # Transform velocity bins to sin(i) bins. 
-    scaled_vels = velbins / velocities[:,np.newaxis]
-    profiles = np.nan_to_num(
-        np.sqrt(1-scaled_vels[:,:-1]**2) - np.sqrt(1-scaled_vels[:,1:]**2))
-    # Determine the values in the bins where v/vc > 1
-    edge_indices = np.argmin(scaled_vels < 1, axis=1)-1
-    # I need data indices to take advantage of the advanced indexing.
-    data_indices = np.arange(len(velocities))
-    profiles[data_indices, edge_indices] = np.sqrt(
-        1-scaled_vels[data_indices, edge_indices]**2)
-    # This is the table of histograms. profiles[i,:] will be the histogram of
-    # the ith profile. The sum along the 2nd axis should be 1. However, the
-    # boundaries will be incorrect without further corrections.
-    # The area of each histogram will be sqrt(1-sin^2 i_1) - sqrt(1-sin^2 i_2)
-    profiles = np.nan_to_num(
-        np.sqrt(1-scaled_vels[:,:-1]**2) - np.sqrt(1-scaled_vels[:,1:]**2))
-    # Determine the values in the bins where v/vc > 1
-    edge_indices = np.argmin(scaled_vels < 1, axis=1)-1
-    # I need data indices to take advantage of the advanced indexing.
-    data_indices = np.arange(len(velocities))
-    profiles[data_indices, edge_indices] = np.sqrt(
-        1-scaled_vels[data_indices, edge_indices]**2)
-    np.testing.assert_allclose(np.sum(profiles, axis=1), 1.0)
-    return profiles
-
-def compare_sini_distribution(velocities, vsinis, vsini_cutoff=7, nbins=20,
-                              frac_uncertainty=0.1):
-    '''Compare the inferred sin(i) distribution to a random one.
-
-    Derive a sin(i) distribution from a given velocity and observed vsin(i). In
-    order to decrease the amount of noise, objects with velocities less than
-    vsini_cutoff will be ignored.'''
-    # This will be the same as before. Except non-detections will be removed.
-    vel_bins = np.linspace(0, 100, nbins+1, endpoint=True)
-    vel_hist, bins = np.histogram(velocities, bins=vel_bins)
-    dv = vel_bins[2] - vel_bins[1]
-    binvalues = (vel_bins[1:] + vel_bins[:-1])/2
-
-    # First I want the noiseless vsin(i) distribution.
-    scaled_vels = vel_bins / velocities[:,np.newaxis]
-    profiles = (np.sqrt(1-scaled_vels[:,:-1]**2) -
-                np.sqrt(1-scaled_vels[:,1:]**2)).filled(0.0)
-    # Determine the values in the bins where v/vc > 1
-    edge_indices = np.argmin(scaled_vels < 1, axis=1)-1
-    # I need data indices to take advantage of the advanced indexing.
-    data_indices = np.arange(len(velocities))
-    profiles[data_indices, edge_indices] = np.sqrt(
-        1-scaled_vels[data_indices, edge_indices]**2)
-
-    # Now convolve with noise
-    noise_array = error_convolution_table(vel_bins, frac_uncertainty)
-    convolved_profile = profiles[:, np.newaxis, :] * noise_array
-    summed_profile = np.sum(convolved_profile, axis=1)
-
-    # Now add up all of the entries again.
-    data_dist = np.sum(convolutions, axis=1)
-
-    # Now get the sini distributions for each object.
-    sini_dists = convolutions / velocities[:,np.newaxis,np.newaxis]
-    plt.step(sini_dists[0])
-
-    return
-    detection_indices = np.where(vsinis > vsini_cutoff)
-    sini = vsinis[detection_indices] / velocities[detection_indices]
-    art_sini = generate_sini_distribution(30000)
-
-    bins = np.linspace(0, 1.1, nbins+1)
-    sini_bins, bins = np.histogram(sini, bins=bins) 
-    sini_bins = sini_bins 
-    art_sini_bins, bins = np.histogram(art_sini, bins=bins) 
-    art_sini_bins = art_sini_bins / len(art_sini) * len(sini)
-
-    plt.step(bins[1:], art_sini_bins, where="pre", lw=2, label="Random")
-    plt.step(bins[1:], sini_bins, where="pre", lw=1, label="Observed")
-    plt.xlim((1.1, 0.0))
-    plt.xlabel("sin(i)")
-    plt.ylabel("N(sini)")
-    
-
-def compare_vsini_distribution(velocities, vsinis, vsini_percent=0.1,
-                               vsini_cutoff=5, nbins=70, maxv=70):
-    '''Compare the observed vsin(i) distribution to that inferred from vrot.
-
-    This will reconstruct a vsin(i) distribution using the provided velocity
-    distribution. The reconstruction involves convolving with a fractional vsini
-    uncertainty, and then convolving with a population of random
-    inclinations.'''
-    vel_bins = np.linspace(0, maxv*(1+1/nbins), nbins+1, endpoint=False)
-    vel_hist, bins = np.histogram(velocities, bins=vel_bins)
-    dv = vel_bins[2] - vel_bins[1]
-    binvalues = (vel_bins[1:] + vel_bins[:-1])/2
-
-    dispersions = np.reshape(vsini_percent * velocities, (len(velocities), 1))
-    # I'll do one data point now, but more will be on the way.
-    dist = 1/np.sqrt(2*np.pi*dispersions**2) * np.exp(-(
-        binvalues - velocities[:,np.newaxis])**2 / (2 * dispersions**2))*dv
-    # Now make a data square that contains sin(i) convolution profiles for all
-    # velocity bin values.
-    fullhist = vsini_convolution_table_test(vel_bins, binvalues)
-
-    # Now make a cube for all data points
-    convolutions = dist[:,:,np.newaxis] * (fullhist)
-
-    # Now add up all of the entries
-    data_dist = np.sum(convolutions, axis=1)
-
-    # And now all of the data points
-    vsini_dist = np.sum(data_dist, axis=0)
-
-    # Pick out the upper limits.
-    upper_index = np.argmin(binvalues<vsini_cutoff)
-    num_upper = np.sum(vsini_dist[:upper_index])
-    vsini_dist[:upper_index] = 0
-    # I want to display the raw numbers in text.
-    
-    # Done modeling. Now do vsinis.
-    vsini_hist, bins = np.histogram(vsinis, bins=vel_bins)
-    num_upper_vsinis = np.sum(vsini_hist[:upper_index])
-    vsini_hist[:upper_index] = 0
-
-    fig, (ax1, ax2) = plt.subplots(2, 1, sharex=True)
-    # Plot the pdf
-    modelcolor = "#000000"
-    rotcolor = "#377eb8"
-    aspcapcolor = "#e41a1c"
-    ax1.step(vel_bins[:-1], vsini_hist, where="post", lw=3, 
-             label="ASPCAP vsini", c=aspcapcolor)
-    ax1.step(vel_bins[:-1], vsini_dist, where="post", lw=4, label="Model vsini", 
-             c=modelcolor)
-    ax1.step(vel_bins[:-1], vel_hist, where="post", lw=1, label="Vrot", 
-             c=rotcolor)
-    ax1.set_xlim(0, vel_bins[-1])
-    ax1.set_ylabel("N (vsini)")
-    ax1.legend(loc="upper right")
-    ax1.text(0.3, 0.8, "{0:d} Total".format(len(velocities)),
-             transform=ax1.transAxes, color=modelcolor)
-    ax1.text(0.3, 0.7, "{0:d} Nondetections".format(int(num_upper_vsinis)),
-             transform=ax1.transAxes, color=aspcapcolor)
-    ax1.text(0.3, 0.6, "{0:d} Nondetections".format(int(num_upper)),
-             transform=ax1.transAxes, color=modelcolor)
-
-
-    # Plot the cdf
-    # This is just moving around the upper limits for display purposes.
-    vsini_dist[0] = num_upper
-    vsini_hist[0] = num_upper_vsinis
-    dist_cum = np.cumsum(vsini_dist)
-    dist_df = dist_cum / dist_cum[-1]
-    hist_cum = np.cumsum(vsini_hist)
-    hist_df = hist_cum / hist_cum[-1]
-    ax2.step(vel_bins[:-1], dist_df, where="post", lw=3, label="Model", 
-             c="#000000")
-    ax2.step(vel_bins[:-1], hist_df, where="post", lw=2, label="ASPCAP", 
-             c="#e41a1c")
-    print("The integral error of the distribution is {0:.3f}%.".format(
-        (1-np.sum(vsini_dist)/(len(velocities)))*100))
-    ax2.xaxis.set_minor_locator(AutoMinorLocator())
-    ax2.set_xlabel("V sin(i) (km/s)")
-    ax2.set_ylabel("f (< vsini)")
-    ax2.set_ylim(0, 1)
-    print(dv)
-
-    # Calculate the significance.
-    # I am using a chi-squared test (Numerical Recipes pg 731) since I have
-    # what should be a distribution compared to a binned dataset.
-    nonzero_indices = np.where(vsini_dist > 0)
-    print(nonzero_indices)
-    reduced_dist = vsini_dist[nonzero_indices]
-    reduced_hist = vsini_hist[nonzero_indices]
-    chisq = np.sum((reduced_hist - reduced_dist)**2 / reduced_dist)
-    dof = len(reduced_dist) - 1
-    # Since most of the bins are empty or close to empty, this is a way to
-    # compensate for that (Numerical Recipes pg 734)
-    lucy_Ysq = dof + np.sqrt(
-        2*dof / (2 * dof + np.sum(1/reduced_dist))) * (chisq - dof)
-    prob = gammaincc(0.5*dof, 0.5*lucy_Ysq)
-    print("Calculated Chi-squared with {1:d} dof: {0:f}".format(lucy_Ysq, dof))
-    print("Probability of data is {0:.4f}".format(prob))
-
-def temperature_diff_vsini_comparison(
-    hot_velocities, hot_vsinis, cool_velocities, cool_vsinis,
-    vsini_percent=0.1, vsini_cutoff=7, nbins=100, maxv=100):
-    '''Compare the vsini/period distributions for hot and cool stars.'''
-    vel_bins = np.linspace(0, maxv*(1+1/nbins), nbins+1, endpoint=False)
-    hot_vel_hist, bins = np.histogram(hot_velocities, bins=vel_bins)
-    cool_vel_hist, bins = np.histogram(cool_velocities, bins=vel_bins)
-    dv = vel_bins[2] - vel_bins[1]
-    binvalues = (vel_bins[1:] + vel_bins[:-1])/2
-
-    hot_dispersions = np.reshape(vsini_percent * hot_velocities, 
-                                 (len(hot_velocities), 1))
-    cool_dispersions = np.reshape(vsini_percent * cool_velocities, 
-                                 (len(cool_velocities), 1))
-    # I'll do one data point now, but more will be on the way.
-    hot_dist = (1/np.sqrt(2*np.pi*hot_dispersions**2) * 
-                np.exp(-(binvalues - hot_velocities[:,np.newaxis])**2 / 
-                       (2 * hot_dispersions**2))*dv)
-    cool_dist = (1/np.sqrt(2*np.pi*cool_dispersions**2) * 
-                np.exp(-(binvalues - cool_velocities[:,np.newaxis])**2 / 
-                       (2 * cool_dispersions**2))*dv)
-    # Now make a data square that contains sin(i) convolution profiles for all
-    # velocity bin values.
-    fullhist = vsini_convolution_table_test(vel_bins, binvalues)
-
-    # Now make a cube for all data points
-    hot_convolutions = hot_dist[:,:,np.newaxis] * (fullhist)
-    cool_convolutions = cool_dist[:,:,np.newaxis] * (fullhist)
-
-    # Now add up all of the entries
-    hot_data_dist = np.sum(hot_convolutions, axis=1)
-    cool_data_dist = np.sum(cool_convolutions, axis=1)
-
-    # And now all of the data points
-    hot_vsini_dist = np.sum(hot_data_dist, axis=0)
-    cool_vsini_dist = np.sum(cool_data_dist, axis=0)
-
-    # Pick out the upper limits.
-    upper_index = np.argmin(binvalues<vsini_cutoff)
-    hot_num_upper = np.sum(hot_vsini_dist[:upper_index])
-    cool_num_upper = np.sum(cool_vsini_dist[:upper_index])
-    hot_vsini_dist[:upper_index] = 0
-    cool_vsini_dist[:upper_index] = 0
-    # I want to display the raw numbers in text.
-    
-    # Done modeling. Now do vsinis.
-    hot_vsini_hist, bins = np.histogram(hot_vsinis, bins=vel_bins)
-    cool_vsini_hist, bins = np.histogram(cool_vsinis, bins=vel_bins)
-    hot_num_upper_vsinis = np.sum(hot_vsini_hist[:upper_index])
-    cool_num_upper_vsinis = np.sum(cool_vsini_hist[:upper_index])
-    hot_vsini_hist[:upper_index] = 0
-    cool_vsini_hist[:upper_index] = 0
-
-    fig, (ax1, ax2) = plt.subplots(2, 1, sharex=True)
-    # Plot the pdf
-    hotcolor = "#377eb8"
-    coolcolor = "#e41a1c"
-    ax1.step(vel_bins[:-1], hot_vsini_hist, where="post", lw=4, 
-             label="Hot ASPCAP vsini", c=hotcolor, ls="-")
-    ax1.step(vel_bins[:-1], hot_vsini_dist, where="post", lw=3, 
-             label="Hot model vsini", c=hotcolor, ls="--")
-    ax1.step(vel_bins[:-1], hot_vel_hist, where="post", lw=1, label="Hot Vrot", 
-             c=hotcolor, ls="-")
-    ax1.step(vel_bins[:-1], cool_vsini_hist, where="post", lw=4, 
-             label="Cool ASPCAP vsini", c=coolcolor, ls="-")
-    ax1.step(vel_bins[:-1], cool_vsini_dist, where="post", lw=3, 
-             label="Cool model vsini", c=coolcolor, ls="--")
-    ax1.step(vel_bins[:-1], cool_vel_hist, where="post", lw=1, label="Cool Vrot", 
-             c=coolcolor, ls="-")
-    ax1.set_xlim(0, vel_bins[-1])
-    ax1.set_ylabel("N (vsini)")
-    ax1.legend(loc="upper right")
-    ax1.text(0.3, 0.8, "{0:d} Total Hot".format(len(hot_velocities)),
-             transform=ax1.transAxes, color=hotcolor)
-    ax1.text(0.3, 0.7, "{0:d} Total Cool".format(len(cool_velocities)),
-             transform=ax1.transAxes, color=coolcolor)
-
-    # Plot the cdf
-    # This is just moving around the upper limits for display purposes.
-    hot_vsini_dist[0] = hot_num_upper
-    hot_vsini_hist[0] = hot_num_upper_vsinis
-    hot_dist_cum = np.cumsum(hot_vsini_dist)
-    hot_dist_df = hot_dist_cum / hot_dist_cum[-1]
-    hot_hist_cum = np.cumsum(hot_vsini_hist)
-    hot_hist_df = hot_hist_cum / hot_hist_cum[-1]
-    ax2.step(vel_bins[:-1], hot_dist_df, where="post", lw=3, label="Hot Model", 
-             c=hotcolor, ls="--")
-    ax2.step(vel_bins[:-1], hot_hist_df, where="post", lw=2, label="Hot ASPCAP", 
-             c=hotcolor, ls="-")
-    cool_vsini_dist[0] = cool_num_upper
-    cool_vsini_hist[0] = cool_num_upper_vsinis
-    cool_dist_cum = np.cumsum(cool_vsini_dist)
-    cool_dist_df = cool_dist_cum / cool_dist_cum[-1]
-    cool_hist_cum = np.cumsum(cool_vsini_hist)
-    cool_hist_df = cool_hist_cum / cool_hist_cum[-1]
-    ax2.step(vel_bins[:-1], cool_dist_df, where="post", lw=3, label="Cool Model", 
-             c=coolcolor, ls="--")
-    ax2.step(vel_bins[:-1], cool_hist_df, where="post", lw=2, label="Cool ASPCAP", 
-             c=coolcolor, ls="-")
-    ax2.xaxis.set_minor_locator(AutoMinorLocator())
-    ax2.set_xlabel("V sin(i) (km/s)")
-    ax2.set_ylabel("f (< vsini)")
-    ax2.set_ylim(0, 1)
-
-    # Calculate the significance.
-    # I am using a chi-squared test (Numerical Recipes pg 731) since I have
-    # what should be a distribution compared to a binned dataset.
-    hot_nonzero_indices = np.where(hot_vsini_dist > 0)
-    cool_nonzero_indices = np.where(cool_vsini_dist > 0)
-    hot_reduced_dist = hot_vsini_dist[hot_nonzero_indices]
-    hot_reduced_hist = hot_vsini_hist[hot_nonzero_indices]
-    hot_chisq = np.sum((hot_reduced_hist - hot_reduced_dist)**2 / hot_reduced_dist)
-    hot_dof = len(hot_reduced_dist) - 1
-    # Since most of the bins are empty or close to empty, this is a way to
-    # compensate for that (Numerical Recipes pg 734)
-    hot_lucy_Ysq = hot_dof + np.sqrt(
-        2*hot_dof / (2 * hot_dof + np.sum(1/hot_reduced_dist))) * (hot_chisq -
-                                                                   hot_dof)
-    hot_prob = gammaincc(0.5*hot_dof, 0.5*hot_lucy_Ysq)
-    print("Calculated Chi-squared with {1:d} dof: {0:f}".format(hot_lucy_Ysq,
-                                                                hot_dof))
-    print("Probability of data is {0:.4f}".format(hot_prob))
-
-    cool_reduced_dist = cool_vsini_dist[cool_nonzero_indices]
-    cool_reduced_hist = cool_vsini_hist[cool_nonzero_indices]
-    cool_chisq = np.sum((cool_reduced_hist - cool_reduced_dist)**2 / cool_reduced_dist)
-    cool_dof = len(cool_reduced_dist) - 1
-    # Since most of the bins are empty or close to empty, this is a way to
-    # compensate for that (Numerical Recipes pg 734)
-    cool_lucy_Ysq = cool_dof + np.sqrt(
-        2*cool_dof / (2 * cool_dof + np.sum(1/cool_reduced_dist))) * (cool_chisq -
-                                                                   cool_dof)
-    cool_prob = gammaincc(0.5*cool_dof, 0.5*cool_lucy_Ysq)
-    print("Calculated Chi-squared with {1:d} dof: {0:f}".format(cool_lucy_Ysq,
-                                                                cool_dof))
-    print("Probability of data is {0:.4f}".format(cool_prob))
-
-def cool_dwarf_subgiants_comparison(
-    dwarf_teff, dwarf_logg, dwarf_vsini, subgiant_teff, subgiant_logg,
-    subgiant_vsini):
-    '''Highlight high-vsini dwarfs and subgiants on an HR diagram.
-
-    Plot the Teff and Log(g) for dwarf and subgiant groups. It will highlight
-    targets with high vsinis.
-    '''
-    vsini_dwarf_detections = dwarf_vsini >= 7
-    vsini_subgiant_detections = subgiant_vsini >= 7
-    vsini_dwarf_nondetections = dwarf_vsini < 7
-    vsini_subgiant_nondetections = subgiant_vsini < 7
-
-    hr.logg_teff_plot(dwarf_teff[vsini_dwarf_nondetections], 
-                      dwarf_logg[vsini_dwarf_nondetections], 
-                      style="bx", label="Huber dwarfs")
-    hr.logg_teff_plot(subgiant_teff[vsini_subgiant_nondetections], 
-                      subgiant_logg[vsini_subgiant_nondetections], 
-                      style="rd", label="Huber subgiants")
-    hr.logg_teff_plot(dwarf_teff[vsini_dwarf_detections], 
-                      dwarf_logg[vsini_dwarf_detections],
-                      style="ws", label="Dwarf vsini")
-    hr.logg_teff_plot(subgiant_teff[vsini_subgiant_detections], 
-                      subgiant_logg[vsini_subgiant_detections],
-                      style="ms", label="Subgiant vsini")
-    plt.xlabel("APOGEE Teff (K)")
-    plt.ylabel("APOGEE logg (uncalibrated)")
-    plt.ylim((4.8, 3.2))
-
-def apokasc_logg_rotation_trend(apogee_logg, asteroseismic_logg, vsini):
-    '''Plot the log(g) comparison against rotation.
-
-    Plot the log(g) measured from asteroseismology against the log(g)
-    determined spectroscopically against vsini. One thing that may explain why
-    the cool stars look completely off is if rotation causes log(g) values to
-    be off for spectroscopic parameters.'''
-    filled_vsini = vsini.copy()
-    filled_vsini[np.where(vsini < 0)] = 0.0
-    vsini_detections = vsini > 7
-    logg_diff = (apogee_logg - asteroseismic_logg)
-    subgiants = asteroseismic_logg < 4.1
-    plt.plot(filled_vsini[~subgiants], logg_diff[~subgiants], 'ko',
-             label="dwarfs")
-    plt.plot(filled_vsini[subgiants], logg_diff[subgiants], 'ro',
-             label="subgiants")
-    print("Slow scatter: {0:.2f}".format(np.std(logg_diff[~vsini_detections])))
-    print("Fast scatter: {0:.2f}".format(np.std(logg_diff[vsini_detections])))
-    plt.plot([7, 7], [-0.1, 0.5], 'b--')
-
-def Bruntt_vsini_comparison():
-    '''Plot the vsini values between APOGEE and Bruntt et al (2013).
-
-    This is a good way to determine the uncertainty in vsini, as well as the
-    cutoff vsini which is really an upper limit.'''
-    brunttcat = catin.bruntt_dr14_overlap()
-    aspcap_vsini = brunttcat["VSINI"]
-    bad_vsini = np.where(aspcap_vsini < 0)
-    good_vsini = np.where(aspcap_vsini > 0)
-    aspcap_vsini[bad_vsini] = 0.0
-    bruntt_vsini = brunttcat["vsini"]
-
-    vsini_fracdiff = (bruntt_vsini - aspcap_vsini) / bruntt_vsini
-
-#   plt.plot(bruntt_vsini[good_vsini], vsini_fracdiff[good_vsini], 'ko')
-    plt.plot(bruntt_vsini[good_vsini], vsini_fracdiff[good_vsini], 'ko')
-    plt.plot([7, 7], plt.ylim(), 'r-')
-
-    detections = aspcap_vsini > 7
-    print("Number of non-detections: {0:d}/{1:d}.".format(
-        len(detections) - np.count_nonzero(detections), len(detections)))
-    print("Vsini uncertainty is {0:.1f}%.".format(
-        np.std(vsini_fracdiff[detections])*100))
-
-    plt.xlabel("Bruntt vsini (km/s)")
-    plt.ylabel("(Vsini (Bruntt) - Vsini (ASPCAP)) / Vsini(Bruntt)")
-
-def compare_inferred_flicker_loggs(
-    flicker_logg, kic_logg, dsep_logg, apogee_logg, xvalue):
-    '''Compare the flicker, Huber, and DSEP-inferred loggs.
-
-    A plot will compare the three different values of logg. They will be
-    plotted with respect to the given xvalue. The flicker logg will be plotted 
-    with a blue diamond, kic loggs with a black diamond, and dsep loggs with a 
-    red diamond.
-    '''
-    apogee_giants = np.where(np.logical_and(
-        apogee_logg > 0, apogee_logg < 3.5))
-    plt.plot(xvalue, flicker_logg, 'bo', ms=6, label="Flicker")
-    plt.plot(xvalue, kic_logg, 'rd', label="Huber", ms=6)
-    plt.plot(xvalue, dsep_logg, 'kx', label="DSEP", ms=4)
-    plt.plot(xvalue[apogee_giants], flicker_logg[apogee_giants], 'sm',
-             label="APOGEE GIANT", ms=6)
-    for i in range(len(xvalue)):
-        fkdiff = abs(flicker_logg[i] - kic_logg[i])
-        kddiff = abs(kic_logg[i] - dsep_logg[i])
-        fddiff = abs(flicker_logg[i] - dsep_logg[i])
-        maxdiff = max([fkdiff, kddiff, fddiff])
-        print(maxdiff)
-        if fkdiff < 1:
-            lc='k'
-        else:
-            lc='r'
-        plt.plot([xvalue[i]]*2, [flicker_logg[i], kic_logg[i]], ls=':', c=lc)
-        plt.plot([xvalue[i]]*2, [kic_logg[i], dsep_logg[i]], ls=':', c=lc)
-    plt.ylabel("Log(g)")
-    hr.invert_y_axis()
-
-def compare_Huber_APOGEE_loggs(
-    apogee_logg, huber_logg, huber_logg_low, huber_logg_high):
-    '''Compare APOGEE log(g) to Huber log(g) with uncertainties.
-
-    Will basically make a One-to-one plot with the asymmetric Huber
-    uncertainties taken into account, to see if objects that scatter into the
-    dwarf regime are uncertain subgiants.'''
-    plt.errorbar(
-        apogee_logg, huber_logg, yerr=[-huber_logg_low, huber_logg_high],
-        fmt="go")
-    plt.plot([2, 5], [2, 5], 'k-')
-    plt.plot([2, 5], [4.2, 4.2], 'b--')
-    plt.plot([4.2, 4.2], [2, 5], 'b--')
-    plt.xlabel("Uncalibrated APOGEE log(g)")
-    plt.ylabel("Huber log(g)")
-
-
-def EBs_missed_by_Rafa(rafa_ebs, missed_ebs, xcol, ycol, xlabel="", ylabel=""):
-    '''Compares the objects which were found by Rafa's code to those missed.
-
-    This function will plot two columns which are in both rafa_ebs and
-    missed_ebs against each other.'''
-    plt.plot(rafa_ebs[xcol], rafa_ebs[ycol], 'ko', label="Detected")
-    plt.plot(missed_ebs[xcol], missed_ebs[ycol], 'gx', label="Missed")
-    if xlabel:
-        plt.xlabel(xlabel)
-    else:
-        plt.xlabel(xcol)
-    if ylabel:
-        plt.ylabel(ylabel)
-    else:
-        plt.ylabel(ycol)
-
-def missed_EBs_logg_teff(rafa_ebs, missed_ebs, loggcol="logg", teffcol="teff"):
-    '''Plot the missed EBs in an HR diagram.'''
-    EBs_missed_by_Rafa(rafa_ebs, missed_ebs, teffcol, loggcol, "teff", "log g")
-    hr.invert_x_axis()
-    hr.invert_y_axis()
-    plt.legend(loc="upper right")
-
-def missed_EBs_period_depth(rafa_ebs, missed_ebs, periodcol="period",
-                            depthcol="pdepth"):
-    '''Plot the missed EBs with period vs. eclipse depth.'''
-    EBs_missed_by_Rafa(rafa_ebs, missed_ebs, periodcol, depthcol, 
-                       "Period (day)", "Primary Eclipse Depth")
-
-def missed_EBs_teff_depth(rafa_ebs, missed_ebs, teffcol="teff", 
-                          depthcol="pdepth"):
-    '''Plot the missed EBs with Teff vs. eclipse depth.'''
-    EBs_missed_by_Rafa(rafa_ebs, missed_ebs, teffcol, depthcol, 
-                       "Teff (K)", "Primary Eclipse Depth")
-    hr.invert_x_axis()
-
-def missed_EBs_period_width(rafa_ebs, missed_ebs, periodcol="period",
-                            widthcol="pwidth"):
-    '''Plot the missed EBs with period vs. eclipse width.'''
-    EBs_missed_by_Rafa(rafa_ebs, missed_ebs, periodcol, widthcol, 
-                       "Period (day)", "Primary Eclipse Width")
-
-def missed_EBs_teff_width(rafa_ebs, missed_ebs, teffcol="teff",
-                          widthcol="pwidth"):
-    '''Plot the missed EBs with Teff vs. eclipse width.'''
-    EBs_missed_by_Rafa(rafa_ebs, missed_ebs, teffcol, widthcol, 
-                       "Period (day)", "Primary Eclipse Width")
-    hr.invert_x_axis()
-
-def missed_EBs_compare_histogram(rafa_ebs, missed_ebs, histcol, binrange,
-                                 bins=50, xlabel=""):
-    '''Create a histogram of missed vs detected EBs.'''
-    plt.hist(rafa_ebs[histcol], range=binrange, bins=bins, label="Missing")
-    plt.hist(missed_ebs[histcol], range=binrange, bins=bins, label="Observed")
-    if xlabel:
-        plt.xlabel(xlabel)
-    else:
-        plt.xlabel(histcol)
-    plt.ylabel("Number")
-
-def EB_plot(eb_periods, eb_vs, eb_flags):
-    """Plots the eclipsing binary period vs velocity.
-
-    This function plots the period as determined from Kepler light curves vs
-    the vscatter calculated from APOGEE. In general, sin i ~ 1 for this case. 
-    This plot functions to note whether VSCATTER is a useful determinant of
-    whether an object is a tidally-synchronized binary.
-
-    VSCATTER by itself is generally not a good measure. However, I would now
-    like to see whether VMAX = VSCATTER * NOBS would be.
-    """
-    bad_indices = bad_ASPCAP_indices(eb_flags)
-    good_indices = np.logical_not(bad_indices)
-
-    # Plot the data.
-    plt.plot(eb_periods[bad_indices], eb_vs[bad_indices], 'ro')
-    plt.plot(eb_periods[good_indices], eb_vs[good_indices], 'ko')
-
-    # Plot the lines.
-    periodrange = np.linspace(0.01, 12, 100) * u.day
-    standard_vel = bc.calc_velocity_of_binary(1*u.solMass, periodrange, 0.5)
-    highmass_vel = bc.calc_velocity_of_binary(2*u.solMass, periodrange, 0.5)
-    lowmass_vel = bc.calc_velocity_of_binary(0.5*u.solMass, periodrange, 0.5)
-    highratio_vel = bc.calc_velocity_of_binary(1*u.solMass, periodrange, 1.0)
-    lowratio_vel = bc.calc_velocity_of_binary(1*u.solMass, periodrange, 0.1)
-    plt.plot(
-        periodrange.to(u.day).value, standard_vel.to(u.km/u.s).value, 'k--',
-        label="M=1, q=0.5")
-    plt.plot(
-        periodrange.to(u.day).value, highmass_vel.to(u.km/u.s).value, 'k--')
-    plt.plot(
-        periodrange.to(u.day).value, lowmass_vel.to(u.km/u.s).value, 'k--')
-    plt.plot(
-        periodrange.to(u.day).value, lowratio_vel.to(u.km/u.s).value, 'b--',
-        label="M=1, q=0.1")
-    plt.plot(
-        periodrange.to(u.day).value, highratio_vel.to(u.km/u.s).value, 'r--',
-        label="M=1, q=1.0")
-
-    plt.xlabel("Period (day)")
-    plt.ylabel("VMAX (km/s)")
-
-    plt.xlim(0, 12)
-
-def radial_velocity_tides_contour(combined_mass, tidal_limit=5*u.day):
-    '''Contour of RVs for given mass ratio and period.
-
-    A combined mass has to be given as an astropy mass unit. After that, a
-    contour plot will be made indicating the radial velocities corresponding to
-    each pair of mass ratio and period.
-    '''
-    periodrange = np.linspace(0.01, 10, 100)*u.day
-    ratiorange = np.linspace(0.01, 1, 100)
-
-    velocities = bc.calc_velocity_of_binary(
-        combined_mass, periodrange, ratiorange[:,np.newaxis])
-
-    plt.figure()
-    contourlevels = [5, 10, 25, 50, 75, 100]
-    CS = plt.contour(periodrange.to(u.day).value, ratiorange,
-                     velocities.to(u.km/u.s).value, levels=contourlevels,
-                     colors="k")
-    plt.clabel(CS, inline=1, fontsize=13)
-    plt.xlabel("Period (day)")
-    plt.ylabel("Mass ratio")
-    plt.title("Velocities for combined mass of {0}".format(combined_mass))
-
-###############################################################################
-# Eclipsing Binaries #
-###############################################################################
-
-
-def remove_Kepler_EBs(maincat, McQuillan=True, mainkiccol="KIC"):
-    '''Filters out Kepler Eclipsing Binaries.
-
-    Removes the KIC values corresponding to the eclipsing binaries in the
-    version of the EB catalog given in paths.EB_PATH.
-    '''
-    if McQuillan:
-        ebcat = catin.mcquillan_ebs()
-    else:
-        ebcat = catin.read_villanova_EBs()
-    filtered_maincat = au.filter_column_from_subtable(
-            maincat, mainkiccol, ebcat["KIC"])
-    return filtered_maincat
-
-def read_Kirk_geometric_correction_spline(
-    splinepath="/home/regulus/simonian/Binaries/Kirk_geometric_correction_spline.csv"):
-    '''Read the spline that represents the geometric correction for EBs.
-
-    The correction was taken from Fig. 11 in Kirk et al (2016).'''
-    splinepoints = Table.read(
-        splinepath, format="ascii.csv", data_start=0, 
-        names=("period", "efficiency"))
-    periods = np.log10(splinepoints["period"])
-    corrections = splinepoints["efficiency"]
-    correction_interpolator = interp1d(periods, corrections)
-    return correction_interpolator
-
-def num_missing_binaries(periods):
-    '''Infer the number of noneclipsing binaries from eclipsing ones.
-    
-    Given a distribution of orbital periods of a sample of stars, this function
-    uses the geometric correction to infer the number of binaries which should
-    also exist in the sample.
-    '''
-    logperiods = np.log10(periods)
-    # This should take the log of periods as input, and the efficiency of
-    # detection based on the corrections.
-    geofrac_spline = read_Kirk_geometric_correction_spline()
-    efficiencies = geofrac_spline(logperiods)
-    # These should be the number of non-eclipsing binaries for each eclipsing
-    # binary.
-    inferred_missing = 1.0 / efficiencies - 1
-    num_inferred_missing = np.sum(inferred_missing)
-    return num_inferred_missing
-
-def EB_histogram_to_rotation_histogram(binvalues, bins):
-    '''Convert EB histogram to one of expected rotatational modulation.
-
-    The bin values should be the number of EBs in each bin. The bins should be
-    the edges of each bin. This should basically take arguments of plt.hist().
-    '''
-    midbins = (bins[:-1] + bins[1:]) / 2
-    logmidbins = np.log10(midbins)
-    geofrac_spline = read_Kirk_geometric_correction_spline()
-    efficiencies = geofrac_spline(logmidbins)
-    missing_fraction = 1.0 / efficiencies - 1
-    missing_histogram = binvalues * missing_fraction
-    print(missing_fraction)
-    rotation_fraction = rotation_modulation_fraction()
-    rotation_histogram = rotation_fraction * missing_histogram
-    return rotation_histogram
-
-def rotation_modulation_fraction():
-    '''Calculate the fraction of binaries showing rotational modulation.
-
-    This function assumes that the binaries are randomly distributed.'''
-    fract = np.sqrt(3)/2
-    return fract
-
-def num_rotating_binaries_from_EBs(periods):
-    '''Calculate an expected number of rotating binaries from EBs.
-
-    This function calculates the number of expected rotating binaries from a
-    set of eclipsing binaries. This differs from num_missing_binaries in that
-    it incorporates a correction factor for the fact that only stars with high
-    enough inclination will have observed rotation modulation.
-
-    Note that this function will not work in the extremely short-period regime
-    where all objects that should exchibit rotational modulation should also
-    exhibit eclipses..'''
-    total_bins = num_missing_binaries(periods)
-    correction = correct_for_rotation(total_bins)
-    return correction
-
-def expected_rotation_fraction_hist(ebperiods, obsperiods, nbins=20,
-                                    binrange=(1, 5)):
-    '''Compare the EB periods with expected and observed period distribution.
-
-    This function will show the eb distribution, the expected rotation
-    modulation distribution based on the EB distribution, and the observed
-    rotation modulation distribution for easy comparison.
-    '''
-    eb_values, eb_binedges = np.histogram(ebperiods, bins=nbins,
-                                          range=binrange)
-    eb_errors = np.sqrt(eb_values)
-    rotvalues = EB_histogram_to_rotation_histogram(eb_values, eb_binedges)
-    rot_errors = eb_errors * rotvalues / eb_values
-    bin_starts = eb_binedges[:-1]
-    nobs = plt.hist(obsperiods, bins=eb_binedges, label="Observed Rotation")
-    plt.bar(bin_starts, rotvalues, label="Predicted Rotation",
-            width=bin_starts[1] - bin_starts[0], yerr=rot_errors)
-    plt.step(eb_binedges, np.concatenate([eb_values, [0]]), label="Eclipsing Binaries", where="post")
-    print("Starts")
-    print(bin_starts)
-    print("Values")
-    print(nobs[0])
-    plt.xlabel("Period (day)")
-    plt.ylabel("Number")
-    plt.xlim(binrange)
-    
-
-###############################################################################
-# KepVIM #
-###############################################################################
-
-def filter_by_quarters(kepvimtable, vimquarters, kic_col="KIC"):
-    '''Remove objects with fewer than the specified quarters of VIM detections.
-
-    Return a table with only the entries which have at least vimquarters number
-    of observations.'''
-    filtered_objects = []
-    # Using groups takes a REALLY long time. Is there a way to avoid this?
-    vimgroups = kepvimtable.group_by(kic_col)
-    for kicgroup in vimgroups.groups:
-        if len(kicgroup) >= vimquarters:
-            filtered_objects.append(kicgroup)
-    filtered_table = vstack(filtered_objects)
-    return filtered_table
-
-def KICs_with_VIM_quarters(kepvimtable, minquarters, kic_col="KIC"):
-    '''Get KIC IDs for objects with VIM detections over minquarters.
-
-    Gets the KIC IDs for all of the KIC objects which have at least minquarters
-    VIM detections over the campaign.
-    '''
-    newvim = filter_by_quarters(kepvimtable, minquarters, kic_col=kic_col)
-    kepvimgroup = newvim.group_by(kic_col)
-    kictable = au.first_row_in_group(kepvimgroup)
-    return kictable[kic_col]
-# Also want function that returns just KIC numbers that have VIM in at least n
-# quarters.
-
-def compress_kepVIM(kepvimtable, kic_col="KIC"):
-    '''Compress each KIC to a unique row.
-
-    The raw organization of the KepVIM catalog has a row for each unique
-    combination of KIC and quarter. This function moves the quarter information
-    from rows to columns; that way TBD'''
-    fullcolnames = kepvimtable.colnames
-    vimvariable_colnames = {
-        'F50', 'Xpix', 'Ypix', 'r', 'AX', 'AY', 'ds_dF', 'PA', 'Ch', 'Q'}
-    remaining_colnames = [fixedcol for fixedcol in fullcolnames if fixedcol not 
-                          in vimvariable_colnames]
-    unique_table = unique(kepvimtable[remaining_colnames], keys=kic_col)
-
-    for quarter in range(1, 18):
-        quarter_colname = "Q{0:d}".format(quarter)
-        unique_table[quarter_colname] = np.zeros(len(unique_table))
-
-        # Find all KIC values with VIM detections in a given quarter, and set
-        # the corresponding entries in quarter_column to true.
-        kic_detection_in_quarter = kepvimtable[kic_col][
-            au.astropy_table_index(kepvimtable, "Q", quarter)]
-        unique_kic_indices = au.astropy_table_indices(
-            unique_table, kic_col, kic_detection_in_quarter)
-        unique_table[quarter_colname][unique_kic_indices] = 1
-
-    return unique_table
-
-def kepVIM_quarter_table(kepvimtable, kic_col="KIC"):
-    '''Create a table indicating which in quarters each KIC object had VIM.
-    
-    For the sake of making things sane again, this table has one row for each
-    KIC object, and columns for each quarter, indicating in which quarter the 
-    KIC object had VIM observations.'''
-    quarter_table = Table([np.unique(kepvimtable[kic_col])])
-    colcount = np.zeros(len(quarter_table))
-
-    for quarter in range(1, 18):
-        quarter_colname = "Q{0:d}".format(quarter)
-        quarter_table[quarter_colname] = np.zeros(len(quarter_table))
-
-        # Find all KIC values with VIM detections in a given quarter, and set
-        # the corresponding entries in quarter_column to true.
-        kic_detection_in_quarter = kepvimtable[kic_col][
-            au.astropy_table_index(kepvimtable, "Q", quarter)]
-        unique_kic_indices = au.astropy_table_indices(
-            quarter_table, kic_col, kic_detection_in_quarter)
-        quarter_table[quarter_colname][unique_kic_indices] = 1
-        colcount += quarter_table[quarter_colname]
-
-    quarter_table["Num_Q"] = colcount
-    return quarter_table
-
-def kepVIM_blending_statistics(magdiffs, offsets, quarters):
-    '''Plots how contaminants affect various quarters of VIM.
-
-    Generates a plot that shows how the number of quarters that an object
-    experiences VIM is related to the magnitude and distance of the
-    contaminant. The magnitude difference will be shown on the y-axis, the
-    distance of the contaminant on the x-axis, and the color will reflect how
-    many quarters of VIM it has.
-    '''
-    colormap = cm.viridis
-    floatquarters = np.array(quarters, dtype=np.float)
-    plt.scatter(offsets, magdiffs, c=floatquarters, cmap=colormap, s=8,
-                edgecolors="face")
-    cbar = plt.colorbar()
-    cbar.set_label("Quarters")
-    plt.xlabel("Distance from source")
-    plt.ylabel("J_Target - J_Contam")
-
-
 ###############################################################################
 # ASPCAP #
 ###############################################################################
@@ -2701,33 +1390,44 @@ def filter_bad_ASPCAP_fits(apogee_table, warn=False):
         add_cut_metadata(newtable, "ASPCAP STAR_WARN removed")
     return newtable
 
-def bad_ASPCAP_indices(aspcapflags, warn=False):
-    '''Picks bad ASPCAP flags from flag array.
+def aspcap_quality_bitmask_indices(aspcapbitmask, quality):
+    '''Return indices of objects with the given quality.
 
-    Bad ASPCAP flags are defined as those with STAR_BAD in them or those with
-    no ASPCAP result at all. If the warn keyword is given, STAR_WARN flags are 
-    also marked as bad.
-    '''
-    bad_indices = npstr.find(aspcapflags, "STAR_BAD") >= 0
-    bad_indices = np.logical_or(
-        bad_indices, npstr.find(aspcapflags, "NO_ASPCAP_RESULT") >= 0)
-    if warn:
-        bad_indices = np.logical_or(bad_indices, npstr.find(
-            aspcapflags, "STAR_WARN") >= 0)
+    The quality value can be either "bad", "warn", "vsini", or "good". If the 
+    quality value is "bad", all objects with the STAR_BAD or NO_ASPCAP_RESULT 
+    flags are marked. If the quality value is "warn", all objects with the
+    STAR_WARN flag will be marked. If the quality value is "vsini", all objects
+    with the VSINI_WARN flag will be marked. And lastly, a "good" quality will
+    only select objects with none of the aforementioned flags. Note this
+    implies that flags such as VMICRO_WARN will be classified as "good".'''
+    bad_flags = ASPCAP_STAR_BAD + NO_ASPCAP_RESULT
+    warn_flags = ASPCAP_STAR_WARN
+    vsini_flags = ASPCAP_VSINI_WARN
+    bad_indices = aspcapbitmask & bad_flags != 0
+    if quality.lower() == "bad":
+        return bad_indices
+    # All bad_indices are accompanied by warn indices. So make sure that you
+    # don't double-count the bad indices.
+    warn_indices = np.logical_and(aspcapbitmask & warn_flags != 0,
+                                  np.logical_not(bad_indices))
+    if quality.lower() == "warn":
+        return warn_indices
+    vsini_indices = au.multi_logical_and(
+        aspcapbitmask & vsini_flags != 0, np.logical_not(warn_indices),
+        np.logical_not(bad_indices))
+    if quality.lower() == "vsini":
+        return vsini_indices
+    good_indices = au.multi_logical_and(
+        np.logical_not(vsini_indices), np.logical_not(warn_indices),
+        np.logical_not(bad_indices))
+    assert np.all(np.sum([bad_indices, warn_indices, vsini_indices,
+                          good_indices], axis=0) == 1)
+    if quality.lower() == "good":
+        return good_indices
+    else:
+        raise ValueError("Don't understand quality: {0}".format(quality))
 
-    return bad_indices
 
-def warn_VSINI_indices(aspcapflags):
-    '''Picks ASPCAP flags which indicate a VSINI warning.
-
-    These are objects which have the VSINI_WARN flag enabled.'''
-    warn_indices = npstr.find(aspcapflags, "VSINI_WARN") >= 0
-    return warn_indices
-
-def good_aspcap_fits(apotable, aspcapcol="ASPCAPFLAG"):
-    '''Only return the entries with good ASPCAP fits.'''
-    return apogee_filter_quality(
-        apotable, quality=("bad", "warn"), aspcapcol=aspcapcol)
 
 def apogee_filter_quality(apotable, quality=("good", "bad", "warn"), 
                           aspcapcol="ASPCAPFLAG"):
@@ -2766,6 +1466,101 @@ def apogee_filter_quality(apotable, quality=("good", "bad", "warn"),
         add_cut_metadata(remaining_table, "Removed bad ASPCAP fits")
 
     return remaining_table
+
+def search_in_ASPCAPFLAGS(aspcapflags, flagval):
+    '''Index entries which have flagval in aspcapflags.
+
+    Returns an index array which indicates which values in aspcapflags have the
+    string given in flagval within. This helps with general manipulation of the
+    aspcapflags parameter without having to pull up the bitmask array.'''
+    strcol = au.byte_to_unicode_cast(aspcapflags)
+    indexarr = npstr.find(strcol, flagval) >= 0
+    return indexarr
+
+def chain_flags(aspcapflags, **kwargs):
+    '''Select elements of aspcapflags with flags values in kwargs.
+
+    Returns an index array to aspcapflags with flags specified in kwargs. The
+    keyword should be the name of an APOGEE flag (e.g. TEFF_BAD, LOGG_BAD) and
+    the value should be either True or False. If True, all True objects in the
+    returned index array will have that flag enabled. If False, all True 
+    objects in the returned index array will have that flag disabled.'''
+    indexarr = np.ones_like(aspcapflags, dtype=bool)
+    for key, val in kwargs.items():
+        keyflags = search_in_ASPCAPFLAGS(aspcapflags, key)
+        if not val:
+            keyflags = np.logical_not(keyflags)
+        indexarr = np.logical_and(indexarr, keyflags)
+    return indexarr
+
+def bad_ASPCAP_indices(aspcapflags, warn=False):
+    '''Picks bad ASPCAP flags from flag array.
+
+    Bad ASPCAP flags are defined as those with STAR_BAD in them or those with
+    no ASPCAP result at all. If the warn keyword is given, STAR_WARN flags are 
+    also marked as bad.
+    '''
+    badcolumns = [
+        "TEFF_BAD", "LOGG_BAD", "VMICRO_BAD", "M_H_BAD", "ALPHA_M_BAD", 
+        "CHI2_BAD", "SN_BAD", "COLORTE_BAD", "C_M_BAD", "N_M_BAD", 
+        "NO_ASPCAP_RESULT"]
+    warncolumns = [
+        "TEFF_WARN", "LOGG_WARN", "VMICRO_WARN", "M_H_WARN", "ALPHA_M_WARN", 
+        "CHI2_WARN", "SN_WARN", "COLORTE_WARN", "C_M_WARN", "N_M_WARN"]
+    bad_indices = au.multi_logical_or(*[search_in_ASPCAPFLAGS(
+        aspcapflags, badcol) for badcol in badcolumns])
+    if warn:
+        warn_indices = au.multi_logical_or(*[search_in_ASPCAPFLAGS(
+            aspcapflags, warncol) for warncol in warncolumns])
+        bad_indices = np.logical_or(bad_indices, warn_indices)
+
+    return bad_indices
+
+def warn_VSINI_indices(aspcapflags):
+    '''Picks ASPCAP flags which indicate a VSINI warning.
+
+    These are objects which have the VSINI_WARN flag enabled.'''
+    warn_indices = search_in_ASPCAPFLAGS(aspcapflags, "VSINI_WARN")
+    return warn_indices
+
+def good_aspcap_fits(apotable, aspcapcol="ASPCAPFLAG"):
+    '''Only return the entries with good ASPCAP fits.'''
+    return apogee_filter_quality(
+        apotable, quality=("bad", "warn"), aspcapcol=aspcapcol)
+
+###############################################################################
+# APOGEE Targeting #
+###############################################################################
+
+# Have a lookup dictionary that has the column and bitmask information.
+target_dict = {
+    "APOGEE_KEPLER_COOLDWARF": ("APOGEE_TARGET2", 16), 
+    "APOGEE2_APOKASC_DWARF": ("APOGEE2_TARGET1", 28),
+    "APOGEE2_APOKASC_GIANT": ("APOGEE2_TARGET1", 27),
+    "APOGEE2_APOKASC": ("APOGEE2_TARGET1", 30),
+    "APOGEE_KEPLER_SEISMO": ("APOGEE_TARGET1", 27),
+    "APOGEE_KEPLER_EB": ("APOGEE_TARGET1", 23),
+    "APOGEE_KEPLER_HOST": ("APOGEE_TARGET1", 28),
+    "APOGEE_RV_MONITOR_KEPLER": ("APOGEE_TARGET2", 19),
+    "APOGEE2_KOI": ("APOGEE2_TARGET3", 0),
+    "APOGEE2_KOI_CONTROL": ("APOGEE2_TARGET3", 2),
+    "APOGEE2_EB": ("APOGEE2_TARGET3", 1),
+    "APOGEE_TELLURIC": ("APOGEE_TARGET2", 9),
+    "APOGEE2_TELLURIC": ("APOGEE2_TARGET2", 9),
+    "APOGEE_CALIB_CLUSTER": ("APOGEE_TARGET2", 10),
+    "APOGEE2_YOUNG_CLUSTER": ("APOGEE2_TARGET3", 5)
+}
+
+def target_indices(fulltable, targetlabel):
+    '''Select the objects in fulltable that are specified by targetlabel.
+
+    This function requires the full APOGEE table because it automatically
+    selects the targeting column where the given targeting bitmask can be
+    found.'''
+    colname, exponent = target_dict[targetlabel]
+    select_indices = fulltable[colname] & 2**exponent > 0
+    return select_indices
+
 
 ###############################################################################
 # Double-Lined Spectroscopic Binaries #
@@ -2939,7 +1734,470 @@ def APOKASC_spectroscopic_rapid_rotators():
     apo_photo = au.join_by_ra_dec(
         apo_nodlsb, ehk, "RA", "DEC", "RA", "Dec", join_type="left")
 
+###############################################################################
+# Jen Cool Dwarfs #
+###############################################################################
+
+def build_cool_dwarf_sample(apodata=None):
+    '''Build Jen's cool dwarf sample.
+
+    This will consist of both the objects with the APOGEE_KEPLER_COOLDWARF
+    targeting flag enabled, as well as objects which Jen indicated *should* be
+    in the sample, but were observed through other programs.
+    '''
+    if not apodata:
+        apodata = catin.dr14_with_KIC_stelparms()
+        apodata["LOGG_FIT"] = apodata["FPARAM"][:,1]
+    targeted_sample = apodata[apodata["APOGEE_TARGET2"] & 2**16 != 0]
+    jen_missed = catin.read_van_Saders_missing_targets()
+    found_targets = au.join_by_id(apodata, jen_missed, "kepid", "KIC",
+                                  join_type="right")
+    new_sample = au.extract_subtable_from_column(
+        apodata, "kepid", found_targets["kepid"])
+
+    jen_sample = vstack([targeted_sample, new_sample])
+    jen_cool = perform_teff_cut(jen_sample, hightemp=5500, teffcol="KIC Teff")
+    replace_Dressing_Charbonneau_params(jen_cool)
+
+    return jen_cool
+
+###############################################################################
+# KOIs #
+###############################################################################
+
+def KOI_indices(kiccol):
+    '''Get the indices of KOIs in the dataset.'''
+    koicat = catin.read_KOI_list()
+    koi_indices = au.mark_selections_in_columns(kiccol, koicat["kepid"])
+    return koi_indices
+
+###############################################################################
+# APOGEE Binaries #
+###############################################################################
+
+def APOGEE_Binary_Classification(tmID):
+    '''Classify the 2MASS IDs given according to the Binary Classification.
+
+    Make an array which classifies the list of APOGEE objects according to the
+    classes defined in the El-Badry et al (2017) study. These include the
+    classes:
+
+    * "Single" objects that show no signs of binarity
+    
+    * "SB1" for single-lined spectroscopic binaries which show RV variability.
+
+    * "SB2" for double-lined spectroscopic binaries.
+
+    * "Triple" for double-lined spectroscopic binaries that have a
+        hidden third component.
+
+    * "SB3" for triple-lined spectroscopic binaries.
+
+    * "N/A" for objects which were not analyzed as part of the study. This will
+      largely be due to the fact that they were observed after DR13.
+    '''
+    labelcol = np.zeros(len(tmID), dtype="U6")
+    singletable = catin.read_El_Badry_Single_Stars()
+    singleindices = au.mark_selections_in_columns(
+        tmID, singletable["APOGEE_ID"])
+    del(singletable)
+    sb1table = catin.read_El_Badry_SB1()
+    sb1indices = au.mark_selections_in_columns(
+        tmID, sb1table["APOGEE_ID"])
+    del(sb1table)
+    sb2table = catin.read_El_Badry_SB2()
+    sb2indices = au.mark_selections_in_columns(
+        tmID, sb2table["APOGEE_ID"])
+    del(sb2table)
+    tripletable = catin.read_El_Badry_hidden_triples()
+    tripleindices = au.mark_selections_in_columns(
+        tmID, tripletable["APOGEE_ID"])
+    del(tripletable)
+    sb3table = catin.read_El_Badry_SB3()
+    sb3indices = au.mark_selections_in_columns(
+        tmID, sb3table["APOGEE_ID"])
+    del(sb3table)
+
+    labelcol[singleindices] = "Single"
+    labelcol[sb1indices] = "SB1"
+    labelcol[sb2indices] = "SB2"
+    labelcol[tripleindices] = "Triple"
+    labelcol[sb3indices] = "SB3"
+
+    naindices = labelcol == ""
+    labelcol[naindices] = "N/A"
+
+    return labelcol
+
+def add_APOGEE_Binary_column(datatab, apidcol="APOGEE_ID", newcol="Binarity"):
+    '''Add a column corresponding to the spectral binarity of the system.
+
+    This function will add a column to datatab with the title of newcol. The
+    targets will be identified by the APOGEE_IDs in apidcol.'''
+    binarray = APOGEE_Binary_Classification(datatab[apidcol])
+    datatab[newcol] = binarray
+
+###############################################################################
+# Tables for Don #
+###############################################################################
+
+def write_Garcia_with_McQuillan_overlap():
+    '''Write a table for Garcia with the McQuillan overlap.'''
+    garcia = catin.read_Garcia_periods()
+    garcia_cols = garcia[["KIC", "Prot", "e_Prot", "Sph", "e_Sph", "Type"]]
+    del(garcia)
+    mcq = catin.read_McQuillan_catalog()
+    mcq_cols = mcq[["KIC", "Prot", "e_Prot", "Rper"]]
+    del(mcq)
+    joined_garcia_mcq = au.join_by_id(
+        garcia_cols, mcq_cols, "KIC", "KIC", join_type="left", 
+        conflict_suffixes=["_Garcia", "_McQuillan"])
+    huber = catin.read_KIC_DR25_catalog()
+    huber_cols = huber[[
+        "kepid", "teff", "teff_err1", "teff_err2", "logg", "logg_err1",
+        "logg_err2", "teff_prov", "logg_prov", "jmag", "hmag", "kmag"]]
+    del(huber)
+    huber_cols.rename_column("teff", "Huber teff")
+    huber_cols.rename_column("logg", "Huber logg")
+    joined_garcia_mcq_huber = au.join_by_id(
+        joined_garcia_mcq, huber_cols, "KIC", "kepid", join_type="left")
+
+    comment = [
+        "The Garcia sample with accompanying McQuillan and Huber entries.",
+        "", 
+        "This table contains the rotational period and activity measure of", 
+        "the spot oscillation for the Garcia sample. The activity measure in",
+        'this case is labeled as "Sph", which is the average standard',
+        "deviation of the light curve in 5*Prot intervals.",
+        "",
+        "It also contains the rotational period and activity measure of the", 
+        "spot oscillation for the McQuillan overlap sample. Around 1/3 of the",
+        "Garcia sample has McQuillan periods. The activity measure in this",
+        "case is labeled as Rper, and is the height of the autocorrelation",
+        "peak.",
+        "",
+        "The Teff and log(g) included in this table were derived from the",
+        "Huber et al (2014) methodology, and include asymmetric",
+        "uncertainties. The teff_prov and logg_prov columns describe the", 
+        "inputs for the analysis: whether they use KIC photometry, J-K",
+        "photometry, spectroscopy, or asteroseismology, to name a few.",
+        "",
+        "The codes for the provenances can be found:",
+        "https://exoplanetarchive.ipac.caltech.edu/docs/API_keplerstellar_columns.html#stellar",
+        "",
+        "Also included are 2MASS JHK photometry for all of the targets."
+    ]
+    joined_garcia_mcq_huber.meta["comments"] = comment
+
+    joined_garcia_mcq_huber.write(
+        str(paths.HEAD_DIR / "Don_Garcia_Table.txt"), 
+        format="ascii.fixed_width", include_names=
+    ["KIC", "Prot_Garcia", "e_Prot_Garcia", "Sph", "e_Sph", "Type",
+     "Prot_McQuillan", "e_Prot_McQuillan", "Rper", "Huber teff", "teff_err1", 
+     "teff_err2", "Huber logg", "logg_err1", "logg_err2", "teff_prov",
+     "logg_prov", "jmag", "hmag", "kmag"])
+
+def combined_huber_apogee_table():
+    '''Write a table with APOGEE targets and Huber et al parameters.'''
+    huber = catin.read_KIC_DR25_catalog()
+    huber_cols = huber[[
+        "kepid", "tm_designation", "teff", "teff_err1", "teff_err2", "logg", 
+        "logg_err1", "logg_err2", "teff_prov", "logg_prov"]]
+    huber_cols.rename_column("teff", "Huber teff")
+    huber_cols.rename_column("logg", "Huber logg")
+    huber_cols.rename_column("kepid", "KIC")
+    del(huber)
+    apogee = catin.read_dr14_allStar()
+    apogee["LOGG_FIT"] = apogee["FPARAM"][:,1]
+    apogee_cols = apogee[[
+        "APOGEE_ID", "TEFF", "LOGG_FIT", "VSINI", "VHELIO_AVG", "VERR",
+        "VSCATTER", "NVISITS", "M_H", "M_H_ERR", "FE_H", "FE_H_ERR", "J", "H",
+        "K", "ASPCAPFLAGS"]]
+    del(apogee)
+    apogee_cols.rename_column("TEFF", "APOGEE teff")
+    apogee_cols.rename_column("LOGG_FIT", "APOGEE logg")
+    joined_apogee_huber = join_by_2MASS_key(
+        huber_cols, apogee_cols, "tm_designation", "APOGEE_ID", join_type="inner")
+
+    comment = [
+        "The APOGEE Kepler sample with Huber parameters.",
+        "",
+        "This is the intersection of targets with APOGEE observations and", 
+        "Huber et al (2014) parameters (which should be all Kepler targets).",
+        "",
+        "The Huber et al (2014) parameters include the effective and log(g)",
+        "including the asymmetric uncertainties. The teff_prov and logg_prov",
+        "columns describe the inputs for the analysis. The codes for the",
+        "provenances can be found:",
+        "https://exoplanetarchive.ipac.caltech.edu/docs/API_keplerstellar_columns.html#stellar",
+        "",
+        "The APOGEE parameters have the Teff and log(g) as inferred from the",
+        "APOGEE spectra. There is also a radial velocity (given in the",
+        '"VHELIO_AVG" column) and its error ("VERR"). For targets with more',
+        'than one visit, there is also a "VSCATTER" computed to reflect RV',
+        'variability.',
+        "",
+        "Metallicity can be described in two quantities: [Fe/H] and [M/H].",
+        "The usual iron abundance and its error are associated with [Fe/H].",
+        "A combined metallicity (which should essentially be [Z/H]) and its",
+        "error is also provided.",
+        "",
+        "Also included are 2MASS JHK photometry of the targets. When the",
+        "Huber et al (2014) pipeline fails (in rare cases), the catalog does",
+        "not include 2MASS photometry, even when it exists and is available",
+        "from the APOGEE catalog. Therefore, all 2MASS photometry in this", 
+        "table is taken from the APOGEE catalog instead of the Huber catalog."
+    ]
+    joined_apogee_huber.meta["comments"] = comment
+
+    joined_apogee_huber.write(
+        str(paths.HEAD_DIR / "Don_APOGEE_Table.txt"), 
+        format="ascii.fixed_width", include_names=[
+            "KIC", "APOGEE_ID", "APOGEE teff", "APOGEE logg", "VSINI",
+            "VHELIO_AVG", "VERR", "VSCATTER", "NVISITS", "M_H", "M_H_ERR",
+            "FE_H", "FE_H_ERR", "J", "H", "K","ASPCAPFLAGS", "Huber teff", 
+            "teff_err1", "teff_err2", "Huber logg", "logg_err1", "logg_err2", 
+            "teff_prov", "logg_prov"])
+
+def big_mcquillan_APOGEE_table():
+    '''Make a comprehensive table with McQuillan info.'''
+    kic = read_KIC_DR25_catalog()[[
+        "kepid", "tm_designation", "teff", "teff_err1", "teff_err2",
+        "teff_prov", "kepmag", "jmag", "jmag_err", "hmag", "hmag_err", "kmag",
+        "kmag_err"]]
+    mcq = read_McQuillan_catalog()[["KIC", "Prot", "e_Prot", "Rper"]]
+    gaia = read_Gaia_DR2_Kepler()[[
+        "KIC", "source_id", "ra", "ra_error", "dec", "dec_error", "parallax",
+        "parallax_error", "pmra", "pmra_error", "pmdec", "pmdec_error",
+        "ra_dec_corr", "ra_parallax_corr", "ra_pmra_corr", "ra_pmdec_corr",
+        "dec_parallax_corr", "dec_pmra_corr", "dec_pmdec_corr",
+        "parallax_pmra_corr", "parallax_pmdec_corr", "pmra_pmdec_corr",
+        "phot_g_mean_flux", "phot_g_mean_flux_error", "phot_bp_mean_flux",
+        "phot_bp_mean_flux_err", "phot_rp_mean_flux",
+        "phot_rp_mean_flux_error", "radial_velocity", "radial_velocity_error"]]
+    berger = read_Berger_DR2_Kepler()[[
+        "KIC", "Teff", "e_Teff", "R*", "e_R*", "E_R*", "AV"]]
+    apogee = catin.read_dr14_allStar()[[
+        "APOGEE_ID", "LOCATION_ID", "APOGEE_TARGET1", "APOGEE_TARGET2",
+        "APOGEE_TARGET3", "TARGFLAGS", "NVISITS", "STARFLAG", "STARFLAGS",
+        "VHELIO_AVG", "VSCATTER", "VERR", "APOGEE2_TARGET1", "APOGEE2_TARGET2",
+        "APOGEE2_TARGET3", "SNREV", "FPARAM", "FPARAM_COV", "TEFF", "TEFF_ERR",
+        "LOGG", "LOGG_ERR", "VSINI", "M_H", "M_H_ERR", "ALPHA_M",
+        "ALPHA_M_ERR", "ASPCAPFLAG", "ASPCAPFLAGS", "ASPCAP_CHI2", "FE_H"]]
 
 
+###############################################################################
+# Supplement tables with columns #
+###############################################################################
 
+###############
+# DSEP values #
+###############
+    
+def generate_DSEP_radius_column(
+    apotable, teffcol="TEFF", fehcol="FE_H", age=3, radcol="APOGEE radius"):
+    '''Add a radius column to apotable.
 
+    The column to convert teff to radius should be given as Teffcol. The radius
+    will be stored in the radcol column.'''
+    radiusarr = np.zeros(len(apotable))
+    # A dictionary referencing DSEP models according to metallicity.
+    DSEP_models = {}
+    # I want to round metallicity to the nearest hundredth
+    rounded_metallicities = np.round(apotable[fehcol], 2)
+    # What to do about -9999 or masked arrays
+    for i in range(len(rounded_metallicities)):
+        try:
+            dsep_interper = DSEP_models[rounded_metallicities[i]]
+        except KeyError:
+            dsep_interper = sed.DSEPInterpolator(age, rounded_metallicities[i])
+
+        teffpoint = apotable[teffcol][i]
+        try:
+            radiusarr[i] = dsep_interper.teff_to_radius_interpolation_sb(teffpoint)
+        # This will be called if the DSEP interpolator has one of the values
+        # being out of bounds.
+        except subprocess.CalledProcessError:
+            radiusarr[i] = np.nan
+        else:
+            assert teffpoint > 0
+
+    apotable[radcol] = radiusarr
+
+def generate_DSEP_radius_column_with_errors(
+        apotable, teffcol="TEFF", fehcol="FE_H", ageval=3, oldage=10,
+        youngage=1, radcol="DSEP radius", topraderrcol="DSEP radius upper",
+        bottomraderrcol="DSEP radius lower"):
+    '''Add radius and error columns to apotable.
+
+    The columns that will be added are a column for the radius, the upper limit
+    and the lower limit. The ages corresponding to the representative, old, and
+    young limits should also be specified.'''
+    generate_DSEP_radius_column(
+        apotable, teffcol=teffcol, fehcol=fehcol, age=ageval, radcol=radcol)
+    generate_DSEP_radius_column(
+        apotable, teffcol=teffcol, fehcol=fehcol, age=youngage,
+        radcol=bottomraderrcol)
+    apotable[bottomraderrcol] = apotable[radcol] - apotable[bottomraderrcol]
+    generate_DSEP_radius_column(
+        apotable, teffcol=teffcol, fehcol=fehcol, age=oldage,
+        radcol=topraderrcol)
+    apotable[topraderrcol] = apotable[radcol] - apotable[topraderrcol]
+
+#######################
+# Absolute Magnitudes #
+#######################
+
+def parallax_to_distance_modulus(parallax):
+    '''Convert parallax to a distance modulus.
+    
+    The parallax should be given in units of milliarcseconds.'''
+    return -5*np.log10(parallax/100)
+
+def parallax_err_to_distance_modulus_err(parallax_err, parallax):
+    '''Convert an error in parallax to an error in distance modulus.'''
+    return 5 * parallax_err / parallax / np.log(10)
+
+def distance_to_distance_modulus(dist):
+    '''Convert distance to distance modulus.
+
+    The distance should be given in units of parsecs.'''
+    return 5 * np.log10(dist/10)
+
+def distance_err_to_distance_modulus_err(dist_err, dist):
+    '''Convert an error in distance to an error in distance modulus.'''
+    return 5 * dist_err / dist / np.log(10)
+
+def generate_abs_mag_column(
+        apotable, appcol, abscol, v_to_ext, avcol="AV", parallaxcol="", 
+        distcol=""):
+    '''Create a extinction-corrected column of absolute magnitudes.
+
+    For the table in apotable, use the data in appcol, avcol and either
+    parallaxcol or distcol to generate absolute magnitudes, which will be stored 
+    in abscol. A function which converts Av to the extinction in a given band to 
+    the extinction in the desired band also needs to be passed.
+
+    Only one of parallaxcol or distcol should be specified; if they are both
+    specified, then an error will be output. Parallaxcol will be set to
+    "parallax" by default.
+    '''
+    if parallaxcol != "" and distcol != "":
+        raise ValueError("Received conflicting parallax and distance columns.")
+    if parallaxcol == "" and distcol == "":
+        parallaxcol = "parallax"
+
+    if parallaxcol != "" and distcol == "":
+        distance_modulus = parallax_to_distance_modulus(apotable[parallaxcol])
+    elif parallaxcol == "" and distcol != "":
+        distance_modulus = distance_to_distance_modulus(apotable[distcol])
+
+    new_ext = v_to_ext(apotable[avcol])
+    apotable[abscol] = sed.calc_abs_magnitude(
+        apotable[appcol], distance_modulus, new_ext)
+
+def generate_abs_mag_column_with_errors(
+        apotable, appcol, apperrcol, abscol, absupcol, absdowncol, v_to_ext,
+        v_err_to_ext_err, parallaxcol="", parallax_err_col="",
+        parallax_offset=0.05, distcol="", dist_up_col="", dist_down_col="",  
+        avcol="AV", avupcol="", avdowncol="", fullgaia=True):
+    '''Create absolute magnitude columns with Gaia info and photometry.
+
+    This calculates the given K-band absolute magnitude using the usual
+    relation. Either parallaxes or distance can be specified, but only one
+    should be given, with the rest being empty strings. By default it will
+    assume that the parallax column is "parallax" and the uncertainty column is
+    "parallax_error". A zero-point offset for the parallax should be given in
+    parallax_offset. It approximates errors by adding the terms in quadrature.
+    For blended objects, the null value for the K-band magnitude is propagated.
+    '''
+    if parallaxcol != "" and distcol != "":
+        raise ValueError("Received conflicting parallax and distance columns.")
+    elif (parallaxcol != "" and parallax_err_col == ""):
+        raise ValueError("Parallax column given without error")
+    elif (parallaxcol == "" and parallax_err_col != ""):
+        raise ValueError("Parallax error given without parallax.")
+    elif (distcol != "" and (dist_up_col == "" or dist_down_col == "")):
+        raise ValueError("Distance column given without error")
+    elif (distcol == "" and (dist_up_col != "" or dist_down_col != "")):
+        raise ValueError("Distance error given without distance")
+    elif parallaxcol == "" and distcol == "":
+        parallaxcol = "parallax"
+
+    if parallaxcol != "" and distcol == "":
+        if fullgaia:
+            dmo = parallax_to_distance_modulus_fulk(
+                (apotable[parallaxcol]+parallax_offset)/1000,
+                apotable[parallax_err_col]/1000)
+            distance_modulus_down, distance_modulus, distance_modulus_up = dmo
+        else:
+            distance_modulus = parallax_to_distance_modulus(
+                apotable[parallaxcol]+parallax_offset)
+            distance_modulus_up = parallax_err_to_distance_modulus_err(
+                apotable[parallax_err_col], apotable[parallaxcol])
+            distance_modulus_down = parallax_err_to_distance_modulus_err(
+                apotable[parallax_err_col], apotable[parallaxcol])
+    elif parallaxcol == "" and distcol != "":
+        distance_modulus = distance_to_distance_modulus(apotable[distcol])
+        distance_modulus_up = distance_err_to_distance_modulus_err(
+            apotable[dist_up_col], apotable[distcol])
+        distance_modulus_down = distance_err_to_distance_modulus_err(
+            apotable[dist_down_col], apotable[distcol])
+
+    new_ext = v_to_ext(apotable[avcol])
+    if avupcol == "" and avdowncol == "":
+        new_ext_up = new_ext
+        new_ext_down = new_ext
+    elif avupcol != "" and avdowncol != "":
+        new_ext_up = v_err_to_ext_err(apotable[avcol], apotable[avupcol])
+        new_ext_down = v_err_to_ext_err(apotable[avcol], apotable[avdowncol])
+    else: 
+        ValueError("Only received one type of uncertainty for extinction.")
+
+    apotable[abscol] = sed.calc_abs_magnitude(
+        apotable[appcol], distance_modulus, new_ext)
+    apotable[absupcol] = sed.calc_abs_magnitude_err(
+        apotable[apperrcol], distance_modulus_down, new_ext_down)
+    apotable[absdowncol] = sed.calc_abs_magnitude_err(
+        apotable[apperrcol], distance_modulus_up, new_ext_up)
+
+def parallax_to_distance_modulus_fulk(parallaxes, errors, L=1350):
+    '''Convert parallax to distance modulus.
+    
+    The parallax and error needs to be in arcseconds. The scale length of disk
+    needs to be in parsecs. The function returns a 3-tuple containing the lower
+    bound of the distance modulus, the mode of the distance modulus, and the
+    upper bound of the distance modulus.'''
+    assert len(parallaxes) == len(errors)
+    parmask = parallaxes.mask
+    dm = np.zeros(len(parallaxes))
+    dm_upper = np.zeros(len(parallaxes))
+    dm_lower = np.zeros(len(parallaxes))
+    for i, (parallax, error) in enumerate(zip(parallaxes, errors)):
+        # Calculate the location of the mode.
+        mode = pyrallaxes.dmod_mode_exp(parallax, error, L)
+        # Integrate from mode-10 to mode.
+        lower_mode_integral = pyrallaxes.percentiles(
+            pyrallaxes.dmpdfexp, mode-10, mode, parallax, error, L)
+        normalization_factor  = pyrallaxes.normalization(
+            pyrallaxes.dmpdfexp, L, parallax, error, lower_mode_integral, mode,
+            mode+10)
+        mode_percentile = pyrallaxes.normalized_percentile(
+            lower_mode_integral, normalization_factor)
+
+        median = pyrallaxes.dmod_median(
+            pyrallaxes.dmpdfexp, parallax, error, L, mode+10, mode,
+            mode_percentile, normalization_factor, -10)
+
+        lower_dmod = pyrallaxes.distances_from_percentiles_dmod(
+            pyrallaxes.dmpdfexp, normalization_factor, parallax, error, "inf",
+            .5-.67/2, .5+.67/2, 0.5, median, L, mode+10, -10)
+        upper_dmod = pyrallaxes.distances_from_percentiles_dmod(
+            pyrallaxes.dmpdfexp, normalization_factor, parallax, error, "sup",
+            .5-.67/2, .5+.67/2, 0.5, median, L, mode+10, -10)
+
+        dm[i] = mode
+        dm_upper[i] = upper_dmod
+        dm_lower[i] = lower_dmod
+
+    return dm_lower, dm, dm_upper

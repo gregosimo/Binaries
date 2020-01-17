@@ -9,9 +9,10 @@ import numpy.core.defchararray as npstr
 import numpy as np
 
 import astropy_util as au
+import path_config as paths
 
-DEFAULT_DLSB_DB = "./DLSB.txt"
-DEFAULT_NULL_DB = "./noDL.txt"
+DEFAULT_DLSB_DB = str(paths.DLSB_DB)
+DEFAULT_NULL_DB = str(paths.NODL_DB)
 
 # Maybe this isn't the correct way to do things.
 class DLSB_prompt(cmd.Cmd):
@@ -166,7 +167,7 @@ if __name__ == "__main__":
     parser = argparse.ArgumentParser()
 
     parser.add_argument(
-        "--dlsb-database", action="store", nargs="?", default=DEFAULT_KICDB)
+        "--dlsb-database", action="store", nargs="?", default=DEFAULT_DLSB_DB)
     parser.add_argument(
         "--null-database", action="store", nargs="?", default=DEFAULT_NULL_DB)
     parser.add_argument("FILES", action="store", nargs=argparse.REMAINDER)

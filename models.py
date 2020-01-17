@@ -1,0 +1,379 @@
+import bisect
+
+from scipy.interpolate import lagrange, interp1d
+from astropy.table import Table
+import numpy as np
+import matplotlib.pyplot as plt
+
+import sed
+
+class StellarEvolutionaryTrack(object):
+    '''A generic class for a stellar evolutionary track.
+
+    This class will hold the data and metadata for a Stellar Evolutionary
+    Track. Important tasks for this object include loading from a file
+    automatically as well as interpolating values at a given age.'''
+    def __init__(self, datatable, age_col, mass, feh, alpha):
+        '''Create an evolutionary track object.
+
+        The object contains a table, which should hold the stellar parameters
+        as a function of age. The age column should be specified as age_col.
+        The metallicity and alpha abundance should also be specified as feh and
+        alpha.'''
+
+        self.tracktable = datatable
+        self.age_col = age_col
+        self.mass = mass
+        self.feh = feh
+        self.alpha = alpha
+
+    def interpolate_at_age(self, age, interp_style="average"):
+        '''Interpolate the parameters of the star at a given age (given in Gyr).'''
+        if interp_style is "lagrange":
+            poly_size=4
+            ind = bisect.bisect_right(self.tracktable[self.age_col], age)
+            if ind == len(self.tracktable):
+                raise ValueError("Track does not reach desired age.")
+            cols = [
+                col for col in self.tracktable.colnames if col not in self.age_col]
+            rowdict = {self.age_col: age}
+            for col in cols:
+                tableslice = slice(ind-poly_size//2, ind+poly_size//2)
+                polyinterp = lagrange(
+                    self.tracktable[self.age_col][tableslice], 
+                    self.tracktable[col][tableslice])
+                rowdict[col] = polyinterp(age)
+            newtab = Table(rows=[rowdict])
+            return newtab
+        elif interp_style is "average":
+            ind = bisect.bisect_left(self.tracktable[self.age_col], age)
+            if ind == len(self.tracktable):
+                raise ValueError("Track does not reach desired age.")
+            tableslice = slice(ind-1, ind+1)
+            ageslice = self.tracktable[self.age_col][tableslice]
+            cols = [
+                col for col in self.tracktable.colnames if col not in self.age_col]
+            rowdict = {self.age_col: age}
+            for col in cols:
+                colslice = self.tracktable[col][tableslice]
+                rowdict[col] = (colslice[0] + (colslice[1] - colslice[0]) /
+                               (ageslice[1] - ageslice[0]) * (
+                                   age - ageslice[0]))
+            newtab = Table(rows=[rowdict])
+            return newtab
+
+    def age_at_col(self, col, colval, col_increases=True):
+        '''Interpolate the age of the star when a parameter first hits a value.
+        
+        Be cautious using this method for double-valued columns. It's highly
+        recommended the restrict the phase first when using this method.
+        
+        The col_increases attribute is for double-valued columns. It will
+        determine whether the slope should be increasing or decreasing as it 
+        passes through the point.'''
+        # Find the indices where the column goes from being below to above
+        # colval.
+        change_indices = np.argwhere(find_signchange(
+            self.tracktable[col] - colval)).flatten()
+        ind = change_indices[0]
+        colval1 = self.tracktable[col][ind-1]
+        colval2 = self.tracktable[col][ind]
+        # If this isn't the solution i want, take the next solution.
+        # If there is no next solution, I guess raise an error.
+        if ((col_increases and colval2 < colval1) or 
+                (not col_increases and colval2 > colval1)):
+            ind = change_indices[1]
+        age1 = self.tracktable[self.age_col][ind-1]
+        age2 = self.tracktable[self.age_col][ind]
+        newage = (age2 + (age2 - age1) / (colval2 - colval1) * (colval - colval2))
+        return newage
+
+    def plot_columns(self, xcol, ycol):
+        '''Plot the internal columns between xcol and ycol'''
+        plt.plot(self.tracktable[xcol], self.tracktable[ycol], color='k', ls="--",
+                 marker="o")
+        plt.xlabel(xcol)
+        plt.ylabel(ycol)
+
+class StellarIsochrone(object):
+    '''A generic class for Stellar Isochrones.
+    
+    This class holds data and metadata for a Stellar Isochrone. Important tasts
+    for this object include loading from a file automatically and interpolating
+    between columns.
+    
+    NOTE That a StellarIsochrone object holds a SET of isochrones, not a single
+    one.'''
+    # I may want to look into using the ABC framework for defining the methods
+    # and attributes that need to be defined in subclasses. These include all
+    # of the physical column names, maybe the band_translation table, 
+    def __init__(
+        self, feh, alpha, mixing_length, Y, Z, vvcrit, bandstr, iso_dict):
+        '''Take in attributes needed to define a DSEP isochrone.'''
+        self.mixing_length = mixing_length
+        self.Y = Y
+        self.Z = Z
+        self.feh = feh
+        self.alpha = alpha
+        self.vvcrit = vvcrit
+        self.bandstr = bandstr
+        self.iso_dict = iso_dict
+
+    def interpolate_isochrone_cols(
+            self, age, invals, incol, outcol, interp_kind="linear", 
+                mask_outside_bounds=True, increase=True):
+        '''Interpolate between the columns of an isochrone object.
+        
+        Interpolate the values invals between the columns of the
+        StellarInterpolator: incol and outcol. An age should be specified for
+        the interpolation.
+        
+        The kind of interpolation to be done should be given as interp_kind, which
+        by default is linear because of the high density of points.
+        
+        If the mask_outside_bounds flag keyword is enabled, any of the invals
+        which fall outside of the range desribed by the isochrone will be
+        masked. Otherwise, this function will return an error.
+        
+        This function assumes that invals in the isochrone should be
+        increasing. If using decreasing values, change the increasing keyword to 
+        False.'''
+        met_table = self.iso_table(age)
+        if increase:
+            restricted_table = interpolation_table_increasing_stretch(
+                met_table, mono_col=incol)
+        else:
+            restricted_table = interpolation_table_decreasing_stretch(
+                met_table, mono_col=incol)
+        xvals, yvals = restricted_table[incol], restricted_table[outcol]
+        in_ordered, out_ordered = ensure_array_increasing(xvals, yvals)
+        in_fixed, out_fixed = fix_duplicate_array_values(
+            in_ordered, out_ordered)
+
+        nonmasked_in = np.ma.compressed(invals)
+        assert len(nonmasked_in) == len(invals)
+
+        if mask_outside_bounds:
+            kinterp = interp1d(
+                in_fixed, out_fixed, kind=interp_kind, fill_value=np.nan, 
+                bounds_error=False)
+            interp_out = np.ma.masked_invalid(kinterp(nonmasked_in))
+        else:
+            kinterp = interp1d(
+                in_fixed, out_fixed, kind=interp_kind, bounds_error=True)
+            interp_out = kinterp(nonmasked_in)
+
+        return interp_out
+
+    def isochrone_derivative(
+            self, age, xvals, xcol, ycol, interp_kind="linear",
+            mask_outside_bounds=True, increase=True, ef=10**-2):
+        '''Return the derivatives of ycol with respect to xcol at xvals.
+        
+        Calculate the derivative of ycol with respect to xcol at the values of
+        xvals. This function uses the treatment in Numerical Recipes 5.7. It
+        assumes that the interpolation is good to a fractional value ef, which
+        is the scale on which the derivative will be evaluated.'''
+        # Want h to be on the scale of ef**(1/3) * x.
+        hsteps = ef**(1/3) * xvals
+        # Force hsteps to be exactly representable.
+        temp = xvals + hsteps
+        posh = temp - xvals
+        temp = xvals - hsteps
+        negh = -(temp - xvals)
+
+        posy = self.interpolate_isochrone_cols(
+        age, xvals+posh, xcol, ycol, interp_kind=interp_kind,
+            mask_outside_bounds=mask_outside_bounds, increase=increase)
+        negy = self.interpolate_isochrone_cols(
+        age, xvals-negh, xcol, ycol, interp_kind=interp_kind,
+            mask_outside_bounds=mask_outside_bounds, increase=increase)
+
+        deriv = (posy-negy)/(posh+negh)
+        return deriv
+
+    def plot_columns(self, age, xcol, ycol):
+        '''Plot the internal columns between xcol and ycol'''
+        met_table = self.iso_table(age)
+        plt.plot(met_table[xcol], met_table[ycol], color='k', ls="--",
+                 marker="o")
+        plt.xlabel(xcol)
+        plt.ylabel(ycol)
+
+    def make_color_col(self, band1, band2, colorcol):
+        '''Combine two bands to make a color column.
+        
+        Note that the function assumes, but does not enforce, that band1 is
+        bluer than band2. NOTE: This does not work for MIST yet.'''
+        if band1 not in self.phot_bands:
+            raise ValueError("{0} not a recognized band".format(band1))
+        if band2 not in self.phot_bands:
+            raise ValueError("{0} not a recognized band".format(band2))
+        if band1 == band2:
+            raise ValueError("Two bands must be distinct.")
+
+        for v in self.iso_dict.values():
+            v[colorcol] = v[band1] - v[band2]
+
+def bin_nearby_table_values(table, bin_col, decimals):
+    '''Bin the table according to values nearby in bin_col.
+    
+    Sometimes the outputs of stellar models show odd clustering behavior, where
+    points are outputted with independent coordinates very close to each other.
+    Those points sometimes capture behavior which isn't physical and may
+    actually be numerical. As a way of downsampling that behavior, this
+    function will take multiple points that are within the given relative
+    tolerance and treat them as equivalent.'''
+    # Because np.around only deals with decimal places, I want to make sure all
+    # the values are between 1-10.
+    exponents = 10**np.floor(np.log10(table[bin_col]))
+    normalized_col = table[bin_col] / exponents
+    rounded_col = np.around(normalized_col, decimals=decimals) * exponents
+    tablegroup = table.group_by(rounded_col)
+    newtable = tablegroup.groups.aggregate(np.mean)
+    return newtable
+
+def fix_duplicate_array_values(xvals, yvals):
+    '''Remove duplicate x-values from arrays.
+
+    One of the problems with DSEP isochrones is that occasionally, there will
+    be two adjacent points that have the same x-value, but have different
+    y-values. This function will attempt to find those duplicate points and fix
+    them.'''
+    # Note: This algorithm assumes that there are only two simultaneous
+    # duplications. Doing it for n simultaneous duplications might be tricky.
+    # The DSEP interpolation causes there to be very slight numerical errors in
+    # the answers. As a result, quantities that should be identical can be
+    # scattered above or below what they are.
+    dupmask = np.abs(np.diff(xvals)) > 1.01e-5
+    valarray = np.ma.vstack([xvals, yvals])
+    # If the cases of duplication are isolated:
+    if np.all(np.logical_or(dupmask[1:], dupmask[:-1])):
+        meanvals = np.mean([
+            valarray[:, np.hstack([np.ones(1, dtype=bool), dupmask])], 
+            valarray[:, np.hstack([dupmask, np.ones(1, dtype=bool)])]], axis=0)
+    else:
+        splitlist = np.hsplit(valarray, np.where(dupmask)[0]+1)
+        meanvals = np.concatenate([
+            np.mean(vals, axis=1)[:,np.newaxis] for vals in splitlist], axis=1)
+    newx = meanvals[0,:]
+    newy = meanvals[1,:]
+    return newx, newy
+
+def interpolation_table_increasing_stretch(isochrone, mono_col="LogTeff"):
+    '''Cut off the low-mass portion of the table which is increasing.
+    
+    This function is an alternative to restrict_interpolation_table because it
+    ensures that a well-behaved part of the isochrone is used for
+    interpolation.'''
+    col = isochrone[mono_col]
+    # If the column is increasing, then these must be positive.
+    coldiff = np.diff(col)
+    # Get the first positive index.
+    first_index = np.where(coldiff >= 0)[0][0]
+    # Find where the index next dips below zero.
+    try:
+        last_index = first_index+np.where(coldiff[first_index:] < 0)[0][0]
+    # There might be a more elegant way of doing this.
+    except IndexError:
+        last_index = len(isochrone)
+    else:
+        # Check for one-off blips and reinterpolate them.
+        # If there was a one-off blip, the next point should look perfectly
+        # normal. If it does, remove that problematic row.
+        try:
+            newdiff = coldiff[last_index] + coldiff[last_index+1]
+        except IndexError:
+            pass
+        else:
+            while newdiff > 0:
+                isochrone.remove_row(last_index+1)
+                coldiff = np.diff(isochrone[mono_col])
+                try:
+                    last_index = first_index+np.where(
+                        coldiff[first_index:] < 0)[0][0]
+                except IndexError:
+                    last_index = len(coldiff)
+                    break
+                newdiff = coldiff[last_index] + coldiff[last_index+1]
+
+    return isochrone[first_index:last_index]
+
+def interpolation_table_decreasing_stretch(isochrone, mono_col="LogTeff"):
+    '''Cut off the low-mass portion of the table which is increasing.
+    
+    This function is an alternative to restrict_interpolation_table because it
+    ensures that a well-behaved part of the isochrone is used for
+    interpolation.'''
+    col = isochrone[mono_col]
+    # If the column is decreasing, then these must be negative.
+    coldiff = np.diff(col)
+    # Get the first positive index.
+    first_index = np.where(coldiff <= 0)[0][0]
+    # Find where the index next dips below zero.
+    try:
+        last_index = first_index+np.where(coldiff[first_index:] > 0)[0][0]
+    # There might be a more elegant way of doing this.
+    except IndexError:
+        last_index = len(isochrone)
+    else:
+        # Check for one-off blips and reinterpolate them.
+        # If there was a one-off blip, the next point should look perfectly
+        # normal. If it does, remove that problematic row.
+        try:
+            newdiff = coldiff[last_index] + coldiff[last_index+1]
+        except IndexError:
+            pass
+        else:
+            while newdiff < 0:
+                isochrone.remove_row(last_index+1)
+                coldiff = np.diff(isochrone[mono_col])
+                try:
+                    last_index = first_index+np.where(
+                        coldiff[first_index:] > 0)[0][0]
+                except IndexError:
+                    last_index = len(coldiff)
+                    break
+                newdiff = coldiff[last_index] + coldiff[last_index+1]
+
+    return isochrone[first_index:last_index]
+
+
+def ensure_array_increasing(xvals, yvals):
+    '''Ensure the provided xvalues are increasing.
+
+    Because creating a spline requires that xvalues are strictly increasing,
+    this function assumes that the provided xvals array is either strictly
+    increasing or decreasing, and if decreasing, it reverses it to ensure that
+    it's increasing. The yvals are also reversed if that's the case.
+    '''
+    if xvals[0] > xvals[-1]:
+        newxvals = xvals[::-1]
+        newyvals = yvals[::-1]
+    else:
+        newxvals = xvals
+        newyvals = yvals
+
+    # These may require a bit of resorting due to interpolation errors. One
+    # quality flag I'd like to ensure is that no drastic sorting changes occur.
+    sorted_xvals_indices = np.argsort(newxvals)
+    sorted_xvals = newxvals[sorted_xvals_indices]
+    sorted_yvals = newyvals[sorted_xvals_indices]
+    xdiffs = np.diff(newxvals)
+    assert abs(min(xdiffs)) <= 1*min(xdiffs[xdiffs > 0])
+
+    return sorted_xvals, sorted_yvals
+
+def find_signchange(arr):
+    '''Return indices that show when an array undergoes a sign change.
+
+    Ex: array([1, 1, -1, -2, -4, 5, 6])
+    Returns array([0, 0, 1, 0, 0, 1, 0])
+    '''
+    signs = np.sign(arr)
+    signchange = ((np.roll(signs, 1) - signs) != 0).astype(int)
+    # If the beginning and end are different signs, this could lead to the
+    # first element being called a signchange. We don't want this for our
+    # purposes.
+    signchange[0] = 0
+    return signchange

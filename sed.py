@@ -1,26 +1,23 @@
 import os
 import glob
 import subprocess
-import tempfile
-import shutil
 import itertools
 import pickle
 import collections
 
 import numpy as np
 import numpy.core.defchararray as npstr
-from scipy.interpolate import interp1d
 from scipy.optimize import minimize
 from scipy.stats import chi2, norm, multivariate_normal
 from astropy.table import Table
 from pathlib import Path
 import matplotlib.pyplot as plt
+import astropy_util as au
 
 import path_config as paths
-import catalog
 import hrplots as hr
-
-DESP_PATH = "/home/regulus/simonian/DSep/"
+import dsep
+import biovis_colors as bc
 
 class TableHolder(object):
     pass
@@ -269,13 +266,22 @@ def Casagrande_inverted_color(color, teffs, metallicity,
     # the components of the solution:
     a = casagrande_row["a2"]
     b = casagrande_row["a1"] + casagrande_row["a3"] * metallicity
-    theta_eff = 5060 / teffs
+    theta_eff = 5040 / teffs
     c = (casagrande_row["a0"] + casagrande_row["a4"] * metallicity +
          casagrande_row["a5"] * metallicity**2 - theta_eff)
 
     color = (-b + np.sqrt(b**2 - 4 * a * c)) / (2 * a)
 
     return color
+
+def Casagrande_scatter(color, tblpath=paths.CASAGRANDE_TABLE_4):
+    '''Get the temperature scatter that Casagrande measured for the color.'''
+    casagrande_teff_table = read_Casagrande_10_Table_4(tblpath)
+
+    casagrande_scatter = casagrande_teff_table[
+        casagrande_teff_table["Color"] == color]["unc"]
+
+    return casagrande_scatter
 
 def Casagrande_Bolometric_Flux(
     band, mags, color, colorvals, metallicity, extrapolation_exception=True,
@@ -328,137 +334,18 @@ def Casagrande_Bolometric_Flux(
     fbol = 10**(-0.4*mags) * polysum
     return fbol
 
-###############################################################################
-# DSEP-specific routines #
-###############################################################################
+
+
 
 # Internal DSEP Routines #
 ##########################
 
-def DSEP_isochrone_interpolator(
-    feh, output, bands=1, y=1, alpha=2, 
-    executable=paths.DSEP_INTERPOLATOR_EXECUTABLE,
-    isochrones=paths.DSEP_ISOCHRONES):
-    '''Runs interpolator to generate DSEP isochrones of a given metallicity.
 
-    This is used to get a set of isochrones at a given metallicity, without
-    having to worry about the grid. The isochrones will be output to the
-    location in output.
 
-    [Fe/H] should be the metallicity of the star. Bands, Y, and Alpha are
-    integers which stand for options in DSEP. 
-    '''
-    command = [str(executable), str(bands), str(y), str(alpha), str(feh), 
-               str(output)]
-    subprocess.run(command, cwd=str(isochrones.parent), check=True)
 
-def DSEP_age_splitter(inputfile, outputdir,
-                      executable=paths.DSEP_SPLITTER_EXECUTABLE):
-    '''Calls the isochrone splitter.
 
-    Oftentimes the isochrones can be really annoying to read in their current
-    shape. Therefore, the isochrone splitter splits the isochrones into
-    separate files, each corresponding to a different age on the isochrone. The
-    isochrone files will be put in outputdir.
 
-    This function expects the paths above to be pathlib.Path objects.
-    '''
-    # This FORTRAN program is kinda awful. It has to be run in the same
-    # directory as the file. And it will output all of the new files to the
-    # same directory. 
-    # As a result, we may have to mess around with the files a bit under the
-    # hood. Here are the steps I would like to take.
-    # 1. Split the input file into the directory and the basename.
-    # 2. Create a temporary directory in the same directory as the input file.
-    # 3. Move the input file into the temporary directory.
-    # 4. Run the splitter on the input file, with the temporary directory as
-    # the current working directory.
-    # 5. Move the input file back into its original directory.
-    # 6. Move the contents of the temporary directory into outputdir.
-    # 7. Delete the temporary directory.
-    basedir, input_filename = inputfile.parent, inputfile.name
-    with tempfile.TemporaryDirectory(dir=str(basedir)) as tempdir_object:
-        tempdir = Path(tempdir_object)
-        shutil.copy(str(inputfile), str(tempdir))
-        command = [str(executable), str(input_filename)]
-        subprocess.run(command, cwd=str(tempdir))
-        temp_input_file = tempdir / input_filename
-        temp_input_file.unlink()
-        for agefile in tempdir.iterdir():
-            outputdir.mkdir(exist_ok=True)
-            shutil.copy(str(agefile), str(outputdir))
-        
-# Maybe add something to automatically download isochrones. But I don't think
-# it's particularly important now.
 
-def assign_DSEP_sign(val):
-    '''Returns p if val is positive and n if val is negative.
-
-    If val is zero, then it will return p anyway.
-    '''
-    return sign_switch(val, "p", "m", 1)
-
-def format_DSEP_isochrone_filename(feh, afe, Y, bands):
-    '''Creates a filename which follows the DSEP format.
-
-    This format is feh(p|m)??afe(p|m)?[y??].{bands}. Where the two digits after
-    feh are the metallicity, with p for positive and m for negative
-    metallicity. After that is the alpha-abundance, which follows the same
-    pattern. If the helium abundance is set and not metallicity-dependent, then
-    there will be the extra y term in the filename.
-
-    The bands is basically a suffix which contains every band that is contained
-    in the isochrone. For example, one isochrone contains UBVRIJHKsKp.'''
-    afe_val = 0.2 * (afe - 2)
-    feh_sign = assign_DSEP_sign(feh)
-    afe_sign = assign_DSEP_sign(afe_val)
-
-    if Y == 1:
-        ystring = ""
-    elif Y == 2:
-        ystring = "y33"
-    elif Y == 3:
-        ystring = "y40"
-    else:
-        raise ValueError("Y={0:.2g} not supported.".format(Y))
-    
-    # When placing extra bands, make sure the numbers line up with the values
-    # in the "iso_interp_feh.f" file. 
-    if bands == 1:
-        suffix = "UBVRIJHKsKp"
-    elif bands == 8:
-        suffix = "UKIDSS"
-    elif bands == 10:
-        suffix = "CFHTugriz"
-    elif bands == 11:
-        suffix = "SDSSugriz"
-    elif 0 < bands <= 15:
-        raise ValueError("Band {0} not implemented yet.".format(bands))
-    else:
-        raise ValueError("Band number not recognized")
-
-    filename_template = "feh{0}{1:02d}afe{2}{3:01d}{4}.{5}".format(
-        feh_sign, int(abs(feh)*10), afe_sign, int(abs(afe_val)*10), ystring, 
-        suffix)
-
-    return filename_template
-
-def format_DSEP_age_isochrone_filename(age, feh, afe, y, bands):
-    '''Formats the filename of a post-split age file.
-
-    This format is a?????feh(p|m)??afe(p|m)?[y??].{bands}. The 5 digits after a
-    stand for the age in Gyr, where an implied decimal place is after the
-    second digit. The two digits after feh are the metallicity, with p for 
-    positive and m for negative metallicity. After that is the 
-    alpha-abundance, which follows the same pattern. If the helium abundance 
-    is set and not metallicity-dependent, then there will be the extra y term 
-    in the filename.
-
-    The bands is basically a suffix which contains every band that is contained
-    in the isochrone. For example, one isochrone contains UBVRIJHKsKp.'''
-
-    age_prefix = "a{0:05d}".format(int(age*1000))
-    return age_prefix + format_DSEP_isochrone_filename(feh, afe, y, bands)
 
 def interpolate_split_multi_isochrones(
     fehs, outputdir, bands=1, Y=1, afe=2, isochrones=paths.DSEP_ISOCHRONES,
@@ -488,70 +375,65 @@ def interpolate_split_multi_isochrones(
                 feh))
 
 
-def interpolated_split_isochrone(
-    feh, outputdir=paths.DSEP_OUTPUT, bands=1, Y=1, afe=2, 
-    isochrones=paths.DSEP_ISOCHRONES,
-    interp_exec=paths.DSEP_INTERPOLATOR_EXECUTABLE,
-    split_exec=paths.DSEP_SPLITTER_EXECUTABLE):
-    '''Generates isochrones at the specified metallicity.
 
-    Functions creates isochrones at the specified [Fe/H] value, and outputs
-    them to outputdir, into separate files corresponding to their age.
-    Therefore, each file should correspond to a single isochrone. 
-    
-    The files will be in the format: a?????fehp??afep?[y??].{bands}. The 
-    first set of 5 digits corresponds to the age of the isochrone, the second 
-    set of two digits corresponds to the metallicity, the third set of one 
-    digit corresponds to the alpha abundance, and the fourth set of two 
-    digits (if present) represents the initial helium abundance. The {bands} 
-    value notes the photometric bands which are contained in the isochrone.
-    '''
-    with tempfile.TemporaryDirectory() as tempdir_object:
-        tempdir = Path(tempdir_object)
-        isochrone_output = tempdir / format_DSEP_isochrone_filename(
-            feh, afe, Y, bands)
-        DSEP_isochrone_interpolator(feh, isochrone_output, bands, Y, 
-                                    afe, interp_exec, isochrones)
-        DSEP_age_splitter(isochrone_output, outputdir,
-                          executable=split_exec)
 
-def read_DSEP_age_table(tablepath):
-    '''Reads the post-split DSEP table.
-
-    The table should be one which has been split from the monolithic isochrone
-    file, and thus should contain only one age.
-    '''
-    age_table = Table.read(str(tablepath), format="ascii.commented_header",
-                           header_start=-1)
-    return age_table
-
-def read_DSEP_isochrone(
-    feh, age, bands=1, Y=1, afe=2, tabledir=paths.DSEP_OUTPUT,
-    isochrones=paths.DSEP_ISOCHRONES,
-    interp_exec=paths.DSEP_INTERPOLATOR_EXECUTABLE,
-    split_exec=paths.DSEP_SPLITTER_EXECUTABLE):
-    '''Read in a DSEP isochrone at a given metallicity and age.
-
-    The individual isochrone tables need to be found in tabledir. If the given
-    table is not found, then the isochrone will be generated automatically from
-    the grid if possible.
-    '''
-    tablepath = (tabledir / format_DSEP_age_isochrone_filename(
-        age, feh, afe, Y, bands))
-    try:
-        age_table = read_DSEP_age_table(tablepath)
-    except FileNotFoundError:
-        interpolated_split_isochrone(
-            feh, outputdir=tabledir, bands=bands, Y=Y, afe=afe, 
-            isochrones=isochrones, interp_exec=interp_exec, 
-            split_exec=split_exec)
-        age_table = read_DSEP_age_table(tablepath)
-
-    return age_table
 
 # Plotting without Interpolation #
 ##################################
 
+def teff_logg_age_evolution(
+        ages, metallicity=0.0, Y=1, afe=2, lowT=3000, highT=7000):
+    '''Plot evolution of Teff-logg diagram.
+
+    This plot shows how given masses evolve with age on the Teff-logg diagram.
+    Points of a given mass will be connected.'''
+    ages = np.sort(ages)
+    firstiso = read_DSEP_isochrone(metallicity, ages[0], bands=1, Y=Y, afe=afe)
+
+    firstiso = restrict_interpolation_table(
+        firstiso, highT=highT, lowT=lowT, minlogG=3.5)
+    standard_masses = firstiso["M/Mo"]
+    firstteff = 10**firstiso["LogTeff"]
+    firstlogg = firstiso["LogG"]
+    plt.plot(firstteff, firstlogg, marker="*", linestyle="None", ms=12,
+             label="{0:.1f} Gyr".format(ages[0]))
+    for i in range(1, len(ages), 1):
+        print("Age: {0:.1f}".format(ages[i]))
+        second_logteff_interp = mass_to_logteff_DSEP_interpolator(
+            age=ages[i], metallicity=metallicity, Y=Y, afe=afe, lowT=lowT,
+            highT=highT)
+        second_masses = standard_masses[np.where(np.logical_and(
+            standard_masses > np.amin(second_logteff_interp.x), 
+            standard_masses < np.amax(second_logteff_interp.x)))]
+        second_teff = 10**second_logteff_interp(second_masses)
+        second_logg_interp = mass_to_logg_DSEP_interpolator(
+            age=ages[i], metallicity=metallicity, Y=Y, afe=afe, lowT=lowT,
+            highT=highT)
+        test_masses = standard_masses[np.where(np.logical_and(
+            standard_masses > np.amin(second_logg_interp.x), 
+            standard_masses < np.amax(second_logg_interp.x)))]
+        assert(np.all(second_masses == test_masses))
+        second_logg = second_logg_interp(second_masses)
+
+        plt.plot(second_teff, second_logg, marker="*", linestyle="None", ms=8,
+                 label="{0:.1f} Gyr".format(ages[i]))
+        first_ind = np.where(standard_masses >= second_masses[0])[0][0]
+        for j in range(len(second_masses)):
+            plt.plot(
+                [firstteff[first_ind+j], second_teff[j]],
+                [firstlogg[first_ind+j], second_logg[j]],
+                linestyle="-", color="k", marker="None")
+            assert(standard_masses[first_ind+j] == second_masses[j])
+        standard_masses = second_masses
+        firstteff = second_teff
+        firstlogg = second_logg
+
+    hr.invert_x_axis()
+    hr.invert_y_axis()
+    plt.xlabel("Teff (K)")
+    plt.ylabel("log(g)")
+    plt.legend(loc="lower left")
+    
 def color_mag_age_evolution(ages, DSEP_lookup, metallicity=0.0, Y=1, afe=2, 
                             lowT=3000, mag="V", color="B-V"):
     '''Plots the evolution of the color-magnitude diagram.
@@ -833,24 +715,6 @@ def out_of_bounds_wrapper(interpolator, colname, bound1, bound2):
     return exception_wrapper
 
 
-def restrict_interpolation_table(
-    isochrone, highT=6000, lowT=3000, minlogG=4.1):
-    '''Remove isochrone models which lie outside of cuts.
-
-    These restrictions are largely to make all the color relations
-    well-behaved. At too low stellar temps, the relations can be double-valued.
-    At too high stellar temps, we can get stars turning off the MS.
-    '''
-    if lowT is not None:
-        lowT = np.log10(lowT)
-
-    if highT is not None:
-        highT = np.log10(highT)
-    tempcut = catalog.perform_teff_cut(
-        isochrone, lowtemp=lowT, hightemp=highT, teffcol="LogTeff")
-    loggcut = catalog.perform_logg_cut(tempcut, lowlogg=minlogG)
-    restricted_table = loggcut
-    return restricted_table
 
 
 # This is a list that I decided to use in order to persistently store
@@ -1460,7 +1324,7 @@ def convert_to_colors(
 
 def mass_to_band_DSEP_interpolator(
     band, age=1.5, metallicity=0.0, bands=1, Y=1, afe=2, lowT=3000,
-    redden_EBV=0.0, D=10):
+    redden_EBV=0.0, D=10, minlogg=4.1, highT=6000):
     '''Return function to interpolate a magnitude for a given mass.
 
     This function returns an interpolator to map mass and magnitude in the
@@ -1470,17 +1334,38 @@ def mass_to_band_DSEP_interpolator(
     try:
         interpolator = DSEP_interpolation(
             "M/Mo", band, age=age, metallicity=metallicity, bands=bands, Y=Y,
-            afe=afe, lowT=lowT)
+            afe=afe, lowT=lowT, minlogg=minlogg, highT=highT)
     except IndexError:
         interpolator = DSEP_interpolation(
             "M/Mo", band[0], age=age, metallicity=metallicity, bands=bands,
-            Y=Y, afe=afe, lowT=lowT)
+            Y=Y, afe=afe, lowT=lowT, minlogg=minlogg, highT=highT)
 
     # I hope weird bugs don't result from this.
     interpolator.y = redden_mag(band, interpolator.y, redden_EBV)
     interpolator.y = interpolator.y + 5 * np.log10(D/10)
 
     return interpolator
+
+def teff_to_mag_DSEP_interpolator(
+        band, age=1.5, metallicity=0.0, bands=1, Y=1, afe=2, lowT=3000,
+        redden_EBV=0.0, D=10, minlogg=4.1, highT=6000):
+    '''Return function to interpolate a magnitude for a given temperature.
+
+    This function returns an interpolator to map Teff and magnitude in the
+    given band.'''
+    star_table = restrict_interpolation_table(
+        read_DSEP_isochrone(metallicity, age, bands=bands, Y=Y, afe=afe), 
+        lowT=lowT, highT=highT)
+    band = DSEP_band_converter(band, bands)
+    bandmag = star_table[band]
+    logteff = star_table["LogTeff"]
+
+    interpolator = interp1d(logteff, bandmag, kind="linear",
+                            bounds_error=bound_error)
+    teff_to_mag = out_of_bounds_wrapper(
+        interpolator, "LogTeff", max(logteff), min(logteff))
+
+    return teff_to_mag_
 
 def mass_to_color_DSEP_interpolator(
     color, DSEP_lookup, age=1.5, metallicity=0.0, Y=1, afe=2,
@@ -1680,8 +1565,8 @@ def mass_to_bolometric_luminosity_DSEP_interpolator(
 
     return exponentify_interpolator(interpolator)
 
-def mass_to_teff_DSEP_interpolator(
-    age=1.5, metallicity=0.0, bands=1, Y=1, afe=2, lowT=3000):
+def mass_to_logteff_DSEP_interpolator(
+    age=1.5, metallicity=0.0, bands=1, Y=1, afe=2, lowT=3000, highT=6000):
     '''Return function to interpolate effective temperature for a given mass.
 
     This provides one of the important mappings between mass and effective
@@ -1692,9 +1577,23 @@ def mass_to_teff_DSEP_interpolator(
 
     interpolator = DSEP_interpolation(
         "M/Mo", "LogTeff", age, metallicity, bands=bands, Y=Y, afe=afe,
-        lowT=lowT)
+        lowT=lowT, highT=highT)
 
-    return exponentify_interpolator(interpolator)
+    return interpolator
+
+def mass_to_logg_DSEP_interpolator(
+        age=1.5, metallicity=0.0, bands=1, Y=1, afe=2, lowT=3000, highT=6000):
+    '''Return function to interpolate log(g) for a given mass.
+
+    This provides one of the important mappings between mass and log(g) using
+    the DSEP isochrones. The interpolator depends on having a given age and
+    metallicity.'''
+    
+    interpolator = DSEP_interpolation(
+        "M/Mo", "LogTeff", age, metallicity, bands=bands, Y=Y, afe=afe,
+        lowT=lowT, highT=highT)
+
+    return interpolator
 
 def teff_to_radius_DSEP_interpolator(
     age=1.5, metallicity=0.0, bands=1, Y=1, afe=2, lowT=3000, highT=6000,
@@ -1719,6 +1618,112 @@ def teff_to_radius_DSEP_interpolator(
         interpolator, "LogTeff", max(logteff), min(logteff))
 
     return teff_to_radius
+
+def DSEP_dwarf_radii(teffs, metallicities, alphas, age=2.0, lowTeff=3000,
+                     highTeff=7000):
+    '''Calculate MS radii predicted from DSEP.
+    
+    Using an isochrone of a given age, calculate the radius of a star given an
+    effective temperature, metallicity, and alpha abundance.'''
+    # This may be complicated, so I wanna take it slow.
+    masked_teffs = np.ma.masked_equal(teffs, APOGEE_NULL)
+    masked_metallicities = np.ma.masked_equal(metallicities, APOGEE_NULL)
+    masked_alphas = np.ma.masked_equal(alphas, APOGEE_NULL)
+    radius_mask = au.multi_logical_or(
+        masked_teffs.mask, masked_metallicities.mask, masked_alphas.mask)
+    model_radii = np.ma.zeros(len(masked_teffs))
+    model_radii.mask = radius_mask
+
+    # These are the alpha/Fe bins that will be fed into DSEP.
+    alpha_binedges = np.arange(-0.1, 0.9, 0.2)
+    # a/Fe < -0.1 corresponds to 1, and a/Fe > 0.7 corresponds to 6.
+    alpha_bins = np.digitize(masked_alphas, alpha_binedges)+1
+    # DSEP should crash or something if the metallicity and alpha enhancement
+    # are not compatible. In particular, high alpha enhancements are only
+    # available for low metallicity stars. I want to ensure that this will be
+    # the case before running into weird DSEP bugs.
+    assert(np.all(np.logical_or(alpha_bins < 4, np.logical_and(
+        alpha_bins >= 4, masked_metallicities <= 0.0))))
+
+    rounded_metallicities = np.around(masked_metallicities, 2)
+    for i in range(len(model_radii)):
+        if not model_radii.mask[i]:
+            interp = teff_to_radius_DSEP_interpolator(
+                age=age, metallicity=rounded_metallicities[i], afe=alpha_bins[i],
+                lowT=lowTeff, highT=highTeff)
+            model_radii[i] = 10**interp(np.log10(masked_teffs[i]))
+
+    return model_radii
+
+def DSEP_dwarf_mag(teffs, metallicities, alphas, mag, age=2.0, lowTeff=3000,
+                   highTeff=7000):
+    '''Calculate absolute K magnitudes from DSEP.
+
+    Using an isochrone of given age, calculate the absolute K magnitude of a
+    star given an effective temperature, metallicity, and alpha abundance.'''
+    # This may be complicated, so I wanna take it slow.
+    masked_teffs = np.ma.masked_equal(teffs, APOGEE_NULL)
+    masked_metallicities = np.ma.masked_equal(metallicities, APOGEE_NULL)
+    masked_alphas = np.ma.masked_equal(alphas, APOGEE_NULL)
+    mag_mask = au.multi_logical_or(
+        masked_teffs.mask, masked_metallicities.mask, masked_alphas.mask)
+    model_mags = np.ma.zeros(len(masked_teffs))
+    model_mags.mask = mag_mask
+
+    # These are the alpha/Fe bins that will be fed into DSEP.
+    alpha_binedges = np.arange(-0.1, 0.9, 0.2)
+    # a/Fe < -0.1 corresponds to 1, and a/Fe > 0.7 corresponds to 6.
+    alpha_bins = np.digitize(masked_alphas, alpha_binedges)+1
+    # DSEP should crash or something if the metallicity and alpha enhancement
+    # are not compatible. In particular, high alpha enhancements are only
+    # available for low metallicity stars. I want to ensure that this will be
+    # the case before running into weird DSEP bugs.
+    assert(np.all(np.logical_or(alpha_bins < 4, np.logical_and(
+        alpha_bins >= 4, masked_metallicities <= 0.0))))
+
+    rounded_metallicities = np.around(masked_metallicities, 2)
+    for i in range(len(model_mags)):
+        if not model_mags.mask[i]:
+            interp = teff_to_mag_DSEP_interpolator(
+                mag, age=age, metallicity=rounded_metallicities[i], afe=alpha_bins[i],
+                lowT=lowTeff, highT=highTeff)
+            model_mags[i] = 10**interp(np.log10(masked_teffs[i]))
+
+def DSEP_logg(teffs, metallicities, alphas, age=2.0, lowTeff=3000,
+              highTeff=7000):
+    '''Calculate logg predicted from DSEP.
+
+    Using an isochrone of a given age, calculate the log(g) of a star given an
+    effective temperature, metallicity, and alpha abundance.'''
+    # This may be complicated, so I wanna take it slow.
+    masked_teffs = np.ma.masked_equal(teffs, APOGEE_NULL)
+    masked_metallicities = np.ma.masked_equal(metallicities, APOGEE_NULL)
+    masked_alphas = np.ma.masked_equal(alphas, APOGEE_NULL)
+    logg_mask = au.multi_logical_or(
+        masked_teffs.mask, masked_metallicities.mask, masked_alphas.mask)
+    model_logg = np.ma.zeros(len(masked_teffs))
+    model_logg.mask = logg_mask
+
+    # These are the alpha/Fe bins that will be fed into DSEP.
+    alpha_binedges = np.arange(-0.1, 0.9, 0.2)
+    # a/Fe < -0.1 corresponds to 1, and a/Fe > 0.7 corresponds to 6.
+    alpha_bins = np.digitize(masked_alphas, alpha_binedges)+1
+    # DSEP should crash or something if the metallicity and alpha enhancement
+    # are not compatible. In particular, high alpha enhancements are only
+    # available for low metallicity stars. I want to ensure that this will be
+    # the case before running into weird DSEP bugs.
+    assert(np.all(np.logical_or(alpha_bins < 4, np.logical_and(
+        alpha_bins >= 4, masked_metallicities <= 0.0))))
+
+    rounded_metallicities = np.around(masked_metallicities, 2)
+    for i in range(len(model_logg)):
+        if not model_logg.mask[i]:
+            interp = teff_to_logg_dwarf_DSEP_interpolator(
+                age=age, metallicity=rounded_metallicities[i], afe=alpha_bins[i],
+                lowT=lowTeff, highT=highTeff)
+            model_logg[i] = interp(np.log10(masked_teffs[i]))
+
+    return model_logg
 
 def teff_to_logg_dwarf_DSEP_interpolator(
     age=1.5, metallicity=0.0, bands=1, Y=1, afe=2, lowT=3000, highT=6000,
@@ -2815,91 +2820,220 @@ def triple_hr_comparison_plot(
         plot_isochrone(color_mag_nir, label="{0:.2g} Gyr".format(age))
         hr.invert_y_axis()
 
-###############################################################################
-# Reddening Routines #
-###############################################################################
+def compare_subgiant_lines():
+    '''Compare where the subgiant line occurs.
 
-reddening_coeffs = {"B": 1.337, "V": 1.000, "I": 0.479, "J": 0.282, "H": 0.190,
-                    "K": 0.114, "Ks": 0.114, "Kp": 0.9}
+    We want to verify the temperature at which this happens is the same for
+    radius and K-band absolute magnitude. If that's the case, then we can use
+    K-band absolute magnitudes to split between dwarfs and subgiants.'''
 
-# These are coefficients that are given by the IRSA dust map service.
-reddening_coeffs = {"B": 1.337, "V": 1.000, "I": 0.479, "J": 0.282, "H": 0.190,
-                    "K": 0.114, "Ks": 0.114, "Kp": 0.9}
+    oldsolmet = DSEPInterpolator(feh=0.0, age=14, minlogG=1.0)
+    oldlowmet = DSEPInterpolator(feh=-0.5, age=14, minlogG=1.0)
+    oldhighmet = DSEPInterpolator(feh=0.5, age=14, minlogG=1.0)
 
-def redden_mag(band, truemag, EB_V, Rv=3.1):
-    '''Redden the true magnitude value given E(B-V).
+    oldsolmetdata = oldsolmet._get_isochrone_data("Ks")
+    oldsolmet_teff = 10**oldsolmetdata["LogTeff"]
+    oldsolmet_radius = 10**(
+        oldsolmetdata["LogL/Lo"] - 2 * (
+            oldsolmetdata["LogTeff"] - np.log10(5778)))
+    oldsolmet_mk = oldsolmetdata["Ks"]
+
+    oldlowmetdata = oldlowmet._get_isochrone_data("Ks")
+    oldlowmet_teff = 10**oldlowmetdata["LogTeff"]
+    oldlowmet_radius = 10**(
+        oldlowmetdata["LogL/Lo"] - 2 * (
+            oldlowmetdata["LogTeff"] - np.log10(5778)))
+    oldlowmet_mk = oldlowmetdata["Ks"]
+
+    oldhighmetdata = oldhighmet._get_isochrone_data("Ks")
+    oldhighmet_teff = 10**oldhighmetdata["LogTeff"]
+    oldhighmet_radius = 10**(
+        oldhighmetdata["LogL/Lo"] - 2 * (
+            oldhighmetdata["LogTeff"] - np.log10(5778)))
+    oldhighmet_mk = oldhighmetdata["Ks"]
+
+    plt.figure()
+    plt.plot(oldsolmet_teff, oldsolmet_radius, 'k-')
+    plt.plot(oldlowmet_teff, oldlowmet_radius, 'b-')
+    plt.plot(oldhighmet_teff, oldhighmet_radius, 'r-')
+    hr.invert_x_axis()
+    plt.ylim(0, 2)
+    plt.xlabel("Teff (K)")
+    plt.ylabel("Radius (Rsun)")
+
+    plt.figure()
+    plt.plot(oldsolmet_teff, oldsolmet_mk, 'k-', label="[Fe/H]=0.0")
+    plt.plot(oldlowmet_teff, oldlowmet_mk, 'b-', label="[Fe/H]=-0.5")
+    plt.plot(oldhighmet_teff, oldhighmet_mk, 'r-', label="[Fe/H]=0.5")
+    plt.legend(loc="upper right")
+    hr.invert_x_axis()
+    plt.ylim(4, 1)
+    plt.xlabel("Teff (K)")
+    plt.ylabel("M_K")
+
+def DSEP_subgiant_point(feh, age=14, lowR=1.0, highR=1.75):
+    '''Calculate the point where stars cool down on the subgiant branch.
     
-    Uses calculated values from CCM to calculate the reddened magnitude given
-    an E(B-V) value.
-    '''
-    extinction = Rv * reddening_coeffs[band] * EB_V
-    extinctedmag = truemag + extinction
+    This function basically treats the region around Teff(R) as a quadratic and
+    solves for the maximum temperature.'''
 
-    return extinctedmag
+    isochrone = DSEPInterpolator(feh=feh, age=age, minlogG=1.0)
+    isodata = isochrone._get_isochrone_data("Ks")
+    iso_teff = 10**isodata["LogTeff"]
+    iso_radius = 10**(
+        isodata["LogL/Lo"] - 2 * (
+            isodata["LogTeff"] - np.log10(5778)))
+    bracket_indices = np.logical_and(iso_radius > lowR, iso_radius < highR)
 
-def deredden_mag(band, extinctedmag, EB_V, Rv=3.1):
-    '''Deredden an observed magnitude given E(B-V).
+    coeffs = np.polyfit(
+        iso_radius[bracket_indices], iso_teff[bracket_indices], 2)
+    pred_poly = np.poly1d(coeffs)
+    rad_grid = np.linspace(lowR, highR, 100)
+    teff_pred = pred_poly(rad_grid)
 
-    Uses calculated values from CCM to obtain the dereddened magnitude given an
-    E(B-V) value.
-    '''
-    extinction = redden_mag(band, 0, EB_V, Rv=Rv)
-    truemag = extinctedmag - extinction
+    min_rad = -coeffs[1]/2/coeffs[0]
+    min_teff = pred_poly(min_rad)
 
-    return truemag
+    return (min_rad, min_teff)
 
-def redden_color(color, truecolor, EB_V, Rv=3.1):
-    '''Redden the true color given E(B-V).
+def DSEP_subgiant_point_mk(feh, age=14, lowK=2.6, highK=3.2):
+    '''Calculate the point at which stars cool down in MK space.
 
-    Use calculated values from CCM to calculate the reddened color given an
-    E(B-V) value.
-    '''
-    blueband, redband = split_color(color)
-    blue_extinction = redden_mag(blueband, 0, EB_V, Rv=Rv)
-    red_extinction = redden_mag(redband, 0, EB_V, Rv=Rv)
-    reddened_color = truecolor + (blue_extinction - red_extinction)
+    This function basically treats the region around Teff(R) as a quadratic and
+    solves for the maximum temperature.'''
 
-    return reddened_color
+    isochrone = DSEPInterpolator(feh=feh, age=age, minlogG=1.0)
+    isodata = isochrone._get_isochrone_data("Ks")
+    iso_teff = 10**isodata["LogTeff"]
+    iso_MK = isodata["Ks"]
+    bracket_indices = np.logical_and(iso_MK > lowK, iso_MK < highK)
 
-def deredden_color(color, extincted_color, EB_V, Rv=3.1):
-    '''Deredden the observed colro given E(B-V).
+    coeffs = np.polyfit(
+        iso_MK[bracket_indices], iso_teff[bracket_indices], 2)
+    pred_poly = np.poly1d(coeffs)
 
-    Use calculated values from CCM to deredden a cover given an E(B-V) value.
-    '''
-    reddening_coeff = redden_color(color, 0, EB_V, Rv=Rv)
-    dereddened_color = extincted_color - reddening_coeff
+    min_mk = -coeffs[1]/2/coeffs[0]
+    min_teff = pred_poly(min_mk)
 
-    return dereddened_color
+    return (min_mk, min_teff)
+
+    # These functions are useful to visualizing the area where the polynomial
+    # interpolation occurs.
+    MK_grid = np.linspace(lowK, highK, 100)
+    teff_pred = pred_poly(MK_grid)
+    plt.plot(iso_MK[bracket_indices], iso_teff[bracket_indices], "k-")
+    plt.plot(MK_grid, teff_pred, 'r-')
+    plt.plot(min_mk, min_teff, 'g*')
+
+def DSEP_subgiant_point_metallicity(lowfeh=-0.5, highfeh=0.5, age=14):
+    '''Plot how the subgiant point changes with metallicity.'''
+    fehs = np.arange(lowfeh, highfeh+0.1, 0.1)
+    radmins = np.zeros(len(fehs))
+    teffradmins = np.zeros(len(fehs))
+    mkmins = np.zeros(len(fehs))
+    teffmkmins = np.zeros(len(fehs))
+    for i, feh in enumerate(fehs):
+        min_rad, min_teff_rad = DSEP_subgiant_point(feh, age=age)
+        min_mk, min_teff_mk = DSEP_subgiant_point_minimum(feh, age=age)
+        radmins[i] = min_rad
+        teffradmins[i] = min_teff_rad
+        mkmins[i] = min_mk
+        teffmkmins[i] = min_teff_mk
+
+    plt.figure()
+    plt.plot(fehs, teffradmins, 'k-', label="Radius")
+    plt.plot(fehs, teffmkmins, 'r-', label=r"$M_K$")
+    plt.xlabel("[Fe/H]")
+    plt.ylabel("Maximum Teff reached")
+
+    plt.figure()
+    meanmk = np.mean(mkmins)
+    plt.plot(fehs, mkmins, 'k-')
+    plt.plot([fehs[0], fehs[-1]], [meanmk, meanmk], 'k--')
+    plt.xlabel("[Fe/H]")
+    plt.ylabel("MK at maximum Teff")
+
+def DSEP_subgiant_point_minimum(feh, age=14, lowK=2.6, highK=3.2):
+    '''Calculate the point at which stars cool down in MK space.
+
+    This function basically just picks the maximum Teff on the grid. I think
+    the grid spacing is fine enough that the uncertainty from doing this is
+    lower than deviations from quadraticity.'''
+
+    isochrone = DSEPInterpolator(feh=feh, age=age, minlogG=1.0)
+    isodata = isochrone._get_isochrone_data("Ks")
+    iso_teff = 10**isodata["LogTeff"]
+    iso_MK = isodata["Ks"]
+    bracket_indices = np.logical_and(iso_MK > lowK, iso_MK < highK)
+
+    max_index = np.argmax(iso_teff)
+
+    max_mk = iso_MK[max_index]
+    max_teff = iso_teff[max_index]
+
+    return (max_mk, max_teff)
+
+def compare_DSEP_Casagrande_colors(color, met):
+    '''Plot Teff-color relation predicted by Casagrande and DSEP.'''
+    teffs = np.linspace(4300, 5500, 100)
+
+    cas_convert = {"V-I": "V-IC", "V-Ks": "V-KS", "V-K": "V-KS"}
+
+    cas_color = cas_convert.get(color, color)
+    cas_col = Casagrande_inverted_color(cas_color, teffs, met)
+    cas_scatter = Casagrande_scatter(cas_color)
+
+    iso = dsep.DSEPInterpolator(5.5, met)
+    iso_old = dsep.DSEPInterpolator(8.0, met)
+    iso_young = dsep.DSEPInterpolator(3.0, met)
+    dsep_col = iso.teff_to_color(teffs, color)
+    old_col = iso_old.teff_to_color(teffs, color)
+    young_col = iso_young.teff_to_color(teffs, color)
+
+    plt.plot(teffs, cas_col, color=bc.blue, marker="", label="Casagrande",
+             ls="-")
+    plt.plot(teffs+cas_scatter, cas_col, color=bc.blue, marker="", ls="--")
+    plt.plot(teffs-cas_scatter, cas_col, color=bc.blue, marker="", ls="--")
+    plt.plot(teffs, dsep_col, color=bc.red, marker="", label="DSEP", ls="-")
+    plt.plot(teffs, old_col, color=bc.red, marker="", ls="--")
+    plt.plot(teffs, young_col, color=bc.red, marker="", ls="--")
+    hr.invert_x_axis()
+    plt.ylabel(color)
+    plt.xlabel("Teff (K)")
+    plt.legend(loc="upper left")
+    plt.title("[Fe/H] = {0:.1f}".format(met))
+
+###############################################################################
+# Convert between absolute and apparent magnitudes #
+###############################################################################
+
+def calc_abs_magnitude(appmag, dm, extinction):
+    '''Absolute magnitude given apparent magnitude, distance modulus, and extinction.
+
+    Applies the usual relation M = m - DM - A to calculate absolute
+    magnitude. All quantities should be given in terms of magnitudes.'''
+
+    absmag = appmag - dm - extinction
+    return absmag
+
+def calc_abs_magnitude_err(apperr_same, dm_err_opp, ext_err_opp):
+    '''Calculate the uncertainty in absolute magnitude.
+
+    This function calculates the absolute magnitude error from the composite
+    apparent magnitude error, distance modulus error, and extinction error.
+    Note that in the case of asymmetric errors, the apparent magnitude needs to
+    be in the same direction as the absolute magnitude; the distance modulus
+    should be in the opposite direction, and the extinction should be in the
+    opposite direction. An example is:
+
+    M_up = m_up, dm_down, ext_down'''
+
+    abserr = np.sqrt(apperr_same**2 + dm_err_opp**2 + ext_err_opp**2)
+    return abserr
+
 ###############################################################################
 # Miscellaneous Routines
 ###############################################################################
-
-def sign_switch(val, pos_sym, neg_sym, zero=0):
-    '''Return symbol based on sign of val.
-
-    This function will return pos_sym if val is positive, neg_sym if val is
-    negative. If val is zero, then the behavior depends on the zero flag. If
-    zero is 0, then an empty string is returned. If zero is positive, then the
-    positive symbol will be returned. If zero is negative, then the negative
-    symbol will be returned.
-    '''
-    if val > 0:
-        sym = pos_sym
-    elif val < 0:
-        sym = neg_sym
-    elif val == 0:
-        if zero > 0:
-            sym = pos_sym
-        elif zero < 0:
-            sym = pos_sym
-        elif zero == 0:
-            sym = ""
-        else:
-            raise ValueError("Zero argument should be a number.")
-    else:
-        ValueError("Value to needs to be a number.")
-
-    return sym
 
 def sum_binary_color(color1, color2, fluxratio):
     '''Calculate summed color from components.
@@ -2921,7 +3055,43 @@ def sum_binary_mag(mag1, mag2):
     order to make the combined magnitude in that band.'''
     summed_mag = mag1 - 2.5 * np.log10(1 + 10**(-0.4 * (mag2 - mag1)))
     return summed_mag
+
+def binary_luminosity_ratio_evolution():
+    '''Plot the evolution of the luminosity ratio for a high-mass q=0.95 binary
+    and a low-mass q=0.95 binary.
     
+    This function should hopefully explain why lots of binary contamination
+    occurs in the cool dwarf regime, but not in the asteroseismic dwarf regime.'''
+    ages = np.concatenate([np.arange(1, 5, 0.25), np.arange(5, 10, 0.5)])
+    primary_masses = np.array([0.9, 1.2])
+    massratio = 0.95
+    lowmass_absmags = np.zeros(len(ages))
+    highmass_absmags = np.zeros(len(ages))
+
+    for i, age in enumerate(ages):
+        interp = mass_to_band_DSEP_interpolator(
+            "H", age=age, minlogg=3.5, highT=7000)
+
+        lowprimary = interp(primary_masses[0])
+        lowsecondary = interp(primary_masses[0]*massratio)
+        lowmass_absmags[i] = lowprimary - lowsecondary
+
+        try:
+            highprimary = interp(primary_masses[1])
+            highsecondary = interp(primary_masses[1]*massratio)
+        except OutOfBoundsError:
+            highmass_absmags[i] = np.nan
+        else: 
+            highmass_absmags[i] = highprimary - highsecondary
+        
+    plt.plot(ages, 10**(-highmass_absmags/2.5), 'b-', label="M=1.2")
+    plt.plot(ages, 10**(-lowmass_absmags/2.5), 'r-', label="M=0.8")
+    plt.ylabel("L1/L2")
+    plt.xlabel("Age (Gyr)")
+    plt.title("Differential luminosity for q={0:0.02f} components".format(
+        massratio))
+    plt.legend(loc="upper right")
+
 if __name__ == "__main__":
 
     Bouy_Colors_plot_excesses()
