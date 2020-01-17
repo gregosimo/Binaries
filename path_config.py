@@ -2,7 +2,7 @@ from pathlib import Path
 import os
 
 HOME_DIR = Path.home()
-HEAD_DIR = Path(os.environ["THESIS"])
+HEAD_DIR = Path(os.environ["RESEARCH"])
 
 CASAGRANDE_TABLE_PATH = HEAD_DIR
 CASAGRANDE_TABLE_4 = CASAGRANDE_TABLE_PATH / "Casagrande_10_Table_4.txt" 
