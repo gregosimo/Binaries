@@ -23,7 +23,9 @@ from astropy.convolution import convolve, Gaussian1DKernel
 from bs4 import BeautifulSoup
 import requests
 # from apogee.tools import bitmask
-import pyrallaxes
+# Pyrallaxes is too annoying to actually import easily. And I don't think I 
+# actually use it. So I am getting rid of it.
+#import pyrallaxes
 
 
 import astropy_util as au
