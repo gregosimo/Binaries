@@ -93,6 +93,36 @@ def read_Pinsonneault_2012_catalog(pinpath=paths.PINSONNEAULT_CORRECTIONS):
     au.set_numeric_fill_values(pincat, -9999)
     return pincat
 
+def read_Tayar_2016_catalog(tayarpath=paths.TAYAR_SAMPLE):
+    '''Read the giant sample from Tayar et al. 2016.'''
+    desired_cols = [
+        "KIC", "logg", "e_logg", "Teff", "e_Teff", "f_vsini", "vsini",
+        "e_vsini"]
+    tayarcat = Table.read(
+        str(tayarpath), format="ascii.cds", include_names=desired_cols)
+    return tayarcat
+
+def Tayar_updated_APOGEE(tayarpath=paths.TAYAR_SAMPLE,
+                         gaia=paths.GAIA_BERGER_OVERLAP,
+                         apopath=paths.APOGEE_DWARF_PATH):
+    '''Combined the Tayar et al (2016) catalog with updated parameters.
+
+    Match the Tayar et al (2016) catalog to the updated APOGEE and Gaia
+    catalogs.'''
+    tayar = read_Tayar_2016_catalog(tayarpath)
+    tayar.rename_column("logg", "Tayar logg")
+    tayar.rename_column("e_logg", "Tayar e_logg")
+    tayar.rename_column("Teff", "Tayar Teff")
+    tayar.rename_column("e_Teff", "Tayar e_Teff")
+    tayar.rename_column("vsini", "Tayar vsini")
+    tayar.rename_column("e_vsini", "Tayar e_vsini")
+
+    apocat = dr14_with_KIC_stelparms()
+    combocat = au.join_by_id(tayar, apocat, "KIC", "kepid")
+    del(combocat["KIC"])
+
+    return combocat
+
 def read_van_Saders_file(vspath=paths.VAN_SADERS_SDSS):
     '''Read the APOGEE dwarf targets from Jen's catalog.'''
     # I don't use these columns, or know what they are, and they are 
@@ -711,6 +741,9 @@ def read_Raghavan_companions(filepath=paths.RAGHAVAN_TABLE_18):
 # individual catalogs put together. Caching these instead of the full catalogs 
 # will hopefully lead to more efficient memory use.
 
+# This function for some reason breaks if you load from the shortcut file. If
+# you run into a "KeyError: 'KIC'" exception, just unlink the file and re-link
+# it.
 @au.shortcut_file(paths.SHORTCUT_MCQUILLAN_STELLPARM)
 def mcquillan_with_stelparms(
     mcq_path=paths.MCQUILLAN_CATALOG, kic_path=paths.KIC_CATALOG,
@@ -723,12 +756,11 @@ def mcquillan_with_stelparms(
     parameters.
     '''
     mcq = read_McQuillan_catalog(mcq_path)
+    trim_McQuillan_catalog(mcq)
     stellcat = stelparms_triple_KIC(origpath, pinpath, kic_path)
-    del(stellcat["kic"])
-    del(stellcat["KIC"])
     mcquillancat = au.join_by_id(
         mcq, stellcat, "KIC", "kepid", join_type="left")
-    trim_McQuillan_catalog(mcquillancat)
+    del(mcquillancat["KIC"])
     return mcquillancat
 
 @au.shortcut_file(paths.SHORTCUT_MCQUILLAN_NONDET_STELLPARM)
@@ -741,16 +773,11 @@ def mcquillan_nondetections_with_stelparms(
     parameters.
     '''
     mcq = read_McQuillan_nondetections(mcq_path)
+    trim_McQuillan_catalog(mcq)
     stellcat = stelparms_triple_KIC()
-    del(stellcat["kic"])
     del(stellcat["KIC"])
     mcquillancat = au.join_by_id(
         mcq, stellcat, "KIC", "kepid", join_type="left")
-    mcquillancat["teff"][mcquillancat["teff"].mask] = mcquillancat["Teff"][
-        mcquillancat["teff"].mask]
-    mcquillancat["logg"][mcquillancat["logg"].mask] = mcquillancat["log_g_"][
-        mcquillancat["logg"].mask]
-    trim_McQuillan_catalog(mcquillancat)
     return mcquillancat
 
 @au.shortcut_file(paths.SHORTCUT_MCQUILLAN_FLICKER)
@@ -947,9 +974,11 @@ def stelparms_triple_KIC(
     whole KIC to use the best available data and fit the parameters as well as
     uncertainties using DSEP isochrones.'''
     hubercat = stelparms_with_original_KIC(huberpath)
+    del(hubercat["KIC"])
     pinsonneaultcat = read_Pinsonneault_2012_catalog(pinpath)
     joinedcat = au.join_by_id(
         hubercat, pinsonneaultcat, "kepid", "KIC", join_type="left")
+    del(joinedcat["KIC"])
     return joinedcat
 
 def ebs_with_stelparms(ebpath=paths.EB_PATH, kic_path=paths.KIC_CATALOG,
