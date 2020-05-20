@@ -8,9 +8,9 @@ CASAGRANDE_TABLE_PATH = HEAD_DIR
 CASAGRANDE_TABLE_4 = CASAGRANDE_TABLE_PATH / "Casagrande_10_Table_4.txt" 
 CASAGRANDE_TABLE_5 = CASAGRANDE_TABLE_PATH / "Casagrande_10_Table_5.txt"
 
-DSEP_OUTPUT = HEAD_DIR / "DSEP"
+DSEP_OUTPUT = HEAD_DIR / "DSEP_out"
 
-DSEP_PATH = HOME_DIR / "DSep"
+DSEP_PATH = HEAD_DIR / "DSep"
 DSEP_ISOCHRONES= DSEP_PATH / "isochrones"
 DSEP_TRACKS = DSEP_PATH / "Tracks"
 DSEP_INTERPOLATOR_EXECUTABLE = DSEP_PATH / "iso_interp_feh"
@@ -146,6 +146,8 @@ GAIA_KEPLER_INPUT = HEAD_DIR / "Gaia_Kepler_Input.txt"
 GAIA_DR2_KEPLER_OVERLAP = HEAD_DIR / "Gaia_DR2_Kepler.csv"
 GAIA_BERGER_OVERLAP = HEAD_DIR / "gaia_berger.vo"
 UCAC_KEPLER_PATH = HEAD_DIR / "UCAC_Kepler.csv"
+
+TAYAR_SAMPLE = HEAD_DIR / "apj514696t1_mrt.webarchive"
 
 # SHORTCUT PATHS
 # These are for subsets of table that take a really long time to generate.
