@@ -149,7 +149,17 @@ UCAC_KEPLER_PATH = HEAD_DIR / "UCAC_Kepler.csv"
 
 TAYAR_SAMPLE = HEAD_DIR / "apj514696t1_mrt.webarchive"
 
-MDM_OBSERVING_TARGETS 
+
+# Modspec Run
+MODSPEC_FOLDER = HEAD_DIR / "Modspec"
+CALIB_FOLDER = MODSPEC_FOLDER / "Modspec_Calibration"
+MDM_DIR = HEAD_DIR / "Don_May_MDM_run"
+
+# RV Standards
+RV_STANDARD_SIMBAD = MDM_DIR / "Standard_SIMBAD.txt"
+RV_STANDARD_SOURCES = HEAD_DIR / "SIMBAD_Standard_References.txt"
+LCES_STANDARD_LIST = HEAD_DIR / "ajaa66cat1_mrt.txt"
+RV_STANDARD_MATRIX_FOLDER = MDM_DIR / "Standard_RVs"
 
 # SHORTCUT PATHS
 # These are for subsets of table that take a really long time to generate.

@@ -1,12 +1,15 @@
 import random
+import os
 
 import numpy as np
 import numpy.core.defchararray as npstr
 import astropy_util as au
 from astropy.coordinates import SkyCoord
 from astropy.table import Table
+from astropy.io.fits import getval
 import astropy.units as u
 import matplotlib.pyplot as plt
+from matplotlib.colors import Normalize
 
 import catalog
 import read_catalog as catin
@@ -15,6 +18,7 @@ import path_config as paths
 import hrplots as hr
 import eclipsing_binaries as ebs
 
+obsnights = [1, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14]
 
 @au.shortcut_file(paths.SHORTCUT_MDM_NOMAGCUT)
 def select_targets_before_magcut():
@@ -496,3 +500,373 @@ def select_RV_nonvariable_targets():
 
     return mcq_observing
 
+def observed_standards(
+        datafolder=paths.CALIB_FOLDER, 
+        filetemplate="Night{0:d}_Standards_Calib.txt"):
+    '''Read in a set of observed standards.
+
+    Go through the files for each night and pick out the names of standards and
+    insert them into a set. The top data folder should be specified in data
+    folder. Under datafolder, should be a file specified by
+    filetemplate.format(n) which lists the standards observed for the night n.
+    '''
+    standard_names = set()
+    for n in obsnights:
+        standard_list = filetemplate.format(n)
+        with (datafolder / standard_list).open() as standards:
+            for standard in standards:
+                stdname = getval(str(datafolder / standard)[:-1], "OBJECT")
+                standard_names.add(stdname)
+    return standard_names
+
+def observed_standard_table(
+        datafolder=paths.CALIB_FOLDER,
+        filetemplate="Night{0:d}_Standards_Calib.txt"):
+    '''Get the SIMBAD table for objects which were specifically observed.'''
+    obs_standards = observed_standards(datafolder, filetemplate)
+    standard_table = catin.read_RV_SIMBAD()
+
+    obs_standard_table = au.extract_subtable_from_column(
+        standard_table, "typed ident", obs_standards)
+    assert obs_standards.issubset(standard_table["typed ident"])
+    return obs_standard_table
+
+def compact_standard(standname):
+    '''Compactify an MDM filename.'''
+    compact = os.path.splitext(os.path.splitext(
+        os.path.basename(standname))[0])[0].replace(
+            ".","").replace( "night", "n").replace("NIGHT", "N")
+    return compact
+
+# Maybe break this up into reading one night. And then use that to read several
+# nights.
+
+def assemble_rv_standard_crosscor_matrix(
+        night, datafolder=paths.CALIB_FOLDER,
+        standardtemplate="Night{0}_Standards_Linear.txt",
+        crosscortemplate="Night{0}_Standards_Cor_{1}.txt"):
+    '''Assemble the RV Standard cross-correlation from FXCor output in a night.
+
+    For the given night, go through all of the crosscortemplate files for each
+    standard and insert those into a matrix.'''
+    standardfile = standardtemplate.format(night)
+    fullvalues = []
+    with (datafolder / standardfile).open() as refstands:
+        for refstand in refstands:
+            crosscorfile = crosscortemplate.format(
+                night, compact_standard(refstand[:-1].upper()))
+            refvalues = []
+            with (datafolder / crosscorfile).open() as cor_measurements:
+                for cor in cor_measurements:
+                    firstl = cor.rindex("l")
+                    secondl = cor[:firstl].rindex("l")
+                    targnum = cor[secondl+1:secondl+4]
+                    tempnum = cor[firstl+1:firstl+4]
+                    if targnum != tempnum:
+                        vel_table = Table.read(
+                        str(datafolder / (cor[:-1] + ".txt")),
+                            format="ascii.commented_header", names=[
+                                "OBJECT", "IMAGE", "REF", "HJD", "AP",
+                                "CODES", "SHIFT", "HGHT", "FWHM", "TDR",
+                                "VOBS", "VREL", "VHELIO", "VERR"])
+                        refvalues.append(vel_table["VHELIO"][-1])
+                    else:
+                        refvalues.append(np.nan)
+            fullvalues.append(refvalues)
+    full_array = np.array(fullvalues)
+    return full_array
+
+
+
+
+def transfer_rv_standard_crosscor_to_matrix(
+        datafolder=paths.CALIB_FOLDER,
+        standardtemplate="Night{0}_Standards_Linear.txt",
+        crosscortemplate="Night{0}_Standards_Cor_{1}.txt",
+        outputfolder=paths.RV_STANDARD_MATRIX_FOLDER,
+        outputfiletemplate="Night{0}_Standards.npy"):
+    '''Write the matrix of standard radial velocities to files.
+
+    The RV standard matrix will be generated from reading the RVs from the
+    files under crosscortemplate for every standard and every night. The
+    standards observed in a night should be specified in standardtemplate. The
+    template filenames are assumed to be stored relative to datafolder.
+
+    The matrix of radial velocity standard measurements will be written to
+    files under outputfolder. The files will have the form of
+    outputfiletemplate, but will be formatted to contain the night number.
+    '''
+    for n in obsnights:
+        matrix = assemble_rv_standard_crosscor_matrix(
+            n, datafolder, standardtemplate, crosscortemplate)
+        np.save(str(outputfolder / outputfiletemplate.format(n)), matrix)
+
+def read_rv_standard_crosscor_matrix(
+        night, matrixfolder=paths.RV_STANDARD_MATRIX_FOLDER,
+        filetemplate="Night{0}_Standards.npy"):
+    '''Read the matrix of standard radial velocities for a given night.
+
+    Load the numpy matrix corresponding to radial velocity standard
+    measurements for the given night.'''
+    return np.load(str(matrixfolder / filetemplate.format(night)))
+
+def read_full_rv_standard_matrix(
+        matrixfolder=paths.RV_STANDARD_MATRIX_FOLDER,
+        filetemplate="Night{0}_Standards.npy"):
+    '''Read the full standard matrix for a given night.
+    
+    The guide to correctly accessing the various parts of the matrix are that
+    horizontal rows ([0,:]) are measurements of all objects with a given 
+    template. And vertical columns ([:, 0]) are measurements of a given object
+    with all of the templates.'''
+    # Each key should be the night of observation while each value should be
+    # a square matrix that corresponds to the measured RV of standard stars
+    # with respect to each other. Note that this means that diagonal elements
+    # should be undefined.
+    standard_matrices = {}
+    for n in obsnights:
+        standard_matrices[n] = read_rv_standard_crosscor_matrix(
+            n, matrixfolder, filetemplate)
+    return standard_matrices
+
+def plot_raw_RV(true_rvs, rv_matrix, max_rv=30, min_rv=-140):
+    '''Plot the measured RVs against the true RVs for each element.
+
+    The figure will also color-code points by the RV of the template. The
+    maximum RV to be colored should be given as max_rv while the minimum RV to
+    be colored should be min_rv.'''
+    f = plt.figure()
+    ax = f.add_subplot(111)
+    colormap = plt.get_cmap("winter")
+
+    for i in len(true_rvs):
+        normalized_color = (true_rvs[i] - min_rv) / (max_rv-min_rv)
+        ax.plot(true_rvs, rv_matrix[i,:], color=colormap(normalized_color),
+                linestyle="none")
+
+def transfer_rv_standard_names(
+        datafolder=paths.CALIB_FOLDER,
+        standardtemplate="Night{0}_Standards_Linear.txt",
+        outputfolder=paths.RV_STANDARD_MATRIX_FOLDER,
+        outputfiletemplate="Night{0}_Standard_Names.txt"):
+    '''Transfer a list of the standard names for each night.
+
+    This will essentially be a text file containing the names for standards
+    observed during that night. The position of the name corresponds to the
+    index of that standard in the RV table.'''
+    for n in obsnights:
+        outputpath = outputfolder / outputfiletemplate.format(n)
+        with outputpath.open("w") as outputfile:
+            standardpath = datafolder / standardtemplate.format(n)
+            with standardpath.open() as standards:
+                for standardfile in standards:
+                    standname = getval(
+                        str(datafolder / standardfile[:-1]), "OBJECT")
+                    outputfile.write(standname+"\n")
+
+def read_night_standard_names(
+        night, rvfolder=paths.RV_STANDARD_MATRIX_FOLDER,
+        namefiletemplate="Night{0}_Standard_Names.txt"):
+    '''Read the file that has standard names in them.
+
+    The names will be read into a numpy array.'''
+    with (rvfolder / namefiletemplate.format(night)).open() as namefile:
+        names = np.array(namefile.read().splitlines(), dtype="<U9")
+    return names
+
+def plot_standard_radial_velocities(n, min_jk=0.23, max_jk=0.71):
+    '''Plot radial velocity velocities against the true value.
+    
+    The measured RVs will be plotted against the catalog RVs, color-coded by
+    J-K color.'''
+    standnames = read_night_standard_names(n)
+    standardrvs = read_rv_standard_crosscor_matrix(n)
+    nighttable = custom_standard_subtable(standnames)
+
+    true_rvs = nighttable["radvel"]
+    jkcolor = nighttable["Mag J"] - nighttable["Mag K"]
+    cmap = plt.get_cmap("cool")
+    mplnorm = Normalize(vmin=min_jk, vmax=max_jk)
+    normed_jks = mplnorm(jkcolor)
+    jkarray = normed_jks
+
+    for i in range(len(standnames)):
+        plt.plot(true_rvs, standardrvs[:,i], color=cmap(jkarray[i]), marker="o",
+                 ls="None")
+
+    plt.plot([-60, 30], [-60, 30], 'k-')
+    sm=plt.cm.ScalarMappable(norm=mplnorm, cmap=cmap)
+    sm.set_array(np.array([0]))
+    cbar = plt.colorbar(sm)
+    cbar.set_label("J-K")
+
+    plt.xlabel("Catalog RV")
+    plt.ylabel("Measured RV")
+
+def night_standard_subtable(n):
+    '''Get the standard table for only standards observed on a given night.'''
+    obs_stand = read_night_standard_names(n)
+    subtable = custom_standard_subtable(obs_stand)
+    return subtable
+
+def custom_standard_subtable(standards):
+    '''Get a subtable for given standards.
+    
+    This function returns a subtable in the order that the list of standards
+    were given.'''
+    standard_table = catin.read_RV_SIMBAD()
+    rows = []
+    for standname in standards:
+        standrow = np.argwhere(standard_table["typed ident"] == standname)
+        assert standrow.shape == (1, 1)
+        rows.append(standard_table[standrow[0][0]])
+    subtable = Table(rows=rows, names=standard_table.colnames)
+    assert np.all(subtable["typed ident"] == standards)
+
+    return subtable
+
+# Calibrating Radial Velocities
+def pick_median_JK(n):
+    '''For a given night, pick the index with the median J-K.'''
+    subtable = night_standard_subtable(n)
+    subtable["J-K"] = subtable["Mag J"] - subtable["Mag K"]
+    subtable.sort("J-K")
+    if len(subtable) % 2 == 1:
+        return len(subtable) // 2
+    else:
+        return len(subtable) / 2
+
+def pick_night_calibrator(
+        n, calibfunc=pick_median_JK, rvfolder=paths.RV_STANDARD_MATRIX_FOLDER,
+        namefiletemplate="Night{0}_Standard_Names.txt"):
+    '''Return index of the calibrator according to the calibration routine.
+
+    Read the names of the standards observed at a given night, and return the
+    index corresponding to the calibration exposure for that night. The
+    function calibfunc should be the one that takes a list of standard names,
+    and then returns the name to be calibrated.'''
+    if n == 7:
+        return pick_night_calibrator(6)
+    calibname = calibfunc(n)
+    return calibname
+
+def standard_rv_matrix_index_corrections(matrix, calibindex, cov=False):
+    '''Return the fits between rows of the matrix and the calibration row.
+
+    Return the output of the fitting routine to calculate the offset from the
+    calibration row. For a linear fit, the zeroth column is the slope while the
+    first column is the y-intercept.
+
+    If desired, a covariance matrix will also be returned as part of a tuple. 
+    '''
+    fitlist = []
+    assert matrix.shape[0] == matrix.shape[1]
+    calibmask = np.isfinite(matrix[calibindex, :])
+    for i in range(matrix.shape[0]):
+        rowmask = np.logical_and(np.isfinite(matrix[i, :]), calibmask)
+        linefit = np.polyfit(
+            matrix[calibindex,:][rowmask], matrix[i,:][rowmask], 1, cov=cov)
+        fitlist.append(linefit)
+    return np.transpose(np.vstack(fitlist))
+
+
+def calibrate_standard_rv_matrix_to_index(matrix, calibindex):
+    '''Calibrate the RV standards to be on the same scale as the index.
+
+    Perform a fit between all of the rows of the matrix and the row lying at
+    the index of the matrix. This function returns a corrected RV matrix will
+    all of the rows calibrated to be on the same scale as the calibration row.
+    '''
+    linefit = standard_rv_matrix_index_corrections(
+        matrix, calibindex, cov=False)
+    self_calib = matrix - linefit[1,:][:,np.newaxis]
+    return self_calib
+
+def self_calibrated_rv_matrix_corrections(matrix, truervs):
+    '''Put the internally-calibrated RV matrix on a true system.
+
+    Each row in the matrix should lie on the same relation. This function will
+    use all of the datapoints to calibrate the rvs to be on the true outside
+    relation.'''
+    assert matrix.shape[0] == matrix.shape[1]
+    assert matrix.shape[0] == truervs.shape[0]
+    matrix_nodiags = matrix[np.logical_not(np.identity(matrix.shape[0]))]
+    rv_nodiags = np.broadcast_to(truervs, (len(truervs), len(truervs)))[
+        np.logical_not(np.identity(len(truervs)))]
+
+    fullfit = np.polyfit(rv_nodiags.flatten(), matrix_nodiags.flatten(), 1)
+    return fullfit
+
+def standard_rv_matrix_full_correction(matrix, rvvalues, calibindex):
+    '''Correction for bringing calibindex templates onto calibrated RV system.
+
+    This function will return an array corresponding to the fit between the
+    true RVs and measured RVs based on the templates. The y-intercept (index 1)
+    should be used to bring objects with RVs measured using the template at
+    calibindex onto the physical RV system.
+    '''
+    self_calib = calibrate_standard_rv_matrix_to_index(matrix, calibindex)
+
+    fullfit = self_calibrated_rv_matrix_corrections(self_calib, rvvalues)
+    return fullfit
+    
+def write_RV_template_correction_table(
+        rvfolder=paths.RV_STANDARD_MATRIX_FOLDER, 
+        outputfile="Calibration_Table.txt"):
+    '''Write a table which contains the template and correction for each night.
+
+    This table will be used as the input for actually calibrating the Kepler
+    targets so that they are all on the same RV system.'''
+    corrections= []
+    names = []
+    for n in obsnights:
+        if n == 7:
+            corrections.append(corrections[-1])
+            names.append(names[-1])
+        else:
+            standnames = read_night_standard_names(n)
+            standinfo = custom_standard_subtable(standnames)
+            standmatrix = read_rv_standard_crosscor_matrix(n)
+            nightrvs = standinfo["radvel"]
+
+            calib_index = pick_night_calibrator(n)
+            names.append(standnames[calib_index])
+            cor = standard_rv_matrix_full_correction(
+                standmatrix, nightrvs, calib_index)
+            corrections.append(cor[1])
+
+    calibtable = Table([obsnights, names, corrections], names=(
+        "Night", "Template", "Correction"))
+    calibtable.write(str(rvfolder / outputfile), format="ascii.fixed_width",
+                     formats={"Correction": ".2f"})
+
+def read_RV_template_correction_table(
+        rvfolder=paths.RV_STANDARD_MATRIX_FOLDER,
+        outputfile="Calibration_Table.txt"):
+    '''Read in the table with template and corrections for each night.
+
+    This table is useful as input for actually calibrating the Kepler targets
+    so that they are all on the same RV system.'''
+    cortable = Table.read(str(rvfolder / outputfile), format="ascii.fixed_width")
+    return cortable
+
+def plot_corrected_standards(n):
+    '''Plot measured RVs against catalog RVs.'''
+    standnames = read_night_standard_names(n)
+    standinfo = custom_standard_subtable(standnames)
+    rawrv = read_rv_standard_crosscor_matrix(n)
+    calib_index = pick_night_calibrator(n)
+    corrv = calibrate_standard_rv_matrix_to_index(rawrv, calib_index)
+
+    cortable = read_RV_template_correction_table()
+    corvalue = cortable["Correction"][cortable["Night"] == n]
+
+    calibrated_rv = corrv - corvalue
+
+    nightrvs = standinfo["radvel"]
+    newfit = self_calibrated_rv_matrix_corrections(calibrated_rv, nightrvs)
+
+    residuals = calibrated_rv - newfit[1]
+
+    plt.plot(nightrvs, residuals, 'k.')
+    plt.plot(nightrvs, newfit[0]*nightrvs, 'k-')
