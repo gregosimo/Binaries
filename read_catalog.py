@@ -727,7 +727,7 @@ def read_Raghavan_companions(filepath=paths.RAGHAVAN_TABLE_18):
 # MDM Observing Files #
 #######################
 
-def mdm_observing_targets(mdm_path=paths.MDM_OBSERVING_TARGETS):
+def mdm_observing_targets(mdm_path=paths.MDM_DIR):
     '''Read in all of the Kepler Targets that were observed.'''
 
     objlist = Table.read(
@@ -741,6 +741,11 @@ def mdm_observing_targets(mdm_path=paths.MDM_OBSERVING_TARGETS):
 # These functions get catalogs which I use often, and are smaller than the
 # individual catalogs put together. Caching these instead of the full catalogs 
 # will hopefully lead to more efficient memory use.
+
+# Note that when the Berger catalog is published
+# (https://arxiv.org/abs/2001.07737), we probably won't need any of these other
+# Kepler tables. The Berger catalog contains Teff, metallicity, parallax, and
+# K-band magnitude.
 
 # This function for some reason breaks if you load from the shortcut file. If
 # you run into a "KeyError: 'KIC'" exception, just unlink the file and re-link
@@ -758,7 +763,9 @@ def mcquillan_with_stelparms(
     '''
     mcq = read_McQuillan_catalog(mcq_path)
     trim_McQuillan_catalog(mcq)
-    stellcat = stelparms_triple_KIC(origpath, pinpath, kic_path)
+    # IF you end up needing the old file, use 
+    # stellcat = stelparms_triple_KIC()
+    stellcat = stelparms_with_Gaia(kic_path, gaia_path)
     mcquillancat = au.join_by_id(
         mcq, stellcat, "KIC", "kepid", join_type="left")
     del(mcquillancat["KIC"])
@@ -775,10 +782,12 @@ def mcquillan_nondetections_with_stelparms(
     '''
     mcq = read_McQuillan_nondetections(mcq_path)
     trim_McQuillan_catalog(mcq)
-    stellcat = stelparms_triple_KIC()
-    del(stellcat["KIC"])
+    # If I end up needing the old file, use:
+    # stellcat = stelparms_triple_KIC()
+    stellcat = stelparms_with_Gaia(kic_path, gaia_path)
     mcquillancat = au.join_by_id(
         mcq, stellcat, "KIC", "kepid", join_type="left")
+    del(mcquillancat["KIC"])
     return mcquillancat
 
 @au.shortcut_file(paths.SHORTCUT_MCQUILLAN_FLICKER)
@@ -1003,6 +1012,7 @@ def stelparms_with_Gaia(
         joinedcat, "kmag", "kmag_err", "M_K", "M_K_err1", "M_K_err2",
         samp.AV_to_AK, samp.AV_err_to_AK_err, parallaxcol="parallax",
         parallax_err_col="parallax_error", parallax_offset=0.05, fullgaia=False)
+    del(joinedcat["KIC"])
     return joinedcat
 
 def dr14_with_ElBadry(binaritycol="Binarity"):
