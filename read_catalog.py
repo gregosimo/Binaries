@@ -502,22 +502,13 @@ def read_dr14_allStar(allstarpath=paths.DR14_ALLSTAR_PATH, opt="kepler"):
     au.mask_numeric_fill_values(short_allstar, -9999.99)
     return short_allstar
 
-def read_Rafa_rotation(rottable=paths.RAFA_SAVITA_PERIODS):
-    '''Reads in the rotation periods as determined by Rafa's pipeline.
+def read_Santos_rotation(rottable=paths.SANTOS_PERIODS):
+    '''Reads in the rotation periods from Santos et al (2019).
 
-    This function will read in a file which, at the very least, contains the
-    KICs and corresponding periods of all of the stars which have detections of
-    rotation periods according to Rafa's pipeline.'''
-    rafa = Table.read(
-        str(rottable), format="ascii.no_header", names=["KIC", "Prot"])
-    # The file Rafa gave me had a bunch of giants in it. So I'm going to
-    # manually limit the catalog to the same one 
-    kic_catalog = read_KIC_DR25_catalog()
-    rafa_kic = au.join_by_id(rafa, kic_catalog, "KIC", "kepid")
-    tempcut = catalog.perform_teff_cut(rafa_kic, lowtemp=0, hightemp=5500,
-                               teffcol="teff")
-    giantcut = catalog.perform_logg_cut(tempcut, lowlogg=3.5, loggcol="logg")
-    return giantcut
+    Read in the rotation periods published from Rafa's pipeline for K and M
+    dwarfs.'''
+    santos = Table.read(str(rottable), format="votable")
+    return santos
 
 def read_flicker_loggs(loggpath=paths.FLICKER_LOGG):
     '''Read in the catalog of flicker log(g)s based on Bastien et al (2016).
@@ -732,6 +723,16 @@ def read_Raghavan_companions(filepath=paths.RAGHAVAN_TABLE_18):
     tab = Table.read(str(filepath), format="ascii.cds")
     return tab
 
+#######################
+# MDM Observing Files #
+#######################
+
+def mdm_observing_targets(mdm_path=paths.MDM_OBSERVING_TARGETS):
+    '''Read in all of the Kepler Targets that were observed.'''
+
+    objlist = Table.read(
+        str(mdm_path), format="ascii.csv", colnames=("KIC", "num"))
+    return objlist
 
 ###############################################################################
 # Joined catalogs #

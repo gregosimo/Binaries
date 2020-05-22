@@ -47,7 +47,7 @@ MCQUILLAN_NONDETECTIONS = HEAD_DIR / "McQuillan_nondet.fit"
 APOKASC_PATH = HEAD_DIR / "APOKASC_cat_v4.2.4.fits"
 KIC_PULSATORS = HEAD_DIR / "pulsators.kic"
 UKIRT_RESULTS = HEAD_DIR / "ukirt_results.csv.gz"
-RAFA_SAVITA_PERIODS = HEAD_DIR / "Prot_OK_noCP.txt"
+SANTOS_PERIODS = HEAD_DIR / "Santos_Table_3.votable"
 GARCIA_PERIODS = HEAD_DIR / "Garcia14_Periods.fit"
 HUBER_CATALOG = HEAD_DIR / "huber_kic_parameters.txt"
 KIC_CATALOG = HEAD_DIR / "KIC_DR25.tbl"
@@ -148,6 +148,8 @@ GAIA_BERGER_OVERLAP = HEAD_DIR / "gaia_berger.vo"
 UCAC_KEPLER_PATH = HEAD_DIR / "UCAC_Kepler.csv"
 
 TAYAR_SAMPLE = HEAD_DIR / "apj514696t1_mrt.webarchive"
+
+MDM_OBSERVING_TARGETS 
 
 # SHORTCUT PATHS
 # These are for subsets of table that take a really long time to generate.
