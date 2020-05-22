@@ -1655,33 +1655,49 @@ def initialize_asteroseismic_sample(aposplit):
 def initialize_mcquillan_sample(mcqsplit):
     '''Makes a series of cuts related to the rotation period of the targets.'''
     mcqsplit.split_teff(
-        "SDSS-Teff", [4000, 5250], (
-            "Too Cool MetCor", "Right MetCor Teff", "Too Hot MetCor", 
-            "No Pinsonneault Teff"),
-        teff_crit="Metallicity Correction", null_value=np.ma.masked)
-    mcqsplit.split_teff(
-        "SDSS-Teff", [4000, 5250], (
-            "Too Cool Statistics", "Right Statistics Teff", 
-            "Too Hot Statistics", "No Statistics Teff"), 
-        teff_crit="Statistics", null_value=np.ma.masked)
-    mcqsplit.split_teff(
-        "SDSS-Teff", 7000, splitnames=(
-            "Good Isochrone Teff", "Too Hot for Isochrone", 
-            "Bad Isochrone Teff"), teff_crit="Isochrone Temperature", 
-        null_value=np.ma.masked)
-    mcqsplit.split_photometric_quality(
-        "kmag", "kmag_err", splitnames=("K Detection", "Blend", "Bad K"), 
-        crit="MK blend")
+        "teff", [4000, 5250], (
+            "Too Cool", "Right Teff", "Too Hot", 
+            "No KSPC Teff"),
+        teff_crit="Teffcut", null_value=np.ma.masked)
 
     mcqsplit.split_Gaia()
 
+    # Check what the properties of the "Blend" qualities are. There are no "Bad
+    # K" targets.
+    aposplit.split_photometric_quality(
+        "kmag", "kmag_err", splitnames=("K Detection", "Blend", "Bad K"), 
+        crit="MK blend")
     
     mcqsplit.split_period([1, 3], ["Too rapid", "Rapid", "Slow"])
+
 
 def initialize_asteroseismic_periods(aposplit):
     '''Initialize the asteroseismic sample with McQuillan periods.'''
     initialize_asteroseismic_sample(aposplit)
     initialize_mcquillan_sample(aposplit)
+
+###############################################################################
+# Processed Splitters #
+###############################################################################
+
+def McQuillan_splitter_with_MIST_deprojection():
+    '''Create a McQuillanSplitter with deprojected MIST luminosities.'''
+    mcq = McQuillanSplitter()
+    initialize_mcquillan_sample(mcq)
+    clean = mcq.split_subsample(["K Detection", "In Gaia"])
+
+    clean.data["MIST K (sol)"] = samp.calc_model_mag_fixed_age_feh_alpha(
+        clean.data["teff"], 0.0, "Ks", age=1e9, model="MIST v1.2")
+    # I don't think this will make much of a difference, and I don't think I am
+    # particularly interested in doing this really detailed analysis.
+    teff_err = (clean.data["teff_err1"] + (-clean.data["teff_err2"]))/2
+    clean.data["MIST K Error"] = samp.calc_model_mag_err_fixed_age_feh_alpha(
+        clean.data["teff"], 0.0, "Ks", teff_err=teff_err,
+        age=1e9, model="MIST v1.2")
+    clean.data["K Excess"] = clean.data["M_K"] - clean.data["MIST K (sol)"]
+    mkerr = (clean.data["M_K_err1"] + clean.data["M_K_err2"])/2
+    clean.data["K Excess Error"] = np.sqrt(
+        clean.data["MIST K Error"]**2 + mkerr**1)
 
 def HR_Param_Check():
     '''Check how logg and teff parameters match with each other.'''
