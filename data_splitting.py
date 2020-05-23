@@ -492,7 +492,9 @@ class GaiaSplitter(DataSplitter):
         hotter_than_giant = self.data[teff_col] >= 4575
 
         # Here is the giant class
-        giants = np.logical_and(mk_giant_boundary, cool)
+        giants = np.logical_and(
+            np.logical_or(mk_nondwarf_boundary, mk_giant_boundary),
+            cooler_than_giant)
         # Single stars
         single_stars = np.logical_and(
             np.logical_and(singles, mk_dwarf_boundary), cool)
@@ -502,9 +504,12 @@ class GaiaSplitter(DataSplitter):
         # Subsubgiants
         subsubgiants = np.logical_and(
             np.logical_and(ssgs, mk_dwarf_boundary), cool)
+        # Everything else on the hot side of the HR diagram.
         hot_dwarfs = au.multi_logical_or(
-            np.logical_and(mk_nongiant_boundary, hot),
-            np.logical_and(mk_giant_boundary, hotter_than_giant))
+            np.logical_and(mk_dwarf_boundary, hot),
+            np.logical_and(
+                np.logical_or(mk_giant_boundary, mk_nondwarf_boundary),  
+                hotter_than_giant))
 
         indexarr = [
             giants, hot_dwarfs, single_stars, photometric_binaries, 
@@ -675,7 +680,7 @@ class KeplerSplitter(GaiaSplitter):
             magcol, mags, splitnames, mag_crit, null_value=null_value, 
             invert_inequality=invert_inequality)
 
-    def split_evstate(
+    def split_logg_evstate(
             self, teff_col="teff", logg_col="LOGG_FIT", 
             giant_subgiant_points=[(5000, 3.5), (3500, 3.5)],
             subgiant_dwarf_points=[(5690, 4.43), (4640, 3.72)], 
@@ -1672,7 +1677,7 @@ def initialize_mcquillan_sample(mcqsplit):
 
     # Check what the properties of the "Blend" qualities are. There are no "Bad
     # K" targets.
-    aposplit.split_photometric_quality(
+    mcqsplit.split_photometric_quality(
         "kmag", "kmag_err", splitnames=("K Detection", "Blend", "Bad K"), 
         crit="MK blend")
     
@@ -1706,6 +1711,8 @@ def McQuillan_splitter_with_MIST_deprojection():
     mkerr = (clean.data["M_K_err1"] + clean.data["M_K_err2"])/2
     clean.data["K Excess Error"] = np.sqrt(
         clean.data["MIST K Error"]**2 + mkerr**1)
+
+    return clean
 
 def HR_Param_Check():
     '''Check how logg and teff parameters match with each other.'''
