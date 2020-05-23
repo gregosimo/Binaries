@@ -457,9 +457,9 @@ class GaiaSplitter(DataSplitter):
 
     def split_evstates(
             self, splitnames=(
-                "Cool Dwarfs", "Hot Dwarfs", "Subgiants", 
-                "Luminous Subgiants", "RGB Base", "Giants", "No Class"), 
-            evcrit="EV Bins", teff_col="teff", kcol="K Excess"):
+                "Giants", "Hot Stars", "Cool Singles", "Photometric Binaries",
+                "Subsubgiants", "No Class"),
+            evcrit="EV Bins", teff_col="teff"):
         '''Split the sample into multiple binned regions in HR space.
         
         The current iteration is to split between hot and cool. The cool stars
@@ -467,42 +467,50 @@ class GaiaSplitter(DataSplitter):
         between dwarfs, subgiants, and luminous subgiants. For targets either
         without K Excesses or Teffs, they will be categorized as not having a
         class.'''
-        noclass = np.logical_or(self.data[teff_col].mask, self.data[kcol].mask)
+        noclass = np.logical_or(
+            self.data[teff_col].mask, self.data["K Excess"].mask)
+
+        mk_giant_boundary = self.data["M_K"] < -0.45
+        mk_nongiant_boundary = self.data["M_K"] >= -0.45
+
+        mk_dwarf_boundary = self.data["M_K"] >= 2
+        mk_nondwarf_boundary = np.logical_and(
+            mk_nongiant_boundary, self.data["M_K"] < 2)
+
+        singles = self.data["K Excess"] > -0.3
+        photbins = np.logical_and(
+            self.data["K Excess"] <= -0.3, 
+            self.data["K Excess"] > -2.5 * np.log10(3))
+        ssgs = self.data["K Excess"] <= -2.5 * np.log10(3)
 
         cool = np.logical_and(
             self.data[teff_col] <= 5250, np.logical_not(noclass))
         hot = np.logical_and(
             self.data[teff_col] > 5250, np.logical_not(noclass))
-        subgiant_hot = np.logical_and(
-            self.data[teff_col] > 5250, np.logical_not(noclass))
-        luminous_hot = np.logical_and(
-            self.data[teff_col] > 5250, np.logical_not(noclass))
 
-        dwarf = np.logical_and(
-            self.data[kcol] >= -1.3, np.logical_not(noclass))
-        subgiant = np.logical_and(
-            np.logical_and(self.data[kcol] < -1.3, self.data[kcol] >= -2.2), 
-            np.logical_not(noclass))
-        lum_sub = np.logical_and(
-            np.logical_and(self.data[kcol] < -2.2, self.data[kcol] >= -4.75), 
-            np.logical_not(noclass))
+        cooler_than_giant = self.data[teff_col] < 4575
+        hotter_than_giant = self.data[teff_col] >= 4575
 
-        cool_dwarfs = np.logical_and(cool, dwarf)
-        hot_dwarfs = np.logical_and(hot, dwarf)
-        hot_subgiants = np.logical_and(subgiant_hot, subgiant)
-        luminous_subgiants = np.logical_and(luminous_hot, lum_sub)
-        rgb_base = np.logical_and(cool, np.logical_or(subgiant, lum_sub))
+        # Here is the giant class
+        giants = np.logical_and(mk_giant_boundary, cool)
+        # Single stars
+        single_stars = np.logical_and(
+            np.logical_and(singles, mk_dwarf_boundary), cool)
+        # Photometric Binaries
+        photometric_binaries = np.logical_and(
+            np.logical_and(photbins, mk_dwarf_boundary), cool)
+        # Subsubgiants
+        subsubgiants = np.logical_and(
+            np.logical_and(ssgs, mk_dwarf_boundary), cool)
+        hot_dwarfs = au.multi_logical_or(
+            np.logical_and(mk_nongiant_boundary, hot),
+            np.logical_and(mk_giant_boundary, hotter_than_giant))
 
-        giants = au.multi_logical_and(
-            np.logical_not(cool_dwarfs), np.logical_not(hot_dwarfs),
-            np.logical_not(hot_subgiants), np.logical_not(luminous_subgiants),
-            np.logical_not(rgb_base), np.logical_not(noclass))
-
-        indexarr = [cool_dwarfs, hot_dwarfs, hot_subgiants,
-                    luminous_subgiants, rgb_base, giants, noclass]
+        indexarr = [
+            giants, hot_dwarfs, single_stars, photometric_binaries, 
+            subsubgiants, noclass]
 
         self._setup_indices(splitnames, indexarr, evcrit)
-
 
 class KeplerSplitter(GaiaSplitter):
     '''Split dataset with Kepler stellar properties.
