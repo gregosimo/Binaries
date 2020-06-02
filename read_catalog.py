@@ -731,8 +731,7 @@ def mdm_observing_targets(mdm_path=paths.MDM_DIR):
     '''Read in all of the Kepler Targets that were observed.'''
 
     objlist = Table.read(str(mdm_path), format="ascii.csv")
-    del(objlist["col1"])
-    objlist = objlist[:-1]
+    objlist.rename_column("\ufeffKIC", "KIC")
     return objlist
 
 ###############################################################################
