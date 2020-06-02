@@ -730,8 +730,9 @@ def read_Raghavan_companions(filepath=paths.RAGHAVAN_TABLE_18):
 def mdm_observing_targets(mdm_path=paths.MDM_DIR):
     '''Read in all of the Kepler Targets that were observed.'''
 
-    objlist = Table.read(
-        str(mdm_path), format="ascii.csv", colnames=("KIC", "num"))
+    objlist = Table.read(str(mdm_path), format="ascii.csv")
+    del(objlist["col1"])
+    objlist = objlist[:-1]
     return objlist
 
 ###############################################################################

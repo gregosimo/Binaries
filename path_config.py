@@ -153,7 +153,7 @@ TAYAR_SAMPLE = HEAD_DIR / "apj514696t1_mrt.webarchive"
 # Modspec Run
 MODSPEC_FOLDER = HEAD_DIR / "Modspec"
 CALIB_FOLDER = MODSPEC_FOLDER / "Modspec_Calibration"
-MDM_DIR = HEAD_DIR / "Don_May_MDM_run"
+MDM_DIR = HEAD_DIR / "MDM_targets.csv"
 
 # RV Standards
 RV_STANDARD_SIMBAD = MDM_DIR / "Standard_SIMBAD.txt"
