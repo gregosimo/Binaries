@@ -875,6 +875,22 @@ class McQuillanSplitter(KeplerSplitter):
         finally:
             del(self.data[tempvelcol])
 
+class MDMSplitter(McQuillanSplitter):
+    '''A data splitter with MDM targets.'''
+    def __init__(self, data=None, splitgroups=None, indices=None, 
+                 kic_col="kepid", tm_col="tm_designation",
+                 gaia_index="source_id"):
+        '''Initialize a splitter of McQuillan data.'''
+        if not data:
+            mdmtargs = catin.mdm_observing_targets()
+            mcq = catin.mcquillan_with_stelparms()
+            data = au.extract_subtable_from_column(
+                mcq, "kepid", mdmtargs["KIC"])
+        super().__init__(
+            data, splitgroups=splitgroups, indices=indices, kic_col=kic_col, 
+            tm_col=tm_col, gaia_index=gaia_index)
+    
+
 class APOGEESplitter(KeplerSplitter):
     '''Keep an organized database of various cuts on APOGEE data.'''
 
