@@ -887,7 +887,7 @@ class MDMSplitter(McQuillanSplitter):
     
     def split_mdm_targets(
             self, splitnames=(
-                "MDM RV Targets", "MDM DLSB", "MDM_SLSB", "Not Observed"), 
+                "MDM RV Targets", "MDM DLSB", "MDM SLSB", "Not Observed"), 
             crit_mdm="MDM Observed"):
         '''Split off MDM targets from the rest of the McQuillan sample.'''
         mdm = catin.mdm_observing_targets()

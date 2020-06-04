@@ -442,10 +442,12 @@ def read_dr14_allVisit(allvisitpath=paths.DR14_ALLVISIT_PATH, opt="kepler"):
 
     return allvisit
 
-def read_dr14_allStar(allstarpath=paths.DR14_ALLSTAR_PATH, opt="kepler"):
-    '''Reads the allStar file for DR14.
+def read_allStar(allstarpath=paths.LATEST_ALLSTAR_PATH, opt="kepler"):
+    '''Reads the APOGEE allStar file.
     
-    Reads in the allStar table for DR14. The table can be optimized for either
+    Reads in the APOGEE allStar table. By default this should be the latest
+    data release, but previous data releases can be specified through
+    allstarpath. The table can be optimized for either
     Kepler targets or Pleiades targets by specifying opt="kepler" or "pleiades". 
     Optimization means that only the objects in the RA range corresponding to 
     either the Kepler field or the Pleiades will be loaded, which will 
@@ -931,13 +933,13 @@ def Stauffer_APOGEE_overlap(
     return joined_table
 
 @au.shortcut_file(paths.SHORTCUT_APOGEE_KIC)
-def dr14_with_KIC_stelparms(
-    apopath=paths.DR14_ALLSTAR_PATH, kicpath=paths.KIC_CATALOG,
+def apogee_with_KIC_stelparms(
+    apopath=paths.LATEST_ALLSTAR_PATH, kicpath=paths.KIC_CATALOG,
     origpath=paths.ORIG_KIC_ABRIDGED, pinpath=paths.PINSONNEAULT_CORRECTIONS):
-    '''Read in Kepler DR14 targets with Huber stellar parameters.'''
+    '''Read in Kepler APOGEE targets with Huber stellar parameters.'''
     # Note that this table is fully cross-matched with Gaia!
     # There are no targets without matching Gaia detections.
-    apo = dr14_with_ElBadry()
+    apo = APOGEE_with_ElBadry()
     kiccat = stelparms_triple_KIC(origpath, pinpath, kicpath)
     apokic = catalog.join_by_2MASS_key(
         apo, kiccat, "APOGEE_ID", "tm_designation", join_type="inner")
@@ -965,7 +967,6 @@ def stelparms_with_original_KIC(
             "kepid", "KIC Teff", "KIC logg"))
     newcat = au.join_by_id(kiccat, orig_subtable, "kepid", "kepid",
                            join_type="left")
-    del(newcat["KIC"])
     hubercat = read_Huber_KIC_catalog()[
         ["KIC", "Teff", "E_Teff", "e_Teff", "r_Teff", "log(g)", "e_log(g)",
          "E_log(g)", "r_log(g)", "R", "e_R", "E_R"]]
@@ -1015,9 +1016,9 @@ def stelparms_with_Gaia(
     del(joinedcat["KIC"])
     return joinedcat
 
-def dr14_with_ElBadry(binaritycol="Binarity"):
-    '''Add in El Badry parameters to the DR14 allStar table.'''
-    apogee = read_dr14_allStar()
+def APOGEE_with_ElBadry(binaritycol="Binarity"):
+    '''Add in El Badry parameters to the APOGEE allStar table.'''
+    apogee = read_allStar()
     wantedcols = ["APOGEE_ID", "T_eff [K]", "log g [dex]", "[Fe/H] [dex]"]
     elbadry = combined_El_Badry_multiplicity(binaritycol=binaritycol)
     singles = read_El_Badry_Single_Stars()
