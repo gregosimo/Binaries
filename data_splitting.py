@@ -881,15 +881,30 @@ class MDMSplitter(McQuillanSplitter):
                  kic_col="kepid", tm_col="tm_designation",
                  gaia_index="source_id"):
         '''Initialize a splitter of McQuillan data.'''
-        if not data:
-            mdmtargs = catin.mdm_observing_targets()
-            mcq = catin.mcquillan_with_stelparms()
-            data = au.extract_subtable_from_column(
-                mcq, "kepid", mdmtargs["KIC"])
         super().__init__(
-            data, splitgroups=splitgroups, indices=indices, kic_col=kic_col, 
+            data=data, splitgroups=splitgroups, indices=indices, kic_col=kic_col, 
             tm_col=tm_col, gaia_index=gaia_index)
     
+    def split_mdm_targets(
+            self, splitnames=(
+                "MDM RV Targets", "MDM DLSB", "MDM_SLSB", "Not Observed"), 
+            crit_mdm="MDM Observed"):
+        '''Split off MDM targets from the rest of the McQuillan sample.'''
+        mdm = catin.mdm_observing_targets()
+        mdm_indices = au.mark_selections_in_columns(
+            self.data[self.kic_col], mdm["KIC"])
+        # Check that some of our targets weren't left out of the Berer catalog
+        # due to bad K-band photometry or something.
+        assert len(mdm) == np.count_nonzero(mdm_indices)
+
+        dlsb = self.data[self.kic_col] == 5609753
+        slsb = self.data[self.kic_col] == 9151271
+
+        target_indices = au.multi_logical_and(mdm_indices, ~dlsb, ~slsb)
+        other_indices = ~mdm_indices
+        indexarr = [target_indices, dlsb, slsb, other_indices]
+
+        self._setup_indices(splitnames, indexarr, crit_mdm)
 
 class APOGEESplitter(KeplerSplitter):
     '''Keep an organized database of various cuts on APOGEE data.'''
@@ -901,7 +916,7 @@ class APOGEESplitter(KeplerSplitter):
         If the data parameter is passed, then it will be set to the full data
         sample. If not, then it will be read in manually.'''
         if not data:
-            data = catin.dr14_with_KIC_stelparms()
+            data = catin.apogee_with_KIC_stelparms()
             data["ALPHA_FE"] = data["ALPHA_M"] + data["M_H"] - data["FE_H"]
         super().__init__(data, splitgroups=splitgroups, indices=indices, 
                          kic_col=kic_col, tm_col=tm_col, gaia_index=gaia_index)
@@ -1699,6 +1714,23 @@ def initialize_mcquillan_sample(mcqsplit):
     
     mcqsplit.split_period([1, 3], ["Too rapid", "Rapid", "Slow"])
 
+def initialize_mdm_sample(mdmsplit):
+    '''Make a series of cuts for the RV-observed samples of targets.'''
+    mdmsplit.split_teff(
+        "teff", [4000, 5250], (
+            "Too Cool", "Right Teff", "Too Hot"),
+        teff_crit="Teffcut")
+
+    mdmsplit.split_Gaia()
+    mdmsplit.split_mdm_targets()
+
+    # Check what the properties of the "Blend" qualities are. There are no "Bad
+    # K" targets.
+    mdmsplit.split_photometric_quality(
+        "kmag", "kmag_err", splitnames=("K Detection", "Blend", "Bad K"), 
+        crit="MK blend")
+    
+    mdmsplit.split_period([1, 3], ["Too rapid", "Rapid", "Slow"])
 
 def initialize_asteroseismic_periods(aposplit):
     '''Initialize the asteroseismic sample with McQuillan periods.'''
