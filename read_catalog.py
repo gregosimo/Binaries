@@ -268,6 +268,16 @@ def read_TGAS_Kepler(tgas_kep_path=paths.TGAS_KEPLER_OVERLAP):
 
     return tgas
 
+def translate_colname_errors(instr):
+    '''Change the errors from being e_ and E_ to _down and _up.'''
+    # A dictionary to match prefixes to suffixes.
+    translate_dict = {"e": "down", "E": "up"}
+    substrs = instr.split("_")
+    prefix = substrs[0]
+    basestr = substrs[1:]
+    suffix = translate_dict[prefix]
+    return "_".join(basestr + [suffix])
+
 def read_Gaia_DR2_Kepler(
         gaia_dr2_kep_path=paths.GAIA_BERGER_OVERLAP, rewrite=False,
         username="gsimonia"):
@@ -277,16 +287,10 @@ def read_Gaia_DR2_Kepler(
     Vizier xMatch service.'''
     if rewrite:
         # Instead I want to upload this file to the Gaia archive.
-        berger = read_Berger_DR2_Kepler()
-
-        berger.rename_column("R*", "rad")
-        berger.rename_column("e_R*", "rad_down")
-        berger.rename_column("E_R*", "rad_up")
-        berger.rename_column("e_D", "D_down")
-        berger.rename_column("E_D", "D_up")
+        berger_gaia = read_Berger_DR2_Kepler()
 
         bergerpath = paths.HEAD_DIR / "Berger_temp.vo"
-        berger.write(str(bergerpath), format="votable", overwrite=True)
+        berger_gaia.write(str(bergerpath), format="votable", overwrite=True)
         print("Please upload file at {0} to Gaia Archive.".format(bergerpath))
         tablename = input("Enter the table name on the Gaia Archive: ")
         # Then perform a join operation
@@ -341,12 +345,17 @@ ORDER BY KIC DESC;
         print("Download finished")
     else:
         dr2 = Table.read(gaia_dr2_kep_path, format="votable")
+
+    berger = read_Berger_DR2_KSPC()
+    assert len(berger) == len(dr2)
+
+    # Rename columns to useful ones.
+    for col in ["Mstar", "Teff", "logg", "FeH", "Rstar", "Lstar", "Age"]:
+        berger.rename_column("e_" + col, col + "_down")
+        berger.rename_column("E_" + col, col + "_up")
+
         # Rename these to be uppercase.
         dr2.rename_column("kic", "KIC")
-        dr2.rename_column("d", "D")
-        dr2.rename_column("d_down", "D_down")
-        dr2.rename_column("d_up", "D_up")
-        dr2.rename_column("av", "AV")
         dr2.replace_column(
             "phot_variable_flag", np.asarray(
                 dr2["phot_variable_flag"], np.unicode_))
@@ -367,10 +376,24 @@ def read_Berger_DR2_Kepler_old(berger_dr2_kep=paths.BERGER_DR2_KEPLER):
 
 def read_Berger_DR2_Kepler(berger_dr2_kep=paths.BERGER_DR2_KEPLER):
     '''Read in the Gaia parameters in Berger et al (2018).'''
-    desired_cols = [
-        "KIC", "Gaia", "Teff", "e_Teff", "D", "E_D", "e_D", "R*", "E_R*", 
-        "e_R*", "AV", "Evol", "Bin"]
+    desired_cols = ["KIC", "Gaia"]
     berger = Table.read(berger_dr2_kep, format="ascii.cds",
+                        include_names=desired_cols)
+    return berger
+
+def read_Berger_DR2_KSPC(berger_dr2_kspc=paths.BERGER_KSPC_KEPLER):
+    '''Read in the Stellar parameters from Berger et al (2020).
+
+    Berger et al (2020) is a uniform determination of stellar effective
+    temperatures using photometry, Gaia parallaxes, and spectrosopic
+    metallicities where available.'''
+    # All columns here are desired.
+    desired_cols = [
+        "KIC", "MStar", "e_Mstar", "E_Mstar", "Teff", "e_Teff", "E_Teff",
+        "logg", "e_logg", "E_logg", "FeH", "e_FeH", "E_FeH", "Rstar",
+        "e_Rstar", "E_Rstar", "Lstar", "e_Lstar", "E_Lstar", "Age", "f_Age",
+        "e_Age", "E_Age", "Avmag", "GOF"]
+    berger = Table.read(berger_dr2_kspc, format="ascii.cds",
                         include_names=desired_cols)
     return berger
 
