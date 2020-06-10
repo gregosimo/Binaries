@@ -65,21 +65,14 @@ def read_Huber_KIC_catalog(huberpath=paths.HUBER_CATALOG):
 def read_KIC_DR25_catalog(kicpath=paths.KIC_CATALOG):
     '''Read the KIC DR25 Stellar Parameter catalog.'''
     desired_cols = [
-        "kepid", "tm_designation", "teff", "teff_err1", "teff_err2", "logg", 
-        "logg_err1", "logg_err2", "feh", "feh_err1", "feh_err2", "mass", 
-        "mass_err1", "mass_err2", "radius", "radius_err1", "radius_err2", 
-        "kepmag", "dist", "dist_err1", "dist_err2", "ra", "dec", "st_quarters", 
-        "teff_prov", "logg_prov", "feh_prov", "jmag", "jmag_err", "hmag", 
-        "hmag_err", "kmag", "kmag_err", "av", "av_err1", "av_err2"]
+        "kepid", "tm_designation", "kepmag", "ra", "dec", "st_quarters", 
+        "jmag", "jmag_err", "hmag", "hmag_err"]
     kiccat = Table.read(
         str(kicpath), format="ascii.ipac", include_names=desired_cols)
     fix_table_coordinates_units(kiccat, "ra", "dec")
     # This was necessary because of a bug in astropy where "dex" isn't
     # considered a valid flux unit.
     # https://github.com/astropy/astropy/issues/7279
-    kiccat["feh"].unit = "Dex"
-    kiccat["feh_err1"].unit = "Dex"
-    kiccat["feh_err2"].unit = "Dex"
     au.set_numeric_fill_values(kiccat, -9999)
     return kiccat
 
@@ -803,9 +796,8 @@ def mdm_observing_targets(mdm_path=paths.MDM_DIR):
 @au.shortcut_file(paths.SHORTCUT_MCQUILLAN_STELLPARM)
 def mcquillan_with_stelparms(
     mcq_path=paths.MCQUILLAN_CATALOG, kic_path=paths.KIC_CATALOG,
-        gaia_path=paths.GAIA_DR2_KEPLER_OVERLAP,
-        origpath=paths.ORIG_KIC_ABRIDGED,
-        pinpath=paths.PINSONNEAULT_CORRECTIONS):
+    gaia_input_path=paths.BERGER_KSPC_KEPLER_INPUT,
+    gaia_output_path=paths.BERGER_KSPC_KEPLER_OUTPUT):
     '''Read McQuillan catalog with full KIC stellar parameters.
 
     Read in the McQuillan detections along with the KIC DR25 stellar
@@ -815,7 +807,7 @@ def mcquillan_with_stelparms(
     trim_McQuillan_catalog(mcq)
     # IF you end up needing the old file, use 
     # stellcat = stelparms_triple_KIC()
-    stellcat = stelparms_with_Gaia(kic_path, gaia_path)
+    stellcat = stelparms_with_Gaia(kic_path, gaia_input_path, gaia_output_path)
     mcquillancat = au.join_by_id(
         mcq, stellcat, "KIC", "kepid", join_type="left")
     del(mcquillancat["KIC"])
@@ -824,7 +816,8 @@ def mcquillan_with_stelparms(
 @au.shortcut_file(paths.SHORTCUT_MCQUILLAN_NONDET_STELLPARM)
 def mcquillan_nondetections_with_stelparms(
     mcq_path=paths.MCQUILLAN_NONDETECTIONS, kic_path=paths.KIC_CATALOG,
-        gaia_path=paths.GAIA_DR2_KEPLER_OVERLAP):
+    gaia_input_path=paths.BERGER_KSPC_KEPLER_INPUT,
+    gaia_output_path=paths.BERGER_KSPC_KEPLER_OUTPUT):
     '''Read the McQuillan nondetections with full KIC stellar parameters.
 
     Read in the McQuillan nondetections along with the KIC DR25 stellar
@@ -834,7 +827,7 @@ def mcquillan_nondetections_with_stelparms(
     trim_McQuillan_catalog(mcq)
     # If I end up needing the old file, use:
     # stellcat = stelparms_triple_KIC()
-    stellcat = stelparms_with_Gaia(kic_path, gaia_path)
+    stellcat = stelparms_with_Gaia(kic_path, gaia_input_path, gaia_output_path)
     mcquillancat = au.join_by_id(
         mcq, stellcat, "KIC", "kepid", join_type="left")
     del(mcquillancat["KIC"])
@@ -1052,15 +1045,18 @@ def ebs_with_stelparms(ebpath=paths.EB_PATH, kic_path=paths.KIC_CATALOG,
 
 @au.shortcut_file(paths.SHORTCUT_GAIA_KEPLER)
 def stelparms_with_Gaia(
-        parmpath=paths.KIC_CATALOG, gaiapath=paths.GAIA_DR2_KEPLER_OVERLAP):
+        parmpath=paths.KIC_CATALOG, gaia_input=paths.BERGER_KSPC_KEPLER_INPUT, 
+        gaia_output=paths.BERGER_KSPC_KEPLER_OUTPUT):
     kiccat = read_KIC_DR25_catalog(parmpath)
-    gaiacat = read_Gaia_DR2_Kepler()
+    gaiacat = read_Berger_DR2_KSPC(
+        input_path=gaia_input, output_path=gaia_output)
 
     joinedcat = au.join_by_id(kiccat, gaiacat, "kepid", "KIC", join_type="left")
     catalog.generate_abs_mag_column_with_errors(
-        joinedcat, "kmag", "kmag_err", "M_K", "M_K_err1", "M_K_err2",
-        samp.AV_to_AK, samp.AV_err_to_AK_err, parallaxcol="parallax",
-        parallax_err_col="parallax_error", parallax_offset=0.05, fullgaia=False)
+        joinedcat, "Ksmag", "e_Ksmag", "M_K", "M_K_err1", "M_K_err2",
+        samp.AV_to_AK, samp.AV_err_to_AK_err, parallaxcol="Par",
+        parallax_err_col="e_Par", parallax_offset=0.05, fullgaia=False,
+        avcol="Avmag")
     del(joinedcat["KIC"])
     return joinedcat
 
