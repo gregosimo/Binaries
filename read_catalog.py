@@ -377,11 +377,23 @@ def read_Berger_DR2_Kepler_old(berger_dr2_kep=paths.BERGER_DR2_KEPLER):
 def read_Berger_DR2_Kepler(berger_dr2_kep=paths.BERGER_DR2_KEPLER):
     '''Read in the Gaia parameters in Berger et al (2018).'''
     desired_cols = ["KIC", "Gaia"]
-    berger = Table.read(berger_dr2_kep, format="ascii.cds",
+    berger = Table.read(str(berger_dr2_kep), format="ascii.cds",
                         include_names=desired_cols)
     return berger
 
-def read_Berger_DR2_KSPC(berger_dr2_kspc=paths.BERGER_KSPC_KEPLER):
+def read_Berger_DR2_KSPC_input(berger_dr2_kspc=paths.BERGER_KSPC_KEPLER_INPUT):
+    '''Read in the input parameters from Berger et al (2020).
+
+    This table has the input photometry and astrometry used for the analysis in
+    Berger et al (2020).'''
+    desired_cols = [
+        "KIC", "gmag", "e_gmag", "Ksmag", "e_Ksmag", "Par", "e_Par", "[Fe/H]",
+        "e_[Fe/H]", "KsCorr", "State"]
+    berger = Table.read(berger_dr2_kspc, format="ascii.cds",
+                        include_names=desired_cols)
+    return berger
+
+def read_Berger_DR2_KSPC_output(berger_dr2_kspc=paths.BERGER_KSPC_KEPLER_OUTPUT):
     '''Read in the Stellar parameters from Berger et al (2020).
 
     Berger et al (2020) is a uniform determination of stellar effective
@@ -396,6 +408,19 @@ def read_Berger_DR2_KSPC(berger_dr2_kspc=paths.BERGER_KSPC_KEPLER):
     berger = Table.read(berger_dr2_kspc, format="ascii.cds",
                         include_names=desired_cols)
     return berger
+
+def read_Berger_DR2_KSPC(
+        input_path=paths.BERGER_KSPC_KEPLER_INPUT,
+        output_path=paths.BERGER_KSPC_KEPLER_OUTPUT):
+    '''Read in the full catalog from Berger et al (2020).
+
+    Include both the input photometry and output stellar parameters for Kepler
+    targets.'''
+    inputs = read_Berger_DR2_KSPC_input(input_path)
+    outputs = read_Berger_DR2_KSPC_output(output_path)
+
+    combined = au.join_by_id(inputs, outputs, "KIC", "KIC", join_type="inner")
+    return combined
 
 def APOGEE_TGAS(tgas_kep_path=paths.TGAS_KEPLER_OVERLAP,
                 apopath=paths.DR14_ALLSTAR_PATH):
@@ -886,9 +911,9 @@ def mcquillan_dr14_overlap(
     mcq_dr14 = catalog.join_by_2MASS_key(mcq_col, dr14, "tm_designation", "APOGEE_ID")
     return mcq_dr14
 
-@au.shortcut_file(paths.SHORTCUT_MCQUILLAN_DR14_KIC)
+@au.shortcut_file(paths.SHORTCUT_MCQUILLAN_APOGEE_KIC)
 def mcquillan_dr14_overlap_with_stelparms(
-    mcq_path=paths.MCQUILLAN_CATALOG, apopath=paths.DR14_ALLSTAR_PATH,
+    mcq_path=paths.MCQUILLAN_CATALOG, apopath=paths.LATEST_ALLSTAR_PATH,
     kicpath=paths.KIC_CATALOG):
     '''Read in the McQuillan/APOGEE overlap with KIC parameters.'''
     dr14_stelparms = dr14_with_KIC_stelparms(apopath, kicpath)

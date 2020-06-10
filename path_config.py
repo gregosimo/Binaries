@@ -76,7 +76,8 @@ TGAS_MCQUILLAN_APOGEE_TIDSYNC_PATH = (
     HEAD_DIR / "TGAS_McQuillan_APOGEE_tidsync.fits")
 TGAS_KEPLER_OVERLAP = HEAD_DIR / "TGAS_Kepler.csv"
 BERGER_DR2_KEPLER = HEAD_DIR / "apjaada83t1_mrt.txt"
-BERGER_KSPC_KEPLER = HEAD_DIR / "ajab8a33t2_mrt.txt"
+BERGER_KSPC_KEPLER_INPUT = HEAD_DIR / "ajab8a33t1_mrt.txt"
+BERGER_KSPC_KEPLER_OUTPUT = HEAD_DIR / "ajab8a33t2_mrt.txt"
 BERGER_MISSING_GAIA = HEAD_DIR / "Missing_Berger.vot"
 FLICKER_LOGG = HEAD_DIR / "flicker_loggs.txt"
 BRUNTT_PATH = HEAD_DIR / "Bruntt_vsini.vot"
