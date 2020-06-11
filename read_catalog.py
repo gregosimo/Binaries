@@ -66,7 +66,7 @@ def read_KIC_DR25_catalog(kicpath=paths.KIC_CATALOG):
     '''Read the KIC DR25 Stellar Parameter catalog.'''
     desired_cols = [
         "kepid", "tm_designation", "kepmag", "ra", "dec", "st_quarters", 
-        "jmag", "jmag_err", "hmag", "hmag_err"]
+        "jmag", "jmag_err", "hmag", "hmag_err", "kmag", "kmag_err"]
     kiccat = Table.read(
         str(kicpath), format="ascii.ipac", include_names=desired_cols)
     fix_table_coordinates_units(kiccat, "ra", "dec")
@@ -272,7 +272,9 @@ def translate_colname_errors(instr):
     return "_".join(basestr + [suffix])
 
 def read_Gaia_DR2_Kepler(
-        gaia_dr2_kep_path=paths.GAIA_BERGER_OVERLAP, rewrite=False,
+        gaia_dr2_kep_path=paths.GAIA_BERGER_OVERLAP,
+        berger_kspc_input=paths.BERGER_KSPC_KEPLER_INPUT,
+        berger_kspc_output=paths.BERGER_KSPC_KEPLER_OUTPUT, rewrite=False,
         username="gsimonia"):
     '''Read the Gaia DR2 table of stars overlapping with Kepler.
 
@@ -280,7 +282,7 @@ def read_Gaia_DR2_Kepler(
     Vizier xMatch service.'''
     if rewrite:
         # Instead I want to upload this file to the Gaia archive.
-        berger_gaia = read_Berger_DR2_Kepler()
+        berger_gaia = read_Berger_DR2_Kepler(berger_dr2_kep=gaia_dr2_kep_path)
 
         bergerpath = paths.HEAD_DIR / "Berger_temp.vo"
         berger_gaia.write(str(bergerpath), format="votable", overwrite=True)
@@ -338,21 +340,24 @@ ORDER BY KIC DESC;
         print("Download finished")
     else:
         dr2 = Table.read(gaia_dr2_kep_path, format="votable")
+        # Rename these to be uppercase.
+        dr2.rename_column("kic", "KIC")
+        dr2.replace_column(
+            "phot_variable_flag", np.asarray(
+                dr2["phot_variable_flag"], np.unicode_))
 
-    berger = read_Berger_DR2_KSPC()
-    assert len(berger) == len(dr2)
+    berger = read_Berger_DR2_KSPC(
+        input_path=berger_kspc_input, output_path=berger_kspc_output)
 
     # Rename columns to useful ones.
     for col in ["Mstar", "Teff", "logg", "FeH", "Rstar", "Lstar", "Age"]:
         berger.rename_column("e_" + col, col + "_down")
         berger.rename_column("E_" + col, col + "_up")
 
-        # Rename these to be uppercase.
-        dr2.rename_column("kic", "KIC")
-        dr2.replace_column(
-            "phot_variable_flag", np.asarray(
-                dr2["phot_variable_flag"], np.unicode_))
-    return dr2
+    # Add the Gaia data to the Berger targets where available. 
+    full_gaia = au.join_by_id(berger, dr2, "KIC", "KIC", join_type="left")
+
+    return full_gaia
 
 def read_Berger_DR2_Kepler_old(berger_dr2_kep=paths.BERGER_DR2_KEPLER):
     '''Read in the Gaia parameters in Berger et al (2018).'''
@@ -981,7 +986,7 @@ def apogee_with_KIC_stelparms(
     # Note that this table is fully cross-matched with Gaia!
     # There are no targets without matching Gaia detections.
     apo = APOGEE_with_ElBadry()
-    kiccat = stelparms_triple_KIC(origpath, pinpath, kicpath)
+    kiccat = stelparms_with_Gaia(origpath, pinpath, kicpath)
     apokic = catalog.join_by_2MASS_key(
         apo, kiccat, "APOGEE_ID", "tm_designation", join_type="inner")
     return apokic
@@ -1045,17 +1050,19 @@ def ebs_with_stelparms(ebpath=paths.EB_PATH, kic_path=paths.KIC_CATALOG,
 
 @au.shortcut_file(paths.SHORTCUT_GAIA_KEPLER)
 def stelparms_with_Gaia(
-        parmpath=paths.KIC_CATALOG, gaia_input=paths.BERGER_KSPC_KEPLER_INPUT, 
+        parmpath=paths.KIC_CATALOG, gaia_kepler=paths.GAIA_BERGER_OVERLAP, 
+        gaia_input=paths.BERGER_KSPC_KEPLER_INPUT, 
         gaia_output=paths.BERGER_KSPC_KEPLER_OUTPUT):
     kiccat = read_KIC_DR25_catalog(parmpath)
-    gaiacat = read_Berger_DR2_KSPC(
-        input_path=gaia_input, output_path=gaia_output)
+    gaiacat = read_Gaia_DR2_Kepler(
+        gaia_dr2_kep_path=gaia_kepler, berger_kspc_input=gaia_input, 
+        berger_kspc_output=gaia_output)
 
     joinedcat = au.join_by_id(kiccat, gaiacat, "kepid", "KIC", join_type="left")
     catalog.generate_abs_mag_column_with_errors(
-        joinedcat, "Ksmag", "e_Ksmag", "M_K", "M_K_err1", "M_K_err2",
+        joinedcat, "kmag", "kmag_err", "M_K", "M_K_err1", "M_K_err2",
         samp.AV_to_AK, samp.AV_err_to_AK_err, parallaxcol="Par",
-        parallax_err_col="e_Par", parallax_offset=0.05, fullgaia=False,
+        parallax_err_col="e_Par", parallax_offset=0.00, fullgaia=False,
         avcol="Avmag")
     del(joinedcat["KIC"])
     return joinedcat
