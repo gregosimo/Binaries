@@ -1064,7 +1064,7 @@ class APOGEESplitter(KeplerSplitter):
         self._setup_complement_index(splitnames, astero_indices, astero_crit)
 
     def split_McQuillan_periods(
-        self, mcq_names=("Mcq", "No Mcq", "Unknown Mcq"), kiccol="KIC", 
+        self, mcq_names=("Mcq", "No Mcq", "Unknown Mcq"), kiccol="kepid", 
         mcq_crit="Mcq"):
         '''Separate detections, nondetections, and undetermined periods.
 
