@@ -512,8 +512,7 @@ def read_allStar(allstarpath=paths.LATEST_ALLSTAR_PATH, opt="kepler"):
         "MIN_JK", "MAX_JK", "FPARAM", "FPARAM_COV", "TEFF", "TEFF_ERR", "LOGG", "LOGG_ERR",
         "VMICRO", "VMACRO", "VSINI", "M_H", "M_H_ERR", "ALPHA_M",
         "ALPHA_M_ERR", "MG_FE", "MG_FE_ERR", "ASPCAPFLAG", "ASPCAPFLAGS", 
-        "ASPCAP_CHI2", "FELEM", "STABLERV_RCHI2", "FE_H", "PMRA", "PMDEC",
-        "PM_SRC", "ALL_VISITS", "VISITS"]
+        "ASPCAP_CHI2", "FELEM", "STABLERV_RCHI2", "FE_H", "ALL_VISITS", "VISITS"]
     if opt:
             allstar_hdus = fits.open(str(allstarpath), memmap=True)
             allstar_indices = allstar_hdus[2]
@@ -664,10 +663,9 @@ def read_El_Badry_SB3(elb_sb3=paths.EL_BADRY_SB3):
     return sb3table
 
 def combined_El_Badry_multiplicity(
-        elb_single_path=paths.EL_BADRY_SINGLE, elb_sb1=paths.EL_BADRY_SB1,
-        elb_sb2=paths.EL_BADRY_SB2,
+        elb_sb1=paths.EL_BADRY_SB1, elb_sb2=paths.EL_BADRY_SB2,
         elb_hidden_trip=paths.EL_BADRY_HIDDEN_TRIPLE,
-         elb_sb3=paths.EL_BADRY_SB3, binaritycol="Binarity"):
+        elb_sb3=paths.EL_BADRY_SB3, binaritycol="Binarity"):
     '''Combine stellar parameters from all multiple El Badry papers.
 
     The new table will have revised APOGEE IDs, Teffs, log(g), and [Fe/H].'''
@@ -980,13 +978,26 @@ def Stauffer_APOGEE_overlap(
 
 @au.shortcut_file(paths.SHORTCUT_APOGEE_KIC)
 def apogee_with_KIC_stelparms(
-    apopath=paths.LATEST_ALLSTAR_PATH, kicpath=paths.KIC_CATALOG,
-    origpath=paths.ORIG_KIC_ABRIDGED, pinpath=paths.PINSONNEAULT_CORRECTIONS):
-    '''Read in Kepler APOGEE targets with Huber stellar parameters.'''
+        apopath=paths.LATEST_ALLSTAR_PATH, 
+        elb_single_path=paths.EL_BADRY_SINGLE, 
+        elb_sb1_path=paths.EL_BADRY_SB1, elb_sb2_path=paths.EL_BADRY_SB2,
+        elb_hidden_triple_path=paths.EL_BADRY_HIDDEN_TRIPLE,
+        elb_sb3_path=paths.EL_BADRY_SB3, binaritycol="Binarity",
+        kicpath=paths.KIC_CATALOG, gaia_kepler_path=paths.GAIA_BERGER_OVERLAP, 
+        gaia_input_path=paths.BERGER_KSPC_KEPLER_INPUT, 
+        gaia_output_path=paths.BERGER_KSPC_KEPLER_OUTPUT):
+    '''Read in Kepler APOGEE targets with Berger KSPC stellar parameters.'''
     # Note that this table is fully cross-matched with Gaia!
     # There are no targets without matching Gaia detections.
-    apo = APOGEE_with_ElBadry()
-    kiccat = stelparms_with_Gaia(origpath, pinpath, kicpath)
+    apo = APOGEE_with_ElBadry(
+        allstarpath=apopath, elb_single_path=elb_single_path,
+        elb_sb1_path=elb_sb1_path, elb_sb2_path=elb_sb2_path,
+        elb_hidden_triple_path=elb_hidden_triple_path,
+        elb_sb3_path=elb_sb3_path, binaritycol=binaritycol)
+
+    # Note that using keyword arguments with the memorizer does not work well.
+    kiccat = stelparms_with_Gaia(
+        kicpath, gaia_kepler_path, gaia_input_path, gaia_output_path)
     apokic = catalog.join_by_2MASS_key(
         apo, kiccat, "APOGEE_ID", "tm_designation", join_type="inner")
     return apokic
@@ -1053,6 +1064,7 @@ def stelparms_with_Gaia(
         parmpath=paths.KIC_CATALOG, gaia_kepler=paths.GAIA_BERGER_OVERLAP, 
         gaia_input=paths.BERGER_KSPC_KEPLER_INPUT, 
         gaia_output=paths.BERGER_KSPC_KEPLER_OUTPUT):
+    '''Return Kepler stellar parameters with Gaia info.'''
     kiccat = read_KIC_DR25_catalog(parmpath)
     gaiacat = read_Gaia_DR2_Kepler(
         gaia_dr2_kep_path=gaia_kepler, berger_kspc_input=gaia_input, 
@@ -1067,12 +1079,20 @@ def stelparms_with_Gaia(
     del(joinedcat["KIC"])
     return joinedcat
 
-def APOGEE_with_ElBadry(binaritycol="Binarity"):
+def APOGEE_with_ElBadry(
+        allstarpath=paths.LATEST_ALLSTAR_PATH,
+        elb_single_path=paths.EL_BADRY_SINGLE, elb_sb1_path=paths.EL_BADRY_SB1,
+        elb_sb2_path=paths.EL_BADRY_SB2,
+        elb_hidden_triple_path=paths.EL_BADRY_HIDDEN_TRIPLE,
+        elb_sb3_path=paths.EL_BADRY_SB3, binaritycol="Binarity"):
     '''Add in El Badry parameters to the APOGEE allStar table.'''
-    apogee = read_allStar()
+    apogee = read_allStar(allstarpath=allstarpath)
     wantedcols = ["APOGEE_ID", "T_eff [K]", "log g [dex]", "[Fe/H] [dex]"]
-    elbadry = combined_El_Badry_multiplicity(binaritycol=binaritycol)
-    singles = read_El_Badry_Single_Stars()
+    elbadry = combined_El_Badry_multiplicity(
+        elb_sb1=elb_sb1_path, elb_sb2=elb_sb2_path, 
+        elb_hidden_trip=elb_hidden_triple_path, elb_sb3=elb_sb3_path, 
+        binaritycol=binaritycol)
+    singles = read_El_Badry_Single_Stars(elb_single_path=elb_single_path)
     singles_apo = au.extract_subtable_from_column(
         apogee, "APOGEE_ID", singles["APOGEE_ID"])
     singles_params = Table(
@@ -1085,6 +1105,11 @@ def APOGEE_with_ElBadry(binaritycol="Binarity"):
         apogee, full_elbadry, "APOGEE_ID", "APOGEE_ID", join_type="left")
 
     return combotab
+
+def read_DR16_Joker_Binaries(binpath=paths.DR16_JOKER_BINARIES):
+    '''Read in the Joker-derived parameters for the Joker parent sample.'''
+    jokerbin = Table.read(binpath, format="fits")
+    return jokerbin
 
 def Rebull_Pleiades_Periods(
         rebull_path=paths.REBULL_PLEIADES_PERIOD_PATH,
