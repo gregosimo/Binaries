@@ -73,6 +73,7 @@ def join_by_2MASS_key(tbl1, tbl2, tm1, tm2, join_type="inner",
     jackson_prefix = "J"
     epic_prefix = ""
 
+    # I think this can be shortened by using the getmask()
     try:
         tbl1 = tbl1[~tbl1[tm1].mask]
     except AttributeError:
@@ -83,26 +84,34 @@ def join_by_2MASS_key(tbl1, tbl2, tm1, tm2, join_type="inner",
     except AttributeError:
         pass
 
-    if np.any(npstr.startswith(tbl1[tm1], kic_prefix)):
+    if np.any(npstr.startswith(
+            np.asarray(tbl1[tm1], np.unicode_), kic_prefix)):
         tbl1_prefix = kic_prefix
-    elif np.any(npstr.startswith(tbl1[tm1], apogee_prefix)):
+    elif np.any(npstr.startswith(
+        np.asarray(tbl1[tm1], np.unicode_), apogee_prefix)):
         tbl1_prefix = apogee_prefix
-    elif np.any(npstr.startswith(tbl1[tm1], jackson_prefix)):
+    elif np.any(npstr.startswith(
+        np.asarray(tbl1[tm1], np.unicode_), jackson_prefix)):
         tbl1_prefix = jackson_prefix
-    elif np.any(npstr.startswith(tbl1[tm1], epic_prefix)):
+    elif np.any(npstr.startswith(
+        np.asarray(tbl1[tm1], np.unicode_), epic_prefix)):
         tbl1_prefix = epic_prefix
     # Given the EPIC key, I think this is redundant. But if I decide to
     # implement this differently, it may still be important.
     else:
         raise ValueError("Don't recognize 2MASS key: " + tbl1[tm1][0])
 
-    if np.any(npstr.startswith(tbl2[tm2], kic_prefix)):
+    if np.any(npstr.startswith(
+            np.asarray(tbl2[tm2], np.unicode_), kic_prefix)):
         tbl2_prefix = kic_prefix
-    elif np.any(npstr.startswith(tbl2[tm2], apogee_prefix)):
+    elif np.any(npstr.startswith(
+        np.asarray(tbl2[tm2], np.unicode_), apogee_prefix)):
         tbl2_prefix = apogee_prefix
-    elif np.any(npstr.startswith(tbl2[tm2], jackson_prefix)):
+    elif np.any(npstr.startswith(
+        np.asarray(tbl2[tm2], np.unicode_), jackson_prefix)):
         tbl2_prefix = jackson_prefix
-    elif np.any(npstr.startswith(tbl2[tm2], epic_prefix)):
+    elif np.any(npstr.startswith(
+        np.asarray(tbl2[tm2], np.unicode_), epic_prefix)):
         tbl2_prefix = epic_prefix
     else:
         raise ValueError("Don't recognize 2MASS key: " + tbl2[tm2][0])
