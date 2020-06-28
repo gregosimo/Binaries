@@ -391,7 +391,44 @@ class DataSplitter:
         raise KeyError(
             "{0} is not a valid index name. Run names() to get "
             "currently available index names.".format(indname))
+    def join_table_to_splitter(
+            self, table, col_key, table_key, join_type="left", 
+            joined_class=None, **splitterargs):
+        '''Create a new splitter with a joined table.
 
+        Create a new splitter class with the original data in the splitter
+        joined to another table. This method makes sure all of the existing
+        indices get matched up when join scrambles them.
+
+        The type of join will be specified as join_type. If joined_class is not
+        specified, the new splitter will have the same class as the original
+        splitter. However, sometimes it will be more appropriate to create an
+        custom DataSplitter class for the joined table, and that class can be
+        specified with joined_class. Any additional arguments will be passed to
+        the constructor of joined_class.'''
+        temp_col = "__join_table_to_splitter_temporary_column"
+        self.data[temp_col] = np.arange(len(self.data))
+        newindices = {}
+        try:
+            # Create a new table.
+            joined_table = au.join_by_id(
+                self.data, table, col_key, table_key, join_type=join_type)
+            # Make sure using the temp_col indices behave as I hope.
+            assert all(
+                self.data[col_key][joined_table[temp_col]] == 
+                joined_table[col_key])
+            for key, old_index in self.indices.items():
+                newindices[key] = old_index[joined_table[temp_col]]
+                assert len(newindices[key]) == len(joined_table)
+        finally:
+            del(self.data[temp_col])
+
+        if not joined_class:
+            joined_class = self.__class__
+        joined_splitter = joined_class(
+            joined_table, splitgroups=self.splitgroups, indices=newindices,
+            **splitterargs)
+        return joined_splitter
 
 def format_census_tree(census_tree, indents=""):
     '''Write the partition census to a string.
@@ -841,8 +878,9 @@ class McQuillanSplitter(KeplerSplitter):
             data, splitgroups=splitgroups, indices=indices, kic_col=kic_col, 
             tm_col=tm_col, gaia_index=gaia_index)
 
-    def split_period(self, splitvalues, splitnames, pcol="Prot", 
-                     period_crit="period", invert_inequality=False):
+    def split_period(
+        self, splitvalues, splitnames, pcol="Prot", period_crit="period", 
+        null_value=np.ma.masked, invert_inequality=False):
         '''Split the data by period.
 
         Since there are many different ways to measure period, the desired
@@ -854,8 +892,9 @@ class McQuillanSplitter(KeplerSplitter):
 
         For more information on invert_inequality, see split_by_col.
         '''
-        self.split_by_col(pcol, splitvalues, splitnames, period_crit, 
-                          invert_inequality=invert_inequality)
+        self.split_by_col(
+            pcol, splitvalues, splitnames, period_crit, null_value=null_value, 
+            invert_inequality=invert_inequality)
 
     def split_veq(self, splitvalues, splitnames, pcol="Prot", rcol="Gaia R",
                   vel_crit="Equatorial Velocity", invert_inequality=False):
@@ -1074,6 +1113,8 @@ class APOGEESplitter(KeplerSplitter):
         the three classes should be given in mcq_names. The two datasets are
         cross-matched by KIC numbers in kiccol.
         '''
+        # This should be overridden in the RotationSplitter if it gets too
+        # slow.
         mcq = catin.read_McQuillan_catalog()
         undet = catin.read_McQuillan_nondetections()
         mcq_period = au.mark_selections_in_columns(
@@ -1390,6 +1431,23 @@ class APOGEESplitter(KeplerSplitter):
 
         self._setup_indices(splitnames, indexarr, evcrit)
 
+    def join_with_McQuillan_periods(self):
+        '''Add the McQuillan periods to the given splitter.
+        
+        This will return a brand new splitter which inherits from the original
+        splitter as well as the McQuillanSplitter.'''
+        mcq = catin.read_McQuillan_catalog()
+        catin.trim_McQuillan_catalog(mcq)
+        combined_splitter = self.join_table_to_splitter(
+            mcq, self.kic_col, "KIC", join_type="left",
+            joined_class=create_combined_rotation_splitter(self.__class__),
+            kic_col=self.kic_col, tm_col=self.tm_col)
+        return combined_splitter
+
+################################################################################
+# Datasplitter Functions #
+################################################################################
+
     def split_modified_Berger_EVstate(
             self, teff_col="TEFF", feh_col="FE_H", alpha_col="ALPHA_FE", 
             MK_col="M_K", class_col="class", cool_limit=5500, splitnames=(
@@ -1562,8 +1620,9 @@ def create_combined_rotation_splitter(baseclass):
             These objects ought to have both vsinis and rotational periods.'''
             if not data:
                 data = catin.dr14_with_KIC_stelparms()
-            super().__init__(data, splitgroups=splitgroups, indices=indices, 
-                             kic_col=kic_col, tm_col=tm_col)
+            super().__init__(
+                data, splitgroups=splitgroups, indices=indices, kic_col=kic_col, 
+                tm_col=tm_col)
 
     return CombinedRotationSplitter
 
@@ -1665,6 +1724,27 @@ def initialize_general_APOGEE(aposplit):
         "K_ERR", splitnames=("Good K", "Blend"), crit="MK blend")
 
     aposplit.split_modified_Berger_EVstate()
+
+def initialize_RVvar_APOGEE(aposplit):
+    '''Initialize APOGEE splitter for RV variability.'''
+    aposplit.split_teff(
+        "TEFF", [4850, 5600], (
+            "Low APOGEE Teff", "Sync APOGEE Teff", "High APOGEE Teff", 
+            "No APOGEE Teff"), null_value=np.ma.masked,
+        teff_crit="Synchronized Temperature Split")
+    aposplit.split_period(
+        [1, 5], (
+            "Too Fast McQuillan", "Fast McQuillan", "Slow McQuillan", 
+            "No McQuillan"), pcol="Prot", null_value=np.ma.masked, 
+        period_crit="McQuillan Synchronized Split")
+    
+    aposplit.split_Gaia()
+    
+    # Check what the properties of the "Blend" qualities are. There are no "Bad
+    # K" targets.
+    aposplit.split_photometric_quality(
+        "kmag", "kmag_err", splitnames=("K Detection", "Blend", "Bad K"), 
+        crit="MK blend")
 
 def initialize_cool_KICs(kicsplit):
     '''Initialize cool dwarfs that have KIC values.'''
@@ -1798,25 +1878,8 @@ def KIC_APOGEE_Param_Diff():
 # Join period table to DataSplitter #
 ###############################################################################
 
-def add_periods_to_datasplitter(split, kic_col="KIC"):
-    '''Add the McQuillan periods to the given splitter.
-    
-    This will return a brand new splitter which inherits from the original
-    splitter as well as the McQuillanSplitter.'''
-
-    mcq = catin.read_McQuillan_catalog()
-    catin.trim_McQuillan_catalog(mcq)
-    newdata = au.join_by_id(split.data, mcq, kic_col, "KIC")
-    NewRotationClass = create_combined_rotation_splitter(split.__class__)
-    combosplit = NewRotationClass(
-        data=newdata, kic_col=kic_col, tm_col=split.tm_col)
-    return combosplit
 
 
-
-################################################################################
-# Datasplitter Functions #
-################################################################################
 
 
 
