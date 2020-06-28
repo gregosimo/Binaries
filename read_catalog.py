@@ -1081,12 +1081,13 @@ def stelparms_with_Gaia(
 
 def APOGEE_with_ElBadry(
         allstarpath=paths.LATEST_ALLSTAR_PATH,
+        jokerpath=paths.DR16_JOKER_BINARIES,
         elb_single_path=paths.EL_BADRY_SINGLE, elb_sb1_path=paths.EL_BADRY_SB1,
         elb_sb2_path=paths.EL_BADRY_SB2,
         elb_hidden_triple_path=paths.EL_BADRY_HIDDEN_TRIPLE,
         elb_sb3_path=paths.EL_BADRY_SB3, binaritycol="Binarity"):
     '''Add in El Badry parameters to the APOGEE allStar table.'''
-    apogee = read_allStar(allstarpath=allstarpath)
+    apogee = APOGEE_with_Joker(apopath=allstarpath, jokerpath=jokerpath)
     wantedcols = ["APOGEE_ID", "T_eff [K]", "log g [dex]", "[Fe/H] [dex]"]
     elbadry = combined_El_Badry_multiplicity(
         elb_sb1=elb_sb1_path, elb_sb2=elb_sb2_path, 
@@ -1106,10 +1107,28 @@ def APOGEE_with_ElBadry(
 
     return combotab
 
+def APOGEE_with_Joker(
+        apopath=paths.LATEST_ALLSTAR_PATH, jokerpath=paths.DR16_JOKER_BINARIES):
+    '''Read in the APOGEE catalog with Joker parameters.'''
+    apo = read_allStar(apopath)
+    assert apopath==paths.DR16_ALLSTAR_PATH
+    joker = read_DR16_Joker_Binaries(jokerpath)
+
+    combo = catalog.join_by_2MASS_key(
+        apo, joker, "APOGEE_ID", "APOGEE_ID", join_type="left")
+    return combo
+
 def read_DR16_Joker_Binaries(binpath=paths.DR16_JOKER_BINARIES):
     '''Read in the Joker-derived parameters for the Joker parent sample.'''
+    desired_columns = [
+        "APOGEE_ID", "n_visits", "MAP_P", "MAP_P_err", "MAP_e", "MAP_e_err",
+        "MAP_omega", "MAP_omega_err", "MAP_M0", "MAP_M0_err", "MAP_K",
+        "MAP_K_err", "MAP_v0", "MAP_v0_err", "MAP_s", "MAP_s_err", "t0_bmjd",
+        "baseline", "max_phase_gap", "periods_spanned", "phase_coverage",
+        "phase_coverage_per_period", "unimodal", "joker_completed",
+        "mcmc_completed", "binary_catalog"]
     jokerbin = Table.read(binpath, format="fits")
-    return jokerbin
+    return jokerbin[desired_columns]
 
 def Rebull_Pleiades_Periods(
         rebull_path=paths.REBULL_PLEIADES_PERIOD_PATH,
