@@ -495,7 +495,7 @@ def download_MIST_isochrones(
         MIST_version=1.2, vvcrit=0.0, bandstr="UBVRIplus", 
         folder=paths.MIST_PATH):
     '''Download all of the MIST isochrones needed for interpolating.'''
-    age_list = [1.25e8, 1e9, 4.5e9, 9e9]
+    age_list = [1.25e8, 5e8, 1e9, 4.5e9, 9e9]
     metallicity = np.concatenate(
         [np.arange(-4, -2, 0.5), np.arange(-2, 0.75, 0.25)])
     for feh in metallicity:
