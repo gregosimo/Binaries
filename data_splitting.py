@@ -1317,6 +1317,61 @@ class APOGEESplitter(KeplerSplitter):
 
         self._setup_complement_index(splitnames, full_sample, cool_crit)
 
+    def split_tidsync_categories(
+        self, splitnames=(
+            "Giants", "Subgiants", "Tidsync", "Cool Rapid Dwarfs", 
+            "No Class"), evcrit="EV Bins", teff_col="TEFF"):
+        '''Split the sample into binned HR diagram regions for RV targets.
+
+        The basic divisions of the APOGEE sample into evolutionary regions:
+        Giants 
+        : MK < 2.5 and Teff < 5600 K
+        
+        Subgiants 
+        : Stars which are expected to be rapidly rotating enough 
+        to not be tidally synchronized. The these stars have Teff > 5600 K: 
+        
+        Tidsync
+        : The regime where rapidly rotating stars are expected to be tidally
+        synchronized. This regime is supposed to be around 4850 K < Teff < 5600
+        K and MK > 2.5
+
+        Cool Rapid Dwarfs
+        : Regime where rapid rotation can be maintained for red dwarfs. This
+        regime is where Teff < 4850 K and MK > 2.5
+        '''
+        # It may be interesting to use the cuts made in initialize. But I don't
+        # see clear benefits from that at this point.
+        noclass = np.logical_or(
+            self.data[teff_col].mask, self.data["M_K"].mask)
+
+        mk_giant_boundary = np.logical_and(
+            self.data["M_K"] < 2.5, np.logical_not(noclass))
+        mk_dwarf_boundary = np.logical_and(
+            self.data["M_K"] >= 2.5, np.logical_not(noclass))
+
+        cool = np.logical_and(
+            self.data[teff_col] <= 5600, np.logical_not(noclass))
+        rapid_cool = np.logical_and(
+            self.data[teff_col] <= 4850, np.logical_not(noclass))
+        hot = np.logical_and(
+            self.data[teff_col] > 5600, np.logical_not(noclass))
+
+        # Here is the giant class
+        giants = np.logical_and(mk_giant_boundary, cool)
+        # Subgiants
+        subgiants = hot
+        # Tidally synchronized systems
+        tidsync = np.logical_and(
+            mk_dwarf_boundary, np.logical_and(
+                cool, np.logical_not(rapid_cool)))
+        # Cool Rapid Rotators
+        rapid_dwarfs = np.logical_and(mk_dwarf_boundary, rapid_cool)
+
+        indexarr = [giants, subgiants, tidsync, rapid_dwarfs, noclass]
+
+        self._setup_indices(splitnames, indexarr, evcrit)
+
     def split_APOGEE_evstates(
             self, splitnames=(
                 "Giants", "Blue Stragglers", "Red Stragglers", "Cool Singles",
@@ -1677,17 +1732,21 @@ def initialize_full_APOGEE(aposplit):
          "APOGEE_RV_MONITOR_KEPLER", "APOGEE_KEPLER_HOST"],
         ("Targeted", "Not Targeted"), "Targeting")
 
-    aposplit.split_McQuillan_periods(kiccol="kepid")
     aposplit.split_Garcia_periods(kiccol="kepid")
 
     aposplit.split_El_Badry_targets()
 
-    aposplit.split_provenance(
-        "r_Teff", ["PHO54"], splitnames=(
-            "Huber Photometry", "Other Teffs", "Not in Huber"), 
-        prov_crit="Huber Photometry", null_value=np.ma.masked)
+    aposplit.split_Gaia()
+    
+    # Check what the properties of the "Blend" qualities are. There are no "Bad
+    # K" targets.
+    aposplit.split_photometric_quality(
+        "kmag", "kmag_err", splitnames=("K Detection", "Blend", "Bad K"), 
+        crit="MK blend")
 
-    aposplit.split_asteroseismic_dwarfs()
+def initialize_cool_KICs(kicsplit):
+    '''Initialize cool dwarfs that have KIC values.'''
+    kicsplit.split_mk_evstate(crit="Subgiant Split")
 
 def general_to_hot_kic_sample(apogeesplitter):
     '''Get the subset of the hot sample that has KIC parameters.'''
@@ -1697,9 +1756,6 @@ def general_to_hot_kic_sample(apogeesplitter):
 
 def initialize_general_APOGEE(aposplit):
     '''Initialize the most general and applicable cuts to APOGEE'''
-    aposplit.split_teff(
-        "TEFF", [5500], ("Cool", "Hot"), teff_crit="APOGEE Teff")
-    
     aposplit.split_mag(
         "H", [7, 11], ("H Bright", "H Jen", "H Faint"), mag_crit="H")
 
@@ -1708,6 +1764,18 @@ def initialize_general_APOGEE(aposplit):
     aposplit.split_by_ASPCAP_flags()
 
     aposplit.split_original_KIC_params()
+
+    aposplit.split_Gaia()
+    
+    # Check what the properties of the "Blend" qualities are. There are no "Bad
+    # K" targets.
+    aposplit.split_photometric_quality(
+        "kmag", "kmag_err", splitnames=("K Detection", "Blend", "Bad K"), 
+        crit="MK blend")
+
+def initialize_cool_KICs(kicsplit):
+    '''Initialize cool dwarfs that have KIC values.'''
+    kicsplit.split_mk_evstate(crit="Subgiant Split")
 
     aposplit.split_McQuillan_periods(kiccol=aposplit.kic_col)
 
@@ -1727,28 +1795,22 @@ def initialize_general_APOGEE(aposplit):
 
 def initialize_RVvar_APOGEE(aposplit):
     '''Initialize APOGEE splitter for RV variability.'''
+    aposplit.split_tidsync_categories()
     aposplit.split_teff(
-        "TEFF", [4850, 5600], (
-            "Low APOGEE Teff", "Sync APOGEE Teff", "High APOGEE Teff", 
-            "No APOGEE Teff"), null_value=np.ma.masked,
-        teff_crit="Synchronized Temperature Split")
+        "TEFF", [7700], (
+            "APOGEE Valid Parameters", "APOGEE Telluric", 
+            "No APOGEE Telluric Teff"), null_value=np.ma.masked, 
+        teff_crit="Telluric Divisions")
     aposplit.split_period(
-        [1, 5], (
+        [1, 3], (
             "Too Fast McQuillan", "Fast McQuillan", "Slow McQuillan", 
             "No McQuillan"), pcol="Prot", null_value=np.ma.masked, 
         period_crit="McQuillan Synchronized Split")
-    
-    aposplit.split_Gaia()
-    
-    # Check what the properties of the "Blend" qualities are. There are no "Bad
-    # K" targets.
-    aposplit.split_photometric_quality(
-        "kmag", "kmag_err", splitnames=("K Detection", "Blend", "Bad K"), 
-        crit="MK blend")
 
-def initialize_cool_KICs(kicsplit):
-    '''Initialize cool dwarfs that have KIC values.'''
-    kicsplit.split_mk_evstate(crit="Subgiant Split")
+    aposplit.split_vscatter(
+        [0, 1], ("Single Visit", "RV Nonvariable", "RV Variable"), 
+        invert_inequality=True)
+    
 
 def initialize_asteroseismic_sample(aposplit):
     '''Initialize the sample for asteroseismic targets.
