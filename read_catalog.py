@@ -65,9 +65,10 @@ def read_Huber_KIC_catalog(huberpath=paths.HUBER_CATALOG):
 def read_KIC_DR25_catalog(kicpath=paths.KIC_CATALOG):
     '''Read the KIC DR25 Stellar Parameter catalog.'''
     desired_cols = [
-        "kepid", "tm_designation", "kepmag", "teff", "teff_err1", "teff_err2", 
-        "dist", "dist_err1", "dist_err2", "ra", "dec", "st_quarters", "jmag", 
-        "jmag_err", "hmag", "hmag_err", "kmag", "kmag_err"]
+        "kepid", "tm_designation", "kepmag", "teff", "teff_err1", "teff_err2",
+        "teff_prov", "dist", "dist_err1", "dist_err2", "ra", "dec", 
+        "st_quarters", "jmag", "jmag_err", "hmag", "hmag_err", "kmag", 
+        "kmag_err"]
     kiccat = Table.read(
         str(kicpath), format="ascii.ipac", include_names=desired_cols)
     fix_table_coordinates_units(kiccat, "ra", "dec")
