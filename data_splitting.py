@@ -1872,7 +1872,8 @@ def initialize_mdm_sample(mdmsplit):
         "kmag", "kmag_err", splitnames=("K Detection", "Blend", "Bad K"), 
         crit="MK blend")
     
-    mdmsplit.split_period([1, 3], ["Too rapid", "Rapid", "Slow"])
+    mdmsplit.split_period(
+        [1, 3], ["Too rapid", "Rapid", "Slow"], null_value=None)
 
 def initialize_asteroseismic_periods(aposplit):
     '''Initialize the asteroseismic sample with McQuillan periods.'''
