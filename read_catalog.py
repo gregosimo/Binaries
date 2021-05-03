@@ -388,7 +388,7 @@ def read_Berger_DR2_KSPC_input(berger_dr2_kspc=paths.BERGER_KSPC_KEPLER_INPUT):
     Berger et al (2020).'''
     desired_cols = [
         "KIC", "gmag", "e_gmag", "Ksmag", "e_Ksmag", "Par", "e_Par", "[Fe/H]",
-        "e_[Fe/H]", "KsCorr", "State"]
+        "e_[Fe/H]", "Ncomp", "KsCorr", "State"]
     berger = Table.read(berger_dr2_kspc, format="ascii.cds",
                         include_names=desired_cols)
     return berger
