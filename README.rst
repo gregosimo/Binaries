@@ -32,13 +32,32 @@ The files in this project can be broadly clustered in the following groups:
     subsamples based on multiple cuts with internal checks to avoid losing data (handles missing data
     too)
     :cluster.py: Functions to open cluster data and classes to manipulate them.
+    :path_config.py: Centralized master list of paths for all datasets.
+    :plot_data_overlaps.py: Create lots of histograms showing the parameter
+        distributions of different samples (e.g. APOGEE, McQuillan, etcl)
+    :read_catalog.py: Module that automatically handles reading catalogs from
+        diverse sources. Large catalogs of which only a subsample is really
+        useful are automatically memoized for speed and memory efficiency.
+    :sample_characterization.py: General 
 
 :RV Sampling: Files for probing the effects of RV sampling.
     :alias_simu.py: Code probing the effects of aliasing on binary populations.
+    :observations.py: Code for preparing and analyzing the observing run for RV 
+        variability at MDM observatory.
+    :rv_simu.py: General functions to simulate RV curve observations, with some
+        tailoring to MDM Modspec.
+
+:Rotation: Modules that explicitly are dedicated to processing and analyzing
+    stellar rotation from different measures (e.g. vsini/photometric
+    variability))
+    :rotation_consistency.py: Routines to check whether vsini and photometric
+        periods are consistent, and to identify/characterize outliers.
+
 
 :Proposals: Files for analyzing and generating plots for proposals
     :apogee_ancillary.py: Making plots and initial targets for the APOGEE
     ancillary proposal.
+
 
 :APOGEE: Files primarily relating to analyzing APOGEE data.
     :apogee_RV_variability.py: Characterizing RV variable subsamples of the
@@ -80,13 +99,6 @@ The files in this project can be broadly clustered in the following groups:
     :hrplots.py: Routines for automating the creation of HR Plots (e.g.
     flipping axes and making sure they are displayed appropriately).
     :label_python.py: Incomplete module for organizing observing run data.
-observations.py
-path_config.py
-plot_data_overlaps.py
-read_catalog.py
-rotation_consistency.py
-rv_simu.py
-sample_characterization.py
 sed.py
 tayar_giants.py
 yrec.py
