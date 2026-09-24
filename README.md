@@ -15,44 +15,30 @@ More general-purpose routines (as extensions to Astropy) can be found in my [ast
 Files for catalog manipulation
 
 - **catalog.py** - Routines for manipulating the internal dataset.
-- **data_splitting.py** - Custom DataSplitter objects to handle splitting into subsamples based on multiple cuts with internal checks to avoid losing data (handles missing data too)
-- **read_catalog.py** - Module that automatically handles reading catalogs from diverse sources. Large catalogs of which only a subsample is really useful are automatically memoized for speed and memory efficiency.
-- **sample_characterization.py** - Collection of functions to characterize the different samples in the analysis
+- **data_splitting.py** - Contains custom DataSplitter objects that perform internal book-keeping to extract subsamples of a dataset. (e.g. Get me all stars with $T_eff < 5700$ K, flagged as binaries, and $m_K > 17$)
+- **read_catalog.py** - Module that automatically queries catalogs from diverse sources (e.g. SQL, text files, binary files, etc.) Large catalogs for which only a subsample is used are automatically memoized for speed and memory efficiency.
+- **sample_characterization.py** - Collection of functions to characterize the different samples in the analysis (e.g. temperature/rotation distributions)
 - **path_config.py** - Centralized master list of paths for all datasets.
-- **cluster.py** - Functions to open cluster data and classes to manipulate them.
-- **plot_data_overlaps.py** - Create lots of histograms showing the parameter distributions of different samples (e.g. APOGEE, McQuillan, etc.)
+- **cluster.py** - Functions and classes dedicated to manipulating star cluster data.
+- **plot_data_overlaps.py** - Create lots of histograms showing the parameter distributions of different samples (e.g. APOGEE, McQuillan, etc.).
 
 ### Rotation
-Modules that explicitly are dedicated to processing and analyzing stellar rotation from different measures (e.g. vsini/photometric variability)
+Modules that explicitly are dedicated to processing and analyzing stellar rotation from different datasets (e.g. vsini/photometric variability).
 
 - **rotation_consistency.py** - Routines to check whether vsini and photometric periods are consistent, and to identify/characterize outliers.
 - **activity.py** - Code looking at trends with Rossby number for [McQuillan et al (2014)](https://ui.adsabs.harvard.edu/abs/2014ApJS..211...24M/abstract) stars.
 - **tayar_giants.py** - A few functions checking out the rotating giants from [Tayar et al (2015)](https://ui.adsabs.harvard.edu/abs/2015ApJ...807...82T/abstract).
-- **jenboundary.py** - Expected rotation envelopes for subgiants experiencing standard stellar spindown based on van Saders' results.
-
-### RV Observations
-Files for probing the effects of RV sampling
-
-- **alias_simu.py** - Code probing the effects of aliasing on binary populations.
-- **observations.py** - Code for preparing and analyzing the observing run for RV variability at MDM observatory.
-- **rv_simu.py** - General functions to simulate RV curve observations, with some tailoring to MDM Modspec.
+- **jenboundary.py** - Expected rotation envelopes for subgiants experiencing standard stellar spindown based on [van saders et al (2019)](https://ui.adsabs.harvard.edu/abs/2019apj...872..128v/abstract) results.
 
 ### APOGEE
 Files primarily relating to analyzing APOGEE data
 
-- **myapogee.py** - Library to download large APOGEE datasets (e.g. apStar and allData)
-- **browse_APOGEE_spectra.py** - Tool to interactively pull up APOGEE spectra to label double-lined spectroscopic binaries.
-- **apogee_ancillary.py** - Making plots and initial targets for the APOGEE ancillary proposal.
+- **myapogee.py** - Library to download large APOGEE datasets (e.g. apstar and alldata)
+- **browse_apogee_spectra.py** - tool to interactively pull up APOGEE spectra to label double-lined spectroscopic binaries based on visual inspection.
+- **apogee_ancillary.py** - making plots and initial targets for the APOGEE ancillary proposal.
 - **apogee_RV_variability.py** - Characterizing RV variable subsamples of the APOGEE population
 - **apogee_census.py** - Characterizing the population of APOGEE targets and outputting the relative sizes of different subsamples.
 - **aspcap_corrections.py** - Functions applying corrections to ASPCAP calibrations for parts of the sample.
-
-### Special Populations
-Files that contain functions for analyzing certain populations
-
-- **eclipsing_binaries.py** - Functions to read in and filter eclipsing binary data. Also makes statistical inferences based on eclipse geometry.
-- **huber_checks.py** - Perform quality checks based on overlap samples with [Huber et al (2014)](https://ui.adsabs.harvard.edu/abs/2014ApJS..211....2H/abstract).
-- **kepvim.py** - Routines for analyzing the crossover sample with KepVIM.
 
 ### Isochrones
 Files for manipulating isochrones
@@ -64,6 +50,21 @@ Files for manipulating isochrones
   - **yrec.py** - Class for reading YREC isochrones
 - **sed.py** - Lots of SED-related functions. In particular related to the [Casagrande et al (2010)](https://ui.adsabs.harvard.edu/abs/2010A%26A...512A..54C/abstract) Teff scale as well as interpolating DSEP Photometry.
 - **extinction.py** - Calculate reddening based on dust maps for different bands.
+
+### RV Observations
+Files to probe the effects of RV sampling
+
+- **alias_simu.py** - Code probing the effects of aliasing on binary populations.
+- **observations.py** - Code for preparing and analyzing the observing run for RV variability at MDM observatory.
+- **rv_simu.py** - General functions to simulate RV curve observations, with some tailoring to MDM Modspec.
+
+### Special Populations
+Files that contain functions for analyzing certain populations
+
+- **eclipsing_binaries.py** - Functions to read in and filter eclipsing binary data. Also makes statistical inferences based on eclipse geometry.
+- **huber_checks.py** - Perform quality checks based on overlap samples with [Huber et al (2014)](https://ui.adsabs.harvard.edu/abs/2014ApJS..211....2H/abstract).
+- **kepvim.py** - Routines for analyzing the crossover sample with KepVIM.
+
 
 ### Misc
 Miscellaneous files
